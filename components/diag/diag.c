@@ -27,6 +27,41 @@ static const char *TAG = "diag";
  * cursor-position queries that a script never answers, so tools/devlog.py wedges it.
  * Plain line mode ("dumb mode") gives every client, human or script, the same behaviour.
  */
+static diag_executor_t s_executor;
+
+void diag_set_executor(diag_executor_t executor)
+{
+    s_executor = executor;
+}
+
+typedef struct {
+    int (*body)(int argc, char **argv);
+    int argc;
+    char **argv;
+    int ret;
+} diag_call_t;
+
+static void call_body(void *arg)
+{
+    diag_call_t *call = arg;
+    call->ret = call->body(call->argc, call->argv);
+}
+
+int diag_on_owner(int (*body)(int argc, char **argv), int argc, char **argv)
+{
+    diag_call_t call = { .body = body, .argc = argc, .argv = argv, .ret = 1 };
+    if (s_executor == NULL) {
+        call_body(&call);
+        return call.ret;
+    }
+    esp_err_t err = s_executor(call_body, &call);
+    if (err != ESP_OK) {
+        printf("%s: %s\n", argv[0], esp_err_to_name(err));
+        return 1;
+    }
+    return call.ret;
+}
+
 static void diag_repl_task(void *arg)
 {
     (void)arg;
@@ -73,6 +108,7 @@ esp_err_t diag_start(void)
     ESP_RETURN_ON_ERROR(diag_register_system_commands(), TAG, "system commands");
     ESP_RETURN_ON_ERROR(diag_register_display_commands(), TAG, "display commands");
     ESP_RETURN_ON_ERROR(diag_register_button_commands(), TAG, "button commands");
+    ESP_RETURN_ON_ERROR(diag_register_sensor_commands(), TAG, "sensor commands");
 
     BaseType_t created = xTaskCreatePinnedToCore(diag_repl_task, "diag_repl", DIAG_REPL_STACK_SIZE, NULL,
                                                  DIAG_REPL_PRIORITY, NULL, DIAG_REPL_CORE);

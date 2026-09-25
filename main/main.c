@@ -6,6 +6,10 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "gfx_test_pattern.h"
+#include "pcf85063.h"
+#include "sdkconfig.h"
+#include "sensors.h"
+#include "timekeeping.h"
 
 static const char *TAG = "main";
 
@@ -32,6 +36,21 @@ void app_main(void)
     esp_err_t err = board_init(true);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "board init failed: %s", esp_err_to_name(err));
+    }
+
+    err = pcf85063_init(board_i2c());
+    if (err == ESP_OK) {
+        err = timekeeping_init(CONFIG_REFLBO_TZ);
+    }
+    if (err == ESP_OK) {
+        err = timekeeping_load_from_rtc();
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "RTC failed: %s", esp_err_to_name(err));
+    }
+    err = sensors_init(board_i2c(), true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "sensors failed: %s", esp_err_to_name(err));
     }
 
     err = display_init(DISPLAY_VARIANT);

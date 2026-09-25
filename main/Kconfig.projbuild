@@ -1,0 +1,29 @@
+menu "reflbo"
+
+    config REFLBO_TZ
+        string "Time zone (POSIX TZ string)"
+        default "CET-1CEST,M3.5.0,M10.5.0/3"
+        help
+            Default time zone, Europe/Prague (spec §7). Settings override it from M3.
+
+    config REFLBO_TEMP_OFFSET_C10
+        int "SHTC3 temperature offset (0.1 °C)"
+        range -100 100
+        default 0
+        help
+            Added to every reading; the board warms the sensor (AGENTS.md gotcha 10). Calibrate
+            against a reference thermometer (spec §8).
+
+    config REFLBO_HUM_OFFSET_PCT10
+        int "SHTC3 humidity offset (0.1 %RH)"
+        range -200 200
+        default 0
+
+    config REFLBO_BATTERY_FACTOR_PERMILLE
+        int "Battery voltage calibration factor (per mille)"
+        range 900 1100
+        default 1000
+        help
+            Per-device correction for the ADC and the 200k/100k divider (spec §8).
+
+endmenu

@@ -22,6 +22,13 @@ add_library(util STATIC ${REPO_ROOT}/components/util/util_crc32.c)
 target_include_directories(util PUBLIC ${REPO_ROOT}/components/util/include)
 target_compile_options(util PRIVATE ${REFLBO_WARNINGS})
 
+# gfx: every source in the component, generated fonts included.
+file(GLOB GFX_SOURCES CONFIGURE_DEPENDS
+     ${REPO_ROOT}/components/gfx/*.c ${REPO_ROOT}/components/gfx/fonts/*.c)
+add_library(gfx STATIC ${GFX_SOURCES})
+target_include_directories(gfx PUBLIC ${REPO_ROOT}/components/gfx/include)
+target_compile_options(gfx PRIVATE ${REFLBO_WARNINGS})
+
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
     add_executable(${name} ${name}.c)
@@ -31,6 +38,7 @@ function(reflbo_host_test name)
 endfunction()
 
 reflbo_host_test(test_util_crc32 util)
+reflbo_host_test(test_gfx gfx)
 
 # Python tool tests (stdlib unittest; pyserial is not needed).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

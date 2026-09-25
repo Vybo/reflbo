@@ -35,6 +35,11 @@ add_library(st7305_frame STATIC ${REPO_ROOT}/components/st7305/st7305_frame.c)
 target_include_directories(st7305_frame PUBLIC ${REPO_ROOT}/components/st7305/include)
 target_compile_options(st7305_frame PRIVATE ${REFLBO_WARNINGS})
 
+# scheduler: pure C.
+add_library(scheduler STATIC ${REPO_ROOT}/components/scheduler/scheduler.c)
+target_include_directories(scheduler PUBLIC ${REPO_ROOT}/components/scheduler/include)
+target_compile_options(scheduler PRIVATE ${REFLBO_WARNINGS})
+
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
     add_executable(${name} ${name}.c)
@@ -52,6 +57,7 @@ reflbo_host_test(test_gfx_fonts gfx)
 reflbo_host_test(test_st7305_frame st7305_frame)
 reflbo_host_test(test_util_snapshot util)
 reflbo_host_test(test_util_time util)
+reflbo_host_test(test_scheduler scheduler)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

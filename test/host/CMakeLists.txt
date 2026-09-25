@@ -30,6 +30,11 @@ add_library(gfx STATIC ${GFX_SOURCES})
 target_include_directories(gfx PUBLIC ${REPO_ROOT}/components/gfx/include)
 target_compile_options(gfx PRIVATE ${REFLBO_WARNINGS})
 
+# st7305: only the pure-C frame conversion builds on the host.
+add_library(st7305_frame STATIC ${REPO_ROOT}/components/st7305/st7305_frame.c)
+target_include_directories(st7305_frame PUBLIC ${REPO_ROOT}/components/st7305/include)
+target_compile_options(st7305_frame PRIVATE ${REFLBO_WARNINGS})
+
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
     add_executable(${name} ${name}.c)
@@ -43,6 +48,7 @@ reflbo_host_test(test_util_base64 util)
 reflbo_host_test(test_gfx gfx)
 reflbo_host_test(test_gfx_text gfx)
 reflbo_host_test(test_gfx_fonts gfx)
+reflbo_host_test(test_st7305_frame st7305_frame)
 
 # Python tool tests (stdlib unittest; pyserial is not needed).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

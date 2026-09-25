@@ -7,8 +7,9 @@
 
 static const char *TAG = "main";
 
-/* Init sequence until the owner picks one (M1 Task 9). */
-#define DISPLAY_VARIANT ST7305_VARIANT_XIAOZHI
+/* The owner's pick at the M1 panel check (2026-09-25): the factory sequence has the better contrast.
+ * The LPM refresh rate stays at the st7305 default of 1 Hz, which showed no contrast loss. */
+#define DISPLAY_VARIANT ST7305_VARIANT_FACTORY
 
 void app_main(void)
 {

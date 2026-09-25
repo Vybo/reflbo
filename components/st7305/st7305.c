@@ -4,6 +4,7 @@
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
@@ -17,6 +18,7 @@
 #define PIN_DC      5
 #define PIN_CS      40
 #define PIN_RST     41
+#define PIN_TE      6
 #define SPI_HOST_ID SPI3_HOST
 
 static const char *TAG = "st7305";
@@ -96,6 +98,8 @@ static uint8_t *s_panel; /* DMA-capable internal RAM */
 static bool s_bus_ready;
 static st7305_variant_t s_variant;
 static st7305_mode_t s_mode;
+static st7305_lpm_rate_t s_lpm_rate = ST7305_LPM_1HZ;
+static volatile uint32_t s_te_pulses;
 
 static bool on_color_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *edata, void *ctx)
 {
@@ -149,6 +153,14 @@ static esp_err_t run_init(const init_cmd_t *cmds, size_t count)
     return ESP_OK;
 }
 
+/* FRCTRL (B2h) = HFRA << 4 | LFRA. HFRA stays 0, as in both vendor sequences: HPM 16 Hz with the
+ * factory oscillator setting, 25.5 Hz with XiaoZhi's. */
+static esp_err_t write_frame_rate(void)
+{
+    const uint8_t frctrl = (uint8_t)s_lpm_rate;
+    return esp_lcd_panel_io_tx_param(s_io, 0xB2, &frctrl, 1);
+}
+
 esp_err_t st7305_init(st7305_variant_t variant)
 {
     ESP_RETURN_ON_FALSE(!s_bus_ready, ESP_ERR_INVALID_STATE, TAG, "already initialised");
@@ -189,9 +201,11 @@ esp_err_t st7305_reinit(st7305_variant_t variant)
         ESP_RETURN_ON_ERROR(run_init(s_init_factory, sizeof(s_init_factory) / sizeof(s_init_factory[0])), TAG,
                             "factory init");
     }
+    ESP_RETURN_ON_ERROR(write_frame_rate(), TAG, "frame rate");
     s_variant = variant;
     s_mode = ST7305_MODE_HPM;
-    ESP_LOGI(TAG, "%s init sequence, SPI %d MHz", xiaozhi ? "XiaoZhi" : "factory", xiaozhi ? 40 : 10);
+    ESP_LOGI(TAG, "%s init sequence, SPI %d MHz, LPM %s Hz", xiaozhi ? "XiaoZhi" : "factory", xiaozhi ? 40 : 10,
+             st7305_lpm_rate_name(s_lpm_rate));
     return ESP_OK;
 }
 
@@ -211,13 +225,43 @@ esp_err_t st7305_push(const uint8_t *canonical)
     return ESP_OK;
 }
 
+/* Datasheet §7.11 sets the source voltages for the new mode during a switch. Both vendor sequences
+ * load the same values into all four voltage sets of C1h/C2h/C4h/C5h, so that step reselects set 1. */
+static esp_err_t select_source_voltages(void)
+{
+    const uint8_t set = 0x00;
+    return esp_lcd_panel_io_tx_param(s_io, 0xC9, &set, 1);
+}
+
 esp_err_t st7305_set_mode(st7305_mode_t mode)
 {
     ESP_RETURN_ON_FALSE(s_io != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, mode == ST7305_MODE_LPM ? 0x39 : 0x38, NULL, 0), TAG,
-                        "power mode");
+    if (mode == s_mode) {
+        return ESP_OK;
+    }
+    if (mode == ST7305_MODE_LPM) { /* HPM => LPM */
+        ESP_RETURN_ON_ERROR(select_source_voltages(), TAG, "LPM voltages");
+        vTaskDelay(pdMS_TO_TICKS(20));
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, 0x39, NULL, 0), TAG, "LPM");
+        vTaskDelay(pdMS_TO_TICKS(100));
+    } else { /* LPM => HPM */
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, 0x38, NULL, 0), TAG, "HPM");
+        vTaskDelay(pdMS_TO_TICKS(300));
+        ESP_RETURN_ON_ERROR(select_source_voltages(), TAG, "HPM voltages");
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
     s_mode = mode;
     return ESP_OK;
+}
+
+esp_err_t st7305_set_lpm_rate(st7305_lpm_rate_t rate)
+{
+    ESP_RETURN_ON_FALSE((unsigned)rate <= ST7305_LPM_8HZ, ESP_ERR_INVALID_ARG, TAG, "LPM rate");
+    s_lpm_rate = rate;
+    if (s_io == NULL) {
+        return ESP_OK; /* st7305_init applies it */
+    }
+    return write_frame_rate(); /* applies at once, also in LPM (measured with panel fps) */
 }
 
 st7305_variant_t st7305_variant(void)
@@ -228,4 +272,41 @@ st7305_variant_t st7305_variant(void)
 st7305_mode_t st7305_mode(void)
 {
     return s_mode;
+}
+
+st7305_lpm_rate_t st7305_lpm_rate(void)
+{
+    return s_lpm_rate;
+}
+
+static void IRAM_ATTR on_te(void *arg)
+{
+    (void)arg;
+    s_te_pulses++;
+}
+
+esp_err_t st7305_count_frames(uint32_t window_ms, uint32_t *frames)
+{
+    ESP_RETURN_ON_FALSE(s_io != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    gpio_config_t te = {
+        .pin_bit_mask = 1ULL << PIN_TE,
+        .mode = GPIO_MODE_INPUT,
+        .intr_type = GPIO_INTR_POSEDGE,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&te), TAG, "TE pin");
+    esp_err_t err = gpio_install_isr_service(0);
+    ESP_RETURN_ON_FALSE(err == ESP_OK || err == ESP_ERR_INVALID_STATE, err, TAG, "GPIO ISR service");
+    s_te_pulses = 0;
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(PIN_TE, on_te, NULL), TAG, "TE handler");
+    vTaskDelay(pdMS_TO_TICKS(window_ms));
+    gpio_isr_handler_remove(PIN_TE);
+    gpio_set_intr_type(PIN_TE, GPIO_INTR_DISABLE);
+    *frames = s_te_pulses;
+    return ESP_OK;
+}
+
+const char *st7305_lpm_rate_name(st7305_lpm_rate_t rate)
+{
+    static const char *const names[] = { "0.25", "0.5", "1", "2", "4", "8" };
+    return (unsigned)rate < sizeof(names) / sizeof(names[0]) ? names[rate] : "?";
 }

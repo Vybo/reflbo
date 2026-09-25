@@ -48,6 +48,8 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D9 | No RTC backup cell is fitted now; one can be fitted later. Firmware must work without it (§7) | The owner may fit an ML1220 |
 | D10 | Features beyond R1–R11 and N1–N5 are proposals, discussed at the relevant milestone (§19) | |
 | D11 | The sync schedule and the display update interval are both configurable (§9.2, §9.3) | Owner adjustment in r2 |
+| D12 | Panel: the factory init sequence, with the LPM refresh rate set separately (default 1 Hz, configurable 0.25–8 Hz) (§4.2) | Owner check at M1: factory contrast is visibly better than XiaoZhi's, and it looks the same at 1 Hz as at 8 Hz |
+| D13 | Landscape only | Portrait orientation declined at M1 |
 
 ### 1.3 Out of scope for v1
 
@@ -184,12 +186,14 @@ Both strategies live behind `power_idle()` until the M2 measurements pick the de
 
 ### 4.2 ST7305 driver
 
-- **SPI.** Mode 0, 8-bit commands and parameters through esp_lcd panel IO, as in the vendor code. D/C GPIO5, CS GPIO40, RESET GPIO41. Clock 10 or 40 MHz (chosen at M1).
+- **SPI.** Mode 0, 8-bit commands and parameters through esp_lcd panel IO, as in the vendor code. D/C GPIO5, CS GPIO40, RESET GPIO41, TE GPIO6. Clock 10 MHz, as in the factory sequence (D12).
 - **`st7305_init(cold)`.**
-  - Cold: hardware reset, the chosen vendor init sequence (factory or XiaoZhi, picked at M1), then clear.
+  - Cold: hardware reset, the factory init sequence (D12; XiaoZhi's stays selectable for diagnostics), the configured LPM rate, then clear.
   - Warm (deep-sleep wake): attach the IO only.
 - **`st7305_push()`.** Set the column window (`2Ah` 0x12–0x2A) and the page window (`2Bh` 0x00–0xC7), send `2Ch`, then write 15 000 bytes.
-- **`st7305_set_mode(HPM | LPM)`.** Sends `38h`/`39h` using the switching sequence in datasheet §7.11. The LPM frame rate is set by `B2h` (0.25–8 Hz). Default 1 Hz; tune it at M2/M5.
+- **`st7305_set_mode(HPM | LPM)`.** Sends `38h`/`39h` using the switching sequence in datasheet §7.11, including its delays: about 120 ms into LPM and 320 ms into HPM. The sequence's per-mode voltage step reselects voltage set 1 (`C9h`), because both vendor sequences load the same values into all four sets.
+- **LPM frame rate.** The LFRA field of `B2h` (0.25–8 Hz), written after the vendor sequence, so it is independent of that sequence. Default 1 Hz. A new rate applies at once, even in LPM. `panel rate` changes it at runtime, and it becomes a display setting (`lpm_hz`, §14.3) with the settings store. Its power cost is measured at M2/M5.
+- **Frame-rate check.** The TE output (GPIO6, enabled by `35h`) pulses once per panel frame. `panel fps` counts the pulses, which gives the real frame rate. M1 measured 1.00 Hz in LPM and about 16–17 Hz in HPM with the factory sequence.
   - Idle uses LPM.
   - Menu and config mode use HPM, so new frames appear without lag.
 - **RAM writes in LPM.** The panel RAM can be written in any power mode. The datasheet (§7.3) guarantees no visible artefacts when the interface writes while the panel reads. New content appears at the next panel frame, so at 1 Hz LPM a minute update shows within 1 s. Idle updates therefore stay in LPM and need no mode switch.
@@ -756,7 +760,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
   "units": { "temp": "C" },
   "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60 },
   "sensors": { "interval_min": 5, "temp_offset_c": 0.0, "hum_offset_pct": 0.0 },
-  "display": { "contrast": "default", "update_min": 1 },
+  "display": { "panel_init": "factory", "lpm_hz": 1, "update_min": 1 },
   "mqtt": { "enabled": false, "host": "", "port": 1883, "user": "",
             "discovery_prefix": "homeassistant", "discovery": true }
 }
@@ -780,7 +784,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 |---|---|
 | `version` · `reboot` · `heap` · `tasks` | Basics |
 | `screenshot` | Framebuffer as base64 PBM between markers |
-| `panel status` · `panel test` · `panel clear` · `panel mode <hpm\|lpm>` · `panel init <factory\|xiaozhi>` | Panel diagnostics: test pattern, power mode, init sequence |
+| `panel status` · `panel test` · `panel clear` · `panel mode <hpm\|lpm>` · `panel rate <Hz>` · `panel fps [s]` · `panel init <factory\|xiaozhi>` | Panel diagnostics: test pattern, power mode, LPM rate, measured frame rate, init sequence |
 | `btn <key\|boot> <short\|double\|long>` | Inject button gestures |
 | `sensors` · `battery` | Readings |
 | `rtc get` · `rtc set <ISO 8601>` | RTC |
@@ -853,8 +857,8 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M | Scope | Acceptance (level) |
 |---|---|---|
 | M0 | ESP-IDF v5.5.5 installed; project skeleton (CMake, `main`, `sdkconfig.defaults`, partition table); console (`version`, `heap`, `reboot`); `tools/idf.sh`, `tools/devlog.py`; host test skeleton with Unity; `LICENSE`, `NOTICE`, `THIRD_PARTY.md` | Clean build (1); host tests pass (2); boot log captured and the console answers (3) |
-| M1 | `st7305` (cold/warm init, push, LPM/HPM), frame conversion, `gfx` core, `fontgen` and the first fonts, screenshot command and tool, host render tool, test pattern | Host tests (2); the test-pattern screenshot matches the host render (3); owner confirms orientation, contrast and the init sequence (4) |
-| M2 | `board` (I²C, buttons, gestures), `rtc`, `sensors` (SHTC3, battery), `timekeeping` (RTC → system time; manual set through the console), Classic clock screen, `power` with both idle strategies, `scheduler` minute wakes | Screen values match the console (3); owner measures deep vs light sleep with the USB meter; the idle strategy is chosen and recorded (4) |
+| M1 | `st7305` (cold init, push, LPM/HPM), frame conversion, `gfx` core, `fontgen` and the first fonts, screenshot command and tool, host render tool, test pattern | Host tests (2); the test-pattern screenshot matches the host render (3); owner confirms orientation, contrast and the init sequence (4) |
+| M2 | `st7305` warm init for deep-sleep wakes (moved from M1), `board` (I²C, buttons, gestures), `rtc`, `sensors` (SHTC3, battery), `timekeeping` (RTC → system time; manual set through the console), Classic clock screen, `power` with both idle strategies, `scheduler` minute wakes | Screen values match the console (3); owner measures deep vs light sleep with the USB meter; the idle strategy is chosen and recorded (4) |
 | M3 | `datastore`, `locale` (en), 4 layouts, widgets, presets JSON and defaults, cycling, status bar, menu v1, special screens | Owner reviews golden renders (2); presets switch with KEY/`btn` and survive a reboot (3) |
 | M4 | `netmgr` (STA/AP, captive portal, mDNS), config screen with QR, `webui` and REST API, preset editor with preview, set time from phone, OTA with rollback | Owner sets up Wi-Fi from a phone in AP mode (4); the preview matches a device screenshot (3); OTA upload and rollback work (3) |
 | M5 | SNTP → RTC, `weather`, `astro`, `sync` with the configurable schedule and backoff, weather widgets, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); sync energy and the daily average are measured and `docs/power.md` is updated (4) |
@@ -867,7 +871,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | Milestone | Proposal |
 |---|---|
 | M0 | GitHub Actions CI (firmware build and host tests) |
-| M1 | Portrait orientation |
+| M1 | ~~Portrait orientation~~ (declined 2026-09-25, D13) |
 | M3 | Preset time-of-day schedule; Night layout; extra fields (dew point, today's min/max, trends, week number, change in day length, moon phase, estimated battery days left); Czech language pack with name days and CZ public holidays |
 | M4 | Web UI admin PIN; web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
@@ -897,3 +901,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r1 | 2026-09-25 | First draft |
 | r2 | 2026-09-25 | Configurable sync schedule (`times` / `interval` / `always` / `manual`) and display update interval (D11, §9.2, §9.3); terms defined (§1.4); no RTC cell fitted, so a boot with invalid time syncs at once (§3.3, §7); ST7305 partial-update findings: RAM windows are supported but don't lower panel power, so v1 pushes full frames (§4.2) |
 | r3 | 2026-09-25 | Approved by the owner; licence confirmed (D8); Python toolchain risk recorded (§20) |
+| r4 | 2026-09-25 | M1 panel check: factory init sequence with a separate LPM rate, default 1 Hz, configurable (D12, §4.2, §14.3); HPM/LPM switching delays from datasheet §7.11; `panel rate` and `panel fps` (§15); landscape only (D13); `display` and `util` components (§3.1) |

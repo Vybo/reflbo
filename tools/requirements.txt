@@ -1,0 +1,4 @@
+# Host-tool dependencies outside the ESP-IDF environment (spec §15): the font generator.
+# tools/gen_fonts.sh runs it in a throwaway uv environment built from this file.
+pillow==12.3.0
+fonttools==4.66.0

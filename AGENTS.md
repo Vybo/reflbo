@@ -252,6 +252,7 @@ tools/idf.sh exec python tools/devlog.py --cmd version --cmd heap
 tools/idf.sh exec python tools/screenshot.py -o captures/screen.png                                 # (planned, M1)
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
   && ctest --test-dir build-host --output-on-failure
+tools/gen_fonts.sh                          # regenerate components/gfx/fonts (needs uv; versions in tools/requirements.txt)
 ```
 
 - `tools/idf.sh` refuses commands that talk to the board (`flash`, `erase-*`, `monitor`, …) unless the port is given with `-p` or `ESPPORT`. Otherwise idf.py would probe every serial port and use the first ESP chip that answers.

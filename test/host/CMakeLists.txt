@@ -63,6 +63,11 @@ target_include_directories(timekeeping_logic PUBLIC ${REPO_ROOT}/components/time
 target_compile_options(timekeeping_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(timekeeping_logic PUBLIC util)
 
+# power: only the sleep policy builds on the host.
+add_library(power_logic STATIC ${REPO_ROOT}/components/power/power_policy.c)
+target_include_directories(power_logic PUBLIC ${REPO_ROOT}/components/power/include)
+target_compile_options(power_logic PRIVATE ${REFLBO_WARNINGS})
+
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
     add_executable(${name} ${name}.c)
@@ -86,6 +91,7 @@ reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)
 reflbo_host_test(test_pcf85063_regs rtc_logic)
 reflbo_host_test(test_timekeeping_iso timekeeping_logic)
+reflbo_host_test(test_power_policy power_logic)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

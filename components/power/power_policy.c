@@ -1,0 +1,20 @@
+#include "power_policy.h"
+
+static power_plan_t plan_for(power_idle_t idle)
+{
+    return idle == POWER_IDLE_DEEP ? POWER_PLAN_DEEP : POWER_PLAN_LIGHT;
+}
+
+power_plan_t power_policy(const power_policy_input_t *in)
+{
+    if (in->hold_awake) {
+        return POWER_PLAN_AWAKE;
+    }
+    if (in->test_cycles > 0) {
+        return plan_for(in->test_mode);
+    }
+    if (in->tethered) {
+        return POWER_PLAN_AWAKE;
+    }
+    return plan_for(in->strategy);
+}

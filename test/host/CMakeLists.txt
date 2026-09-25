@@ -51,6 +51,12 @@ add_library(sensors_logic STATIC ${REPO_ROOT}/components/sensors/shtc3_codec.c
 target_include_directories(sensors_logic PUBLIC ${REPO_ROOT}/components/sensors/include)
 target_compile_options(sensors_logic PRIVATE ${REFLBO_WARNINGS})
 
+# rtc: only the PCF85063 register codec builds on the host.
+add_library(rtc_logic STATIC ${REPO_ROOT}/components/rtc/pcf85063_regs.c)
+target_include_directories(rtc_logic PUBLIC ${REPO_ROOT}/components/rtc/include)
+target_compile_options(rtc_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(rtc_logic PUBLIC util)
+
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
     add_executable(${name} ${name}.c)
@@ -72,6 +78,7 @@ reflbo_host_test(test_scheduler scheduler)
 reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)
+reflbo_host_test(test_pcf85063_regs rtc_logic)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

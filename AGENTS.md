@@ -250,7 +250,7 @@ ls /dev/cu.usbmodem*                       # the board's USB-Serial-JTAG port
 tools/idf.sh -p /dev/cu.usbmodemXXXX flash
 tools/idf.sh exec python tools/devlog.py --reset --until "reflbo ready" -t 20 -o captures/boot.log
 tools/idf.sh exec python tools/devlog.py --cmd version --cmd heap
-tools/idf.sh exec python tools/screenshot.py -o captures/screen.png                                 # (planned, M1)
+tools/idf.sh exec python tools/screenshot.py -o captures/screen.png --compare test/host/golden/test_pattern.pbm
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
   && ctest --test-dir build-host --output-on-failure
 tools/gen_fonts.sh                          # regenerate components/gfx/fonts (needs uv; versions in tools/requirements.txt)
@@ -258,7 +258,7 @@ python3 tools/render.py                     # host renderings to captures/render
 ```
 
 - `tools/idf.sh` refuses commands that talk to the board (`flash`, `erase-*`, `monitor`, …) unless the port is given with `-p` or `ESPPORT`. Otherwise idf.py would probe every serial port and use the first ESP chip that answers.
-- `devlog.py` picks the port itself when exactly one `/dev/cu.usbmodem*` exists; otherwise pass `-p`. Exit codes: 0 ok, 2 port problem, 3 console prompt never appeared, 4 `--until` not seen in time.
+- `devlog.py` picks the port itself when exactly one `/dev/cu.usbmodem*` exists; otherwise pass `-p`. Exit codes: 0 ok, 2 port problem, 3 console prompt never appeared, 4 `--until` not seen in time. `screenshot.py` picks the port the same way and adds 5 (the image differs from `--compare`) and 6 (no complete, valid image arrived). It writes the PNG and the raw PBM next to it.
 - After adding a component directory, run `tools/idf.sh reconfigure` once. ESP-IDF finds components when CMake configures, so a plain `build` in an existing build directory silently leaves the new component out.
 - Do not run `idf.py monitor` from an agent shell; it needs an interactive TTY. Use `devlog.py`.
 - Do not run `idf.py erase-flash` or erase NVS without asking. Either wipes the owner's Wi-Fi credentials and presets.
@@ -274,9 +274,9 @@ Use the cheapest level that proves the change. Any UI change needs at least leve
 3. **Device**: flash, capture the boot log, exercise the change through the console, then take a screenshot and look at it.
 4. **Owner**: only for physical facts, such as panel orientation and contrast, audio, how the buttons behave, and current draw. Give an exact checklist with expected results.
 
-**Screenshots** *(planned, M1)*: the `screenshot` console command prints the canonical framebuffer as base64 PBM between `-----BEGIN RLCD PBM-----` and `-----END RLCD PBM-----`. `tools/screenshot.py` turns that into a PNG using only pyserial and the standard library. The web UI serves `/api/screenshot.bmp`. A screenshot shows what the firmware drew, not what the panel shows, because the ST7305 is write-only. After any display-driver change, have the owner confirm the test pattern.
+**Screenshots**: the `screenshot` console command prints the canonical framebuffer as base64 PBM between `-----BEGIN RLCD PBM-----` and `-----END RLCD PBM-----`. `tools/screenshot.py` turns that into a PNG using only pyserial and the standard library. The web UI will serve `/api/screenshot.bmp` *(planned, M4)*. A screenshot shows what the firmware drew, not what the panel shows, because the ST7305 is write-only. After any display-driver change, have the owner confirm the test pattern.
 
-**Diagnostics console** (`diag`; full list in spec §15). Available now: `help`, `version`, `heap`, `reboot`. Planned: `screenshot`, `btn <key|boot> <short|double|long>` (simulated presses), `sensors`, `battery`, `rtc get|set`, `field list|get|set`, `preset list|set`, `wifi status|scan`, `sync now`, `sleep stats`, `power idle <deep|light>`, `audio tone`. Drive the UI with `btn` and `screenshot` instead of asking the owner to press buttons. Inject test data with `field set`. Run commands with `tools/idf.sh exec python tools/devlog.py --cmd <command>`. The console runs in plain line mode on purpose: no history, arrow keys or tab completion, even in a terminal. It never sends escape-code queries that a script can't answer (spec §15, `components/diag/diag.c`).
+**Diagnostics console** (`diag`; full list in spec §15). Available now: `help`, `version`, `heap`, `reboot`, `screenshot`, `panel status|test|clear|mode <hpm|lpm>|init <factory|xiaozhi>`. Planned: `btn <key|boot> <short|double|long>` (simulated presses), `sensors`, `battery`, `rtc get|set`, `field list|get|set`, `preset list|set`, `wifi status|scan`, `sync now`, `sleep stats`, `power idle <deep|light>`, `audio tone`. Drive the UI with `btn` and `screenshot` instead of asking the owner to press buttons. Inject test data with `field set`. Run commands with `tools/idf.sh exec python tools/devlog.py --cmd <command>`. The console runs in plain line mode on purpose: no history, arrow keys or tab completion, even in a terminal. It never sends escape-code queries that a script can't answer (spec §15, `components/diag/diag.c`).
 
 **Done** means: the acceptance criteria pass at the right level, new logic has tests, power-affecting changes have measurements in `docs/power.md`, and this file and `docs/` are updated.
 

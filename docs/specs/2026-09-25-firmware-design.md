@@ -780,6 +780,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 |---|---|
 | `version` · `reboot` · `heap` · `tasks` | Basics |
 | `screenshot` | Framebuffer as base64 PBM between markers |
+| `panel status` · `panel test` · `panel clear` · `panel mode <hpm\|lpm>` · `panel init <factory\|xiaozhi>` | Panel diagnostics: test pattern, power mode, init sequence |
 | `btn <key\|boot> <short\|double\|long>` | Inject button gestures |
 | `sensors` · `battery` | Readings |
 | `rtc get` · `rtc set <ISO 8601>` | RTC |

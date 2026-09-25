@@ -24,6 +24,7 @@ PORT_GLOB = "/dev/cu.usbmodem*"
 NUDGE_INTERVAL_S = 1.0
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+_RESET_BANNER_RE = re.compile(r"rst:0x")  # the ROM prints this on every chip reset
 
 
 class PortError(Exception):
@@ -113,7 +114,12 @@ def run(args, opener=open_port, now=time.monotonic, sleep=time.sleep,
     deadline = now() + args.seconds
     until = re.compile(args.until) if args.until else None
     pending = list(args.cmd)
+    current = None  # the command whose output is being captured
+    echo_seen = False  # the console echoes a command when it starts reading it
     awaiting_prompt = bool(pending)
+    # Each nudge makes the console print one more prompt, so nudge only before the first
+    # command or after a reset; a nudge queued behind a running command becomes a stale prompt.
+    nudge_ok = bool(pending)
     until_seen = until is None
     last_nudge = now()
     log = None
@@ -122,7 +128,7 @@ def run(args, opener=open_port, now=time.monotonic, sleep=time.sleep,
         log = open(args.out, "w", encoding="utf-8")
 
     def emit(line):
-        nonlocal until_seen
+        nonlocal until_seen, echo_seen, nudge_ok
         out.write(line + "\n")
         out.flush()
         if log:
@@ -130,6 +136,10 @@ def run(args, opener=open_port, now=time.monotonic, sleep=time.sleep,
             log.flush()
         if until and until.search(line):
             until_seen = True
+        if current is not None and not echo_seen and line.rstrip().endswith(current):
+            echo_seen = True
+        if _RESET_BANNER_RE.search(line):
+            nudge_ok = True
 
     try:
         ser = open_with_retry(port, deadline, opener, now, sleep)
@@ -149,14 +159,19 @@ def run(args, opener=open_port, now=time.monotonic, sleep=time.sleep,
             for line in splitter.feed(data):
                 emit(line)
             prompt_visible = splitter.tail().rstrip().endswith(PROMPT.rstrip())
-            if awaiting_prompt and prompt_visible:
+            # A prompt ends the current command only after its echo: earlier ones are stale.
+            if awaiting_prompt and prompt_visible and (current is None or echo_seen):
                 if pending:
-                    ser.write((pending.pop(0) + "\r").encode())
+                    current = pending.pop(0)
+                    echo_seen = False
+                    nudge_ok = False
+                    ser.write((current + "\r").encode())
                     splitter.clear_tail()
                     last_nudge = now()
                 else:
                     awaiting_prompt = False
-            elif awaiting_prompt and now() - last_nudge >= NUDGE_INTERVAL_S:
+                    current = None
+            elif awaiting_prompt and nudge_ok and now() - last_nudge >= NUDGE_INTERVAL_S:
                 ser.write(b"\r")  # ask the console to print a fresh prompt
                 last_nudge = now()
             if not awaiting_prompt and not pending and until_seen and (args.cmd or until):

@@ -189,6 +189,37 @@ class RunTest(unittest.TestCase):
         self.assertEqual(fake.written[0], b"\r")
         self.assertEqual(fake.written[-1], b"heap\r")
 
+    def test_slow_command_gets_no_nudges_and_the_next_command_output_is_captured(self):
+        # A nudge sent while "slow" runs would queue a stale prompt that could end "fast" early.
+        code, out, fake, _ = self.run_tool(
+            [b"reflbo> ",
+             (lambda f: b"slow\r" in f.written and f.clock.t >= 3.5, b"slow\r\nslow done\r\nreflbo> "),
+             (after_sending("fast"), b"fast\r\nfast output\r\nreflbo> ")],
+            cmd=["slow", "fast"], seconds=10.0)
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.written, [b"slow\r", b"fast\r"])
+        self.assertIn("fast output", out)
+
+    def test_prompt_before_the_command_echo_does_not_end_the_command(self):
+        code, out, _, _ = self.run_tool(
+            [b"reflbo> ",
+             (after_sending("version"), b"\r\nreflbo> "),  # stale prompt answering an earlier nudge
+             b"version\r\nreflbo 0.1.0-dev\r\nreflbo> "],
+            cmd=["version"])
+        self.assertEqual(code, 0)
+        self.assertIn("reflbo 0.1.0-dev", out)
+
+    def test_nudges_again_for_the_prompt_after_a_reboot(self):
+        code, _, fake, _ = self.run_tool(
+            [b"reflbo> ",
+             (after_sending("reboot"), b"reboot\r\nrebooting\r\n"),
+             b"rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\nI (95) main: reflbo ready\r\n",
+             (lambda f: f.written[-1] == b"\r", b"\r\nreflbo> ")],
+            cmd=["reboot"], until="reflbo ready")
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.written[0], b"reboot\r")
+        self.assertIn(b"\r", fake.written[1:])
+
     def test_reconnects_after_usb_disconnect(self):
         code, out, _, opened = self.run_tool(
             [b"rst:0x15\r\n", OSError("device disconnected"), b"I (300) main: reflbo ready\r\n"],

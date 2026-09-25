@@ -218,6 +218,7 @@ docs/            specs, plans, power measurements
 - **Data flows one way:** drivers and services → `datastore` → `ui`. The UI emits intents, and `main` wires everything together.
 - **`[host]` components include no ESP-IDF headers.** Other components keep their pure logic free of IDF headers too, so it can be host-tested (spec §3.1).
 - **Web assets are embedded in the app image,** so OTA updates them. User data lives in the `storage` LittleFS partition, which `idf.py flash` never writes.
+- **Shared resources have one owner.** `st7305` owns SPI3_HOST and GPIO 5, 6, 11, 12, 40 and 41. `display` and `st7305` are not thread-safe; they belong to the app task (spec §3.2). Until M2 adds it, `app_main` uses them at boot and the console task afterwards. From M2, console commands that draw or push go through the app task.
 - **The device sleeps most of the time.** Every feature must work with that. For MQTT this means retained state, `expire_after`, and QoS 1 commands on a persistent session (spec §12).
 - **The idle strategy (deep or light sleep) stays switchable** until the M2 measurement (spec §3.4). Tethered mode, with a USB host connected, always uses light sleep.
 - For details, see spec §5.6 (controls), §9 (power and scheduling) and §5 (UI).

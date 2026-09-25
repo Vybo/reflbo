@@ -6,6 +6,12 @@
 #include "esp_err.h"
 #include "st7305_frame.h"
 
+/*
+ * ST7305 driver. It owns SPI3_HOST and GPIO 5 (D/C), 6 (TE), 11 (SCK), 12 (MOSI), 40 (CS) and
+ * 41 (RESET). Not thread-safe: only one task may call it at a time. That is the display service's
+ * caller (see display.h).
+ */
+
 /* The two vendor init sequences (AGENTS.md gotcha 6). They differ in the source high voltages
  * (contrast), the oscillator (HPM frame rate) and the LPM frame rate. The driver replaces the
  * sequence's LPM rate (factory 8 Hz, XiaoZhi 1 Hz) with st7305_lpm_rate(). */

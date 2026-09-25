@@ -183,7 +183,7 @@ Partition table: spec §14.1. Key `sdkconfig.defaults`: 16 MB QIO flash; octal P
 ```
 main/            app_main: init order, wiring, app event loop
 components/
-  util/          small pure-C helpers (CRC-32, base64)                [host]
+  util/          small pure-C helpers (CRC-32, base64, delay ticks)   [host]
   board/         pins, I²C bus, GPIO setup, buttons → gestures, wake cause
   st7305/        panel init, LPM/HPM, frame push, deep-sleep retention
   display/       canonical framebuffer, CRC-skipped pushes to the panel

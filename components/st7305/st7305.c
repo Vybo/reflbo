@@ -12,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "util_ticks.h"
 
 #define PIN_MOSI    12
 #define PIN_SCLK    11
@@ -22,6 +23,12 @@
 #define SPI_HOST_ID SPI3_HOST
 
 static const char *TAG = "st7305";
+
+/* Datasheet delays are minimums, so sleep at least `ms` (see util_ticks.h). */
+static void delay_at_least_ms(uint32_t ms)
+{
+    vTaskDelay(util_ticks_at_least(ms, portTICK_PERIOD_MS));
+}
 
 typedef struct {
     uint8_t cmd;
@@ -133,13 +140,13 @@ static esp_err_t create_io(uint32_t pclk_hz)
 static void hardware_reset(void)
 {
     gpio_set_level(PIN_RST, 1);
-    vTaskDelay(pdMS_TO_TICKS(50));
+    delay_at_least_ms(50);
     gpio_set_level(PIN_RST, 0);
-    vTaskDelay(pdMS_TO_TICKS(20));
+    delay_at_least_ms(20);
     gpio_set_level(PIN_RST, 1);
     /* Datasheet §12.1.4: a reset in sleep-out mode (reflash, reboot, `panel init`) takes up to 120 ms
      * to cancel, and SLPOUT must wait that long. The vendor's 50 ms only covers a power-on reset. */
-    vTaskDelay(pdMS_TO_TICKS(120));
+    delay_at_least_ms(120);
 }
 
 static esp_err_t run_init(const init_cmd_t *cmds, size_t count)
@@ -149,7 +156,7 @@ static esp_err_t run_init(const init_cmd_t *cmds, size_t count)
                                                       cmds[i].len),
                             TAG, "init command 0x%02X failed", cmds[i].cmd);
         if (cmds[i].delay_ms) {
-            vTaskDelay(pdMS_TO_TICKS(cmds[i].delay_ms));
+            delay_at_least_ms(cmds[i].delay_ms);
         }
     }
     return ESP_OK;
@@ -243,14 +250,14 @@ esp_err_t st7305_set_mode(st7305_mode_t mode)
     }
     if (mode == ST7305_MODE_LPM) { /* HPM => LPM */
         ESP_RETURN_ON_ERROR(select_source_voltages(), TAG, "LPM voltages");
-        vTaskDelay(pdMS_TO_TICKS(20));
+        delay_at_least_ms(20);
         ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, 0x39, NULL, 0), TAG, "LPM");
-        vTaskDelay(pdMS_TO_TICKS(100));
+        delay_at_least_ms(100);
     } else { /* LPM => HPM */
         ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, 0x38, NULL, 0), TAG, "HPM");
-        vTaskDelay(pdMS_TO_TICKS(300));
+        delay_at_least_ms(300);
         ESP_RETURN_ON_ERROR(select_source_voltages(), TAG, "HPM voltages");
-        vTaskDelay(pdMS_TO_TICKS(20));
+        delay_at_least_ms(20);
     }
     s_mode = mode;
     return ESP_OK;

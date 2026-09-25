@@ -91,7 +91,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `st7305` | Panel init, frame push, LPM/HPM, deep-sleep retention | board | frame conversion |
 | `display` | Canonical framebuffer; pushes it to the panel when its CRC changes | gfx, st7305, util | — |
 | `gfx` | Framebuffer, primitives, text, fonts, bitmaps, QR, PBM/BMP encoders | — | ✓ |
-| `util` | Small pure-C helpers: CRC-32, base64 | — | ✓ |
+| `util` | Small pure-C helpers: CRC-32, base64, delay ticks | — | ✓ |
 | `locale` | Language packs: strings, date and number formats | — | ✓ |
 | `astro` | Sunrise, sunset, day length | — | ✓ |
 | `datastore` | Field registry, values, freshness, change events, snapshot | — | ✓ |

@@ -45,6 +45,7 @@ endfunction()
 
 reflbo_host_test(test_util_crc32 util)
 reflbo_host_test(test_util_base64 util)
+reflbo_host_test(test_util_ticks util)
 reflbo_host_test(test_gfx gfx)
 reflbo_host_test(test_gfx_text gfx)
 reflbo_host_test(test_gfx_fonts gfx)

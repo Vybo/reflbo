@@ -1,0 +1,23 @@
+# reflbo defaults. Edit here, not in sdkconfig; personal overrides go in sdkconfig.defaults.local.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash: 16 MB QIO (ESP32-S3-WROOM-1-N16R8)
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Partition table (spec §14.1)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# 8 MB octal PSRAM; skip the boot-time memory test for a faster boot (spec §5.1)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_MEMTEST=n
+
+# Console and logs on the USB-Serial-JTAG port
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Core dumps go to the coredump partition (spec §16)
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y

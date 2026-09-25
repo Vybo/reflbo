@@ -240,10 +240,10 @@ It takes ESP-IDF from `REFLBO_IDF_PATH` (default `~/esp/esp-idf-v5.5.5`) and del
 Build, flash and observe:
 
 ```sh
-tools/idf.sh set-target esp32s3            # once per clone (planned, M0 Task 5)
-tools/idf.sh build                         # (planned, M0 Task 5)
+tools/idf.sh set-target esp32s3            # once per clone
+tools/idf.sh build
 ls /dev/cu.usbmodem*                       # the board's USB-Serial-JTAG port
-tools/idf.sh -p /dev/cu.usbmodemXXXX flash # (planned, M0 Task 5)
+tools/idf.sh -p /dev/cu.usbmodemXXXX flash
 tools/idf.sh exec python tools/devlog.py --reset --until "reflbo ready" -t 20 -o captures/boot.log
 tools/idf.sh exec python tools/devlog.py --cmd version --cmd heap
 tools/idf.sh exec python tools/screenshot.py -o captures/screen.png                                 # (planned, M1)

@@ -50,6 +50,13 @@ reflbo_host_test(test_gfx_text gfx)
 reflbo_host_test(test_gfx_fonts gfx)
 reflbo_host_test(test_st7305_frame st7305_frame)
 
+reflbo_host_test(test_test_pattern_golden gfx)
+target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+
+add_executable(render_test_pattern render_test_pattern.c)
+target_compile_options(render_test_pattern PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(render_test_pattern PRIVATE gfx)
+
 # Python tool tests (stdlib unittest; pyserial is not needed).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME tools_unittests

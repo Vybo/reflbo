@@ -211,7 +211,7 @@ Both strategies live behind `power_idle()` until the M2 measurements pick the de
 
 ### 4.3 gfx
 
-- **Framebuffer type.** `gfx_fb_t { uint8_t *buf; uint16_t w, h, stride; }`, plus a clip rectangle.
+- **Framebuffer type.** `gfx_fb_t { uint8_t *buf; int16_t width, height, stride; gfx_rect_t clip; }`. The fields are signed so that clip arithmetic needs no casts.
 - **Primitives.** Pixel, horizontal/vertical line, line, rectangle, filled rectangle, rounded rectangle, circle, filled circle. Draw modes: black, white, invert (XOR).
 - **Bitmaps.** 1-bpp images, drawn transparent, opaque or inverted.
 - **Text.**
@@ -225,7 +225,7 @@ Both strategies live behind `power_idle()` until the M2 measurements pick the de
 ### 4.4 Fonts
 
 - **Pipeline.** Source fonts live in `assets/fonts/` with their licences. `tools/fontgen.py` (Pillow) renders glyphs at fixed pixel sizes into C sources under `components/gfx/fonts/`. These sources are committed, so building needs no Python or Pillow.
-- **Format.** Header (height, ascent, descent, glyph count), a sorted codepoint table, per-glyph metrics (w, h, x/y offset, advance), and 1-bpp packed bitmaps.
+- **Format.** Header (ascent, line height, glyph count; descent = line height − ascent), a sorted codepoint table, per-glyph metrics (w, h, x/y offset, advance), and 1-bpp packed bitmaps. Each generated file names the font's licence file.
 - **Glyph coverage for text fonts.** ASCII, Latin-1 Supplement, Latin Extended-A, `° µ ² ³ € – — …` and the arrows used by widgets.
   - This covers Czech and most European languages.
   - MQTT/HA text with diacritics therefore renders correctly even with the English UI.

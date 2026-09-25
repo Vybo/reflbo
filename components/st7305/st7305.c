@@ -137,7 +137,9 @@ static void hardware_reset(void)
     gpio_set_level(PIN_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(PIN_RST, 1);
-    vTaskDelay(pdMS_TO_TICKS(50));
+    /* Datasheet §12.1.4: a reset in sleep-out mode (reflash, reboot, `panel init`) takes up to 120 ms
+     * to cancel, and SLPOUT must wait that long. The vendor's 50 ms only covers a power-on reset. */
+    vTaskDelay(pdMS_TO_TICKS(120));
 }
 
 static esp_err_t run_init(const init_cmd_t *cmds, size_t count)

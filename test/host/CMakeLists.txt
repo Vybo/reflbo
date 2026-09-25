@@ -57,6 +57,12 @@ target_include_directories(rtc_logic PUBLIC ${REPO_ROOT}/components/rtc/include)
 target_compile_options(rtc_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(rtc_logic PUBLIC util)
 
+# timekeeping: only the ISO 8601 parser builds on the host.
+add_library(timekeeping_logic STATIC ${REPO_ROOT}/components/timekeeping/timekeeping_iso.c)
+target_include_directories(timekeeping_logic PUBLIC ${REPO_ROOT}/components/timekeeping/include)
+target_compile_options(timekeeping_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(timekeeping_logic PUBLIC util)
+
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
     add_executable(${name} ${name}.c)
@@ -79,6 +85,7 @@ reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)
 reflbo_host_test(test_pcf85063_regs rtc_logic)
+reflbo_host_test(test_timekeeping_iso timekeeping_logic)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

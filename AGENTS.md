@@ -184,6 +184,7 @@ components/
   util/          small pure-C helpers (CRC-32)                        [host]
   board/         pins, I²C bus, GPIO setup, buttons → gestures, wake cause
   st7305/        panel init, LPM/HPM, frame push, deep-sleep retention
+  display/       canonical framebuffer, CRC-skipped pushes to the panel
   gfx/           framebuffer, primitives, text, fonts, bitmaps, QR    [host]
   locale/        language packs (en in v1)                            [host]
   astro/         sunrise/sunset, day length                           [host]

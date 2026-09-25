@@ -29,7 +29,7 @@ Guiding principles:
 
 ## 2. Status and roadmap
 
-- **There is no firmware code yet.**
+- **Status:** M0 is done: toolchain, skeleton, USB console, host tests and `devlog.py`. Next is M1, whose plan gets written before it starts.
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
 - **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Current plan: [`docs/plans/2026-09-25-m0-toolchain-and-skeleton.md`](docs/plans/2026-09-25-m0-toolchain-and-skeleton.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
@@ -181,6 +181,7 @@ Partition table: spec §14.1. Key `sdkconfig.defaults`: 16 MB QIO flash; octal P
 ```
 main/            app_main: init order, wiring, app event loop
 components/
+  util/          small pure-C helpers (CRC-32)                        [host]
   board/         pins, I²C bus, GPIO setup, buttons → gestures, wake cause
   st7305/        panel init, LPM/HPM, frame push, deep-sleep retention
   gfx/           framebuffer, primitives, text, fonts, bitmaps, QR    [host]
@@ -203,6 +204,7 @@ components/
   diag/          console commands, screenshot export
 web/             web UI sources, embedded into the app image
 tools/           host helpers: idf wrapper, log capture, screenshot, render, font/image generators
+tools/tests/     unit tests for the host tools (run by ctest)
 test/host/       host unit tests, fixtures, golden images
 docs/            specs, plans, power measurements
 ```

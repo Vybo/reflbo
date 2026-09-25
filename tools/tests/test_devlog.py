@@ -209,6 +209,17 @@ class RunTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("reflbo 0.1.0-dev", out)
 
+    def test_prompt_with_a_log_line_glued_on_still_ends_the_command(self):
+        # The app task can log right after the console prints its prompt: "reflbo> W (20052) app: ...".
+        code, out, fake, _ = self.run_tool(
+            [b"reflbo> ",
+             (after_sending("rtc get"), b"rtc get\r\nrtc: 2026-09-25T19:44:48Z\r\nreflbo> W (20052) app: tick\r\n"),
+             (after_sending("sensors"), b"sensors\r\nsensors: 23.41 C, 45.20 %RH\r\nreflbo> ")],
+            cmd=["rtc get", "sensors"], seconds=10.0)
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.written, [b"rtc get\r", b"sensors\r"])
+        self.assertIn("sensors: 23.41 C", out)
+
     def test_nudges_again_for_the_prompt_after_a_reboot(self):
         code, _, fake, _ = self.run_tool(
             [b"reflbo> ",

@@ -121,6 +121,7 @@ def run(args, opener=open_port, now=time.monotonic, sleep=time.sleep,
     # command or after a reset; a nudge queued behind a running command becomes a stale prompt.
     nudge_ok = bool(pending)
     until_seen = until is None
+    prompt_line = False  # a prompt arrived with other output glued on, e.g. "reflbo> W (20) app: ..."
     last_nudge = now()
     log = None
     if args.out:
@@ -128,7 +129,7 @@ def run(args, opener=open_port, now=time.monotonic, sleep=time.sleep,
         log = open(args.out, "w", encoding="utf-8")
 
     def emit(line):
-        nonlocal until_seen, echo_seen, nudge_ok
+        nonlocal until_seen, echo_seen, nudge_ok, prompt_line
         out.write(line + "\n")
         out.flush()
         if log:
@@ -138,6 +139,8 @@ def run(args, opener=open_port, now=time.monotonic, sleep=time.sleep,
             until_seen = True
         if current is not None and not echo_seen and line.rstrip().endswith(current):
             echo_seen = True
+        elif line.startswith(PROMPT) and (current is None or echo_seen):
+            prompt_line = True
         if _RESET_BANNER_RE.search(line):
             nudge_ok = True
 
@@ -158,9 +161,10 @@ def run(args, opener=open_port, now=time.monotonic, sleep=time.sleep,
                 continue
             for line in splitter.feed(data):
                 emit(line)
-            prompt_visible = splitter.tail().rstrip().endswith(PROMPT.rstrip())
+            prompt_visible = prompt_line or splitter.tail().rstrip().endswith(PROMPT.rstrip())
             # A prompt ends the current command only after its echo: earlier ones are stale.
             if awaiting_prompt and prompt_visible and (current is None or echo_seen):
+                prompt_line = False
                 if pending:
                     current = pending.pop(0)
                     echo_seen = False

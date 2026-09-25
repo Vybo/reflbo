@@ -1,7 +1,7 @@
 # reflbo firmware: design spec
 
 - **Date:** 2026-09-25
-- **Status:** Draft r2, waiting for owner review (changes listed in §21)
+- **Status:** Approved by the owner on 2026-09-25 (r3; changes listed in §21)
 - **Covers:** firmware v1, milestones M0–M8
 - **Related:** `AGENTS.md` (hardware reference §3, workflow §6–§8)
 
@@ -44,7 +44,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D5 | Home Assistant over MQTT with HA MQTT discovery | |
 | D6 | Power is best effort; an average below 2 mA is the stretch goal | |
 | D7 | Other local devices publish to MQTT, and the device maps topics to fields | Same mechanism as HA values (§12.5) |
-| D8 | Licence Apache-2.0, plus `NOTICE` and `THIRD_PARTY.md` (**proposed; owner confirms**) | Same licence as the Waveshare code we adapt. `NOTICE` carries attribution into forks |
+| D8 | Licence Apache-2.0, plus `NOTICE` and `THIRD_PARTY.md` (confirmed 2026-09-25) | Same licence as the Waveshare code we adapt. `NOTICE` carries attribution into forks |
 | D9 | No RTC backup cell is fitted now; one can be fitted later. Firmware must work without it (§7) | The owner may fit an ML1220 |
 | D10 | Features beyond R1–R11 and N1–N5 are proposals, discussed at the relevant milestone (§19) | |
 | D11 | The sync schedule and the display update interval are both configurable (§9.2, §9.3) | Owner adjustment in r2 |
@@ -885,7 +885,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M7; pick another decoder if needed |
 | Open-Meteo's free tier is for non-commercial use | Low request rate (daily sync); the provider can be swapped |
 | No RTC backup cell (D9): the time is lost at every PWR-off | Sync at boot when Wi-Fi is configured, otherwise a "Set time" prompt; the owner may fit an ML1220 (§7) |
-| Licence (D8) | Owner confirms Apache-2.0 in the spec review |
+| Homebrew Python 3.14.6 on this Mac can't load `pyexpat` (it expects a newer libexpat than macOS 26.2 has), which breaks pip and the ESP-IDF installer | ESP-IDF uses uv's Python 3.13 through `~/esp/python-shim` (`AGENTS.md` §6) |
 
 ## 21. Revision history
 
@@ -893,3 +893,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 |---|---|---|
 | r1 | 2026-09-25 | First draft |
 | r2 | 2026-09-25 | Configurable sync schedule (`times` / `interval` / `always` / `manual`) and display update interval (D11, §9.2, §9.3); terms defined (§1.4); no RTC cell fitted, so a boot with invalid time syncs at once (§3.3, §7); ST7305 partial-update findings: RAM windows are supported but don't lower panel power, so v1 pushes full frames (§4.2) |
+| r3 | 2026-09-25 | Approved by the owner; licence confirmed (D8); Python toolchain risk recorded (§20) |

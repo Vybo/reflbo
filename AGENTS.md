@@ -30,8 +30,8 @@ Guiding principles:
 ## 2. Status and roadmap
 
 - **There is no firmware code yet.**
-- **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. It is a draft waiting for owner review. §5 below summarises it. If the two disagree, the spec wins; fix this file.
-- **Next:** once the owner approves the spec, write an implementation plan for each milestone in `docs/plans/`, then build one milestone at a time.
+- **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
+- **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Current plan: [`docs/plans/2026-09-25-m0-toolchain-and-skeleton.md`](docs/plans/2026-09-25-m0-toolchain-and-skeleton.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
 - **Repository:** the owner is in Brno, CZ. Remote `origin` is `git@github.com:Vybo/reflbo.git`.
 
@@ -285,13 +285,13 @@ Use the cheapest level that proves the change. Any UI change needs at least leve
 
 **Licence**
 
-- Open source with credit. Apache-2.0 is proposed and waits for the owner's confirmation. `LICENSE`, `NOTICE` and `THIRD_PARTY.md` land in M0.
+- Open source with credit: Apache-2.0 (confirmed by the owner, 2026-09-25). `LICENSE`, `NOTICE` and `THIRD_PARTY.md` land in M0.
 - Adapted third-party code keeps its licence header. Credit it in `THIRD_PARTY.md`, and in `NOTICE` where its licence requires it.
 - Fonts, icons and other assets need licences that allow redistribution in this repository.
 
 **Git**
 
-- Branch `main`; remote `origin` is `git@github.com:Vybo/reflbo.git`. Push only when the owner asks.
+- Branch `main`; remote `origin` is `git@github.com:Vybo/reflbo.git`. The owner allows pushing to `origin` without asking (2026-09-25). Never force-push `main`.
 - Make small, focused commits in Conventional Commits style (`feat(st7305): …`, `fix: …`, `docs: …`), imperative mood. Commit only states that build.
 - No AI or assistant attribution anywhere: commits, PRs, code comments or docs.
 
@@ -310,7 +310,7 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 | D5 | Home Assistant over MQTT |
 | D6 | Power is best effort; an average below 2 mA is the stretch goal |
 | D7 | Data from other local devices arrives over MQTT |
-| D8 | Open source with credit. Apache-2.0 proposed; **owner to confirm** |
+| D8 | Open source with credit: Apache-2.0 (confirmed) |
 | D9 | No RTC backup cell is fitted now (one can be added later); firmware must work without it |
 | D10 | Extra features are discussed at the relevant milestone before they are built |
 | D11 | The sync schedule (`times` / `interval` / `always` / `manual`) and the display update interval are both configurable |

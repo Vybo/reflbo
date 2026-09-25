@@ -248,7 +248,7 @@ tools/idf.sh exec python tools/devlog.py --reset --until "reflbo ready" -t 20 -o
 tools/idf.sh exec python tools/devlog.py --cmd version --cmd heap                                   # (planned, M0 Task 4)
 tools/idf.sh exec python tools/screenshot.py -o captures/screen.png                                 # (planned, M1)
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
-  && ctest --test-dir build-host --output-on-failure                                                # (planned, M0 Task 3)
+  && ctest --test-dir build-host --output-on-failure
 ```
 
 - `devlog.py` picks the port itself when exactly one `/dev/cu.usbmodem*` exists; otherwise pass `-p`. Exit codes: 0 ok, 2 port problem, 3 console prompt never appeared, 4 `--until` not seen in time.

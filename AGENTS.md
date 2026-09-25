@@ -329,5 +329,5 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 | D9 | No RTC backup cell is fitted now (one can be added later); firmware must work without it |
 | D10 | Extra features are discussed at the relevant milestone before they are built |
 | D11 | The sync schedule (`times` / `interval` / `always` / `manual`) and the display update interval are both configurable |
-| D12 | Panel: the factory init sequence (better contrast), with the LPM refresh rate set separately: 1 Hz by default, configurable from 0.25 to 8 Hz (owner check at M1) |
+| D12 | Panel: the factory init sequence (better contrast), with the LPM refresh rate set separately: 1 Hz by default, changeable at runtime with `panel rate` from 0.25 to 8 Hz (owner check at M1) |
 | D13 | Landscape only; portrait orientation was declined at M1 |

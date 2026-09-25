@@ -31,3 +31,9 @@ function(reflbo_host_test name)
 endfunction()
 
 reflbo_host_test(test_util_crc32 util)
+
+# Python tool tests (stdlib unittest; pyserial is not needed).
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME tools_unittests
+         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -t . -v
+         WORKING_DIRECTORY ${REPO_ROOT}/tools)

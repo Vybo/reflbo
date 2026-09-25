@@ -244,8 +244,8 @@ tools/idf.sh set-target esp32s3            # once per clone (planned, M0 Task 5)
 tools/idf.sh build                         # (planned, M0 Task 5)
 ls /dev/cu.usbmodem*                       # the board's USB-Serial-JTAG port
 tools/idf.sh -p /dev/cu.usbmodemXXXX flash # (planned, M0 Task 5)
-tools/idf.sh exec python tools/devlog.py --reset --until "reflbo ready" -t 20 -o captures/boot.log   # (planned, M0 Task 4)
-tools/idf.sh exec python tools/devlog.py --cmd version --cmd heap                                   # (planned, M0 Task 4)
+tools/idf.sh exec python tools/devlog.py --reset --until "reflbo ready" -t 20 -o captures/boot.log
+tools/idf.sh exec python tools/devlog.py --cmd version --cmd heap
 tools/idf.sh exec python tools/screenshot.py -o captures/screen.png                                 # (planned, M1)
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
   && ctest --test-dir build-host --output-on-failure

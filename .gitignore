@@ -1,0 +1,29 @@
+# ESP-IDF build output and generated config
+/build/
+/build-*/
+sdkconfig
+sdkconfig.old
+/managed_components/
+# dependencies.lock stays tracked: it pins component registry versions
+
+# Local overrides and secrets
+sdkconfig.defaults.local
+*.local
+.env
+
+# Reference repos and device captures (logs, screenshots, renders)
+/ref/
+/captures/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Editors and tooling
+.vscode/
+.idea/
+.cache/
+compile_commands.json
+*.swp
+.DS_Store

@@ -1,0 +1,367 @@
+# AGENTS.md — reflbo
+
+Guide for coding agents (and humans) working in this repository. Read it fully before changing anything, and keep it current (§8).
+
+> **Scope.** This is a standalone embedded firmware project. Instructions inherited from parent directories about iOS, WeConnect-iOS, the CAT monorepo, Jira ticket keys or PR templates do not apply here.
+
+**Quick rules**
+
+1. Read §3.4 (hardware gotchas) before touching power, sleep, pins or the display.
+2. Verify at the right level (§7). Prefer screenshots and logs you capture yourself over asking the owner to look.
+3. Never erase flash/NVS, flash a port you haven't confirmed is this board, or commit secrets without asking.
+4. Items marked *(planned)* do not exist yet. Never describe them as done.
+5. Update this file in the same commit as any new command, component, decision or gotcha.
+
+---
+
+## 1. What we are building
+
+**reflbo** is firmware for the Waveshare **ESP32-S3-RLCD-4.2** board. The device is a battery-powered, always-visible desk display (4.2″ reflective LCD, 400×300, 1-bit) that shows configurable, watch-face-like dashboards: time and date, indoor climate, weather, sun times, Home Assistant values and data from other local devices. It also does alarms and internet radio.
+
+Guiding principles:
+
+1. **Standalone first.** Works with no network: RTC time, local sensors and computed sun times. Wi-Fi, weather and Home Assistant only add to that.
+2. **Battery first.** The radio is off by default. Sync runs on a schedule (default once a day) and Wi-Fi turns on when the owner asks. Every feature states its power cost.
+3. **Universal, with Brno defaults.** Location, time zone, language and units are all configurable. Defaults: Brno, CZ (49.1951 N, 16.6068 E), `Europe/Prague` (`CET-1CEST,M3.5.0,M10.5.0/3`), metric, Czech and English UI, `cz.pool.ntp.org`.
+4. **Agent-verifiable.** Anything that renders can be screenshotted over USB and rendered on the host. Changes can be checked without the owner's eyes.
+5. **Small, testable modules.** Pure logic (layout, formatting, astro, parsing) builds and runs tests on the host.
+
+## 2. Status and roadmap
+
+- The repository is initialised. **There is no firmware code yet.** §5–§7 describe the *proposed* design.
+- Next step: turn §5 into an approved design spec in `docs/specs/`, write an implementation plan in `docs/plans/`, then build one milestone at a time.
+- Owner: Brno, CZ. The owner will add the git remote later.
+
+| # | Milestone | Done when |
+|---|---|---|
+| M0 | Toolchain and skeleton: ESP-IDF, project builds and flashes, USB console, `tools/` helpers | `idf.py build` is clean and the console answers |
+| M1 | ST7305 driver, `gfx`, screenshot path (serial → PNG), host renderer | Test pattern on the panel (owner confirms orientation) matches the screenshot |
+| M2 | Board services: PCF85063, SHTC3, battery gauge, buttons; first clock layout | Values on screen match console readings |
+| M3 | Data store, layout and preset engine, cycling, on-device menu | KEY switches presets and the choice survives reboot |
+| M4 | Wi-Fi manager (STA/AP, captive portal), web configurator, mDNS, OTA | A phone sets up Wi-Fi from AP mode; OTA works |
+| M5 | Time sync, weather, astro, sync scheduler, sleep policy, power measurement | Daily sync works on battery; measured average current is in `docs/power.md` |
+| M6 | MQTT and Home Assistant: discovery, telemetry, commands, HA values on the dashboard | Entities appear in HA; an HA value renders on the device |
+| M7 | Audio: offline alarms, then internet radio | An alarm fires from deep sleep; a radio stream plays |
+| M8 | microSD features (§5.8) | Logging and backup/restore verified |
+| M9 | Data from other local devices (owner will specify) | — |
+
+## 3. Hardware reference: Waveshare ESP32-S3-RLCD-4.2
+
+Sources: [wiki](https://docs.waveshare.com/ESP32-S3-RLCD-4.2) · [schematic](https://files.waveshare.com/wiki/ESP32-S3-RLCD-4.2/ESP32-S3-RLCD-4.2-schematic.pdf) · [vendor examples](https://github.com/waveshareteam/ESP32-S3-RLCD-4.2) (the most complete is `02_Example/ESP-IDF/10_FactoryProgram`, built on ESP-IDF 5.5.x). The pins below were cross-checked against the schematic and the vendor code on 2026-09-25.
+
+### 3.1 Chips
+
+| Part | Role | Bus / address |
+|---|---|---|
+| ESP32-S3-WROOM-1-N16R8 | 2× Xtensa LX7 up to 240 MHz, 16 MB flash (QIO), 8 MB octal PSRAM, Wi-Fi 2.4 GHz, BLE 5 | — |
+| ST7305 | Reflective LCD controller, 400×300, 1 bpp. Write-only: no MISO wired | SPI (vendor uses `SPI3_HOST`) |
+| PCF85063ATL | RTC with alarm, timer and minute interrupt. Own backup cell connector | I²C `0x51` |
+| SHTC3 | Temperature and humidity | I²C `0x70` |
+| ES8311 | Audio codec. Its DAC drives the speaker amp; its ADC is unused | I²C `0x18` + I²S |
+| ES7210 | 4-channel ADC: 2 mics plus the speaker output looped back for echo cancellation | I²C `0x40` + I²S |
+| NS4150B | Class-D speaker amp, 2-pin speaker header | enable = GPIO46 |
+| ETA6098 | Li-ion charger for the 18650. STAT only drives the CHG LED | — |
+| TPS63020 / RT9193-33 | 3V3 buck-boost for the system / 3V3 LDO for audio analog (always on) | — |
+| U3 power-latch IC + P-MOSFET | PWR push button: short press = on, long press = off | hardware only |
+
+### 3.2 GPIO map
+
+| GPIO | Function | Notes |
+|---|---|---|
+| 0 | BOOT button, active low, external 10k pull-up | Strapping pin: held low at reset → download mode. RTC GPIO, can wake the chip |
+| 4 | BAT_ADC, ADC1_CH3 = VBAT × 1/3 (200k/100k) | The divider always draws about 14 µA |
+| 5 | LCD D/C | |
+| 6 | LCD TE (tearing-effect output) | Optional |
+| 8 | I²S DOUT → ES8311 | |
+| 9 | I²S BCLK | |
+| 10 | I²S DIN ← ES7210 | |
+| 11 / 12 | LCD SCK / MOSI | |
+| 13 / 14 | I²C SDA / SCL, external 2.2k pull-ups | Shared by RTC, SHTC3 and both codecs. Also on the header |
+| 15 | RTC_INT (PCF85063 INT, open-drain, active low) | **No external pull-up**: enable the RTC-domain pull-up. RTC GPIO, can wake the chip |
+| 16 | I²S MCLK | |
+| 18 | KEY button, active low, external 10k pull-up | RTC GPIO, can wake the chip. Also on the header |
+| 19 / 20 | USB D− / D+ (USB-Serial-JTAG: console and flashing) | Also on the header |
+| 21 / 38 / 39 | SD CMD / CLK / D0 (SDMMC 1-bit) | D3 is pulled up. There is no card-detect line |
+| 40 | LCD CS | Digital-only pad (see gotcha 4) |
+| 41 | LCD RESET | Digital-only pad. Must stay high in deep sleep or the panel resets |
+| 45 | I²S LRCK/WS | Strapping pin |
+| 46 | PA_CTRL (amp enable, external 10k pull-down) | Strapping pin. Keep low while silent |
+| 1, 2, 3, 17 | Free, on the header only | 1–3 are ADC1_CH0–2. 3 is a strapping pin (JTAG select) |
+| 43 / 44 | UART0 TX / RX, header only | Logs that survive deep sleep, via a USB-UART adapter |
+| 7, 42, 47, 48 | Not routed | Cannot be used without rework |
+| 35–37 | Taken by octal PSRAM | Never use |
+
+### 3.3 2×8 expansion header (P1, 2.54 mm)
+
+Numbering follows the schematic. Check the silkscreen before wiring.
+
+| Pin | Signal | Pin | Signal |
+|---|---|---|---|
+| 1 | 3V3 | 2 | VBUS (5 V only while USB is connected) |
+| 3 | GND | 4 | GND |
+| 5 | GPIO0 (BOOT) | 6 | USB D− (GPIO19) |
+| 7 | GPIO1 | 8 | USB D+ (GPIO20) |
+| 9 | GPIO2 | 10 | U0TXD (GPIO43) |
+| 11 | GPIO3 | 12 | U0RXD (GPIO44) |
+| 13 | GPIO17 | 14 | I²C SDA (GPIO13) |
+| 15 | GPIO18 (KEY) | 16 | I²C SCL (GPIO14) |
+
+### 3.4 Hardware gotchas
+
+1. **The PWR button cannot be read.** It toggles a hardware latch that cuts all power except the RTC backup cell. Firmware can neither see presses nor switch itself off; it can only sleep. The only buttons firmware can use are **KEY (GPIO18)** and **BOOT (GPIO0)**.
+2. The first power-up with a freshly inserted 18650 needs USB connected, to release the battery protection. After that the battery runs the board.
+3. **Charging and USB presence are not wired to any GPIO.** Infer them from the VBAT trend, or from `usb_serial_jtag_is_connected()`, which only works with a PC host. Optional mod: VBUS (header pin 2) → 100k/100k divider → GPIO1, 2 or 3.
+4. **Keeping the image through deep sleep.** The ST7305 keeps showing its image while powered. RESET (GPIO41) and CS (GPIO40) are digital-only pads that lose state in deep sleep, so hold them with `gpio_hold_en()` plus `gpio_deep_sleep_hold_en()`. On wake from deep sleep, skip the panel reset and init: re-attach SPI and push the frame. Between updates use LPM (`0x39`, 0.25–8 Hz). Use HPM (`0x38`, 16–51 Hz) only for fast interaction. A community driver reports about 10 µA in sleep-in (image hidden), about 1 mA in LPM and about 5 mA in HPM. Measure these.
+5. **Framebuffer format.** In landscape the panel packs 2×4-pixel blocks into each byte (vendor `InitLandscapeLUT`). Our canonical buffer is row-major 1 bpp, MSB first, 1 = black (the PBM P4 layout). Convert it when flushing.
+6. The two vendor init sequences differ: the factory firmware runs SPI at 10 MHz, XiaoZhi at 40 MHz, and they use different VSHP/VSLP voltages (contrast) and frame-rate settings. Pick one, tune contrast, and record the choice here.
+7. The ESP32 has no 32 kHz crystal; the board's crystal belongs to the PCF85063. The ESP sleep timer therefore drifts. The PCF85063 is the time source, and its minute interrupt or alarm on GPIO15 gives exact wake-ups.
+8. **The audio analog rail is always on** (RT9193). Put the ES8311 and ES7210 into standby over I²C and keep PA_CTRL low when nothing is playing.
+9. **The microSD slot is always powered and has no card detect.** An inserted card adds idle current. Mount it on demand and detect a card by probing.
+10. The SHTC3 reads high because the board heats it; vendor code subtracts a constant 4 °C. Provide a calibration offset, and sample right after wake, before Wi-Fi and the CPU warm the board.
+11. USB-Serial-JTAG disappears during deep sleep, which breaks flashing and the console. Dev builds should use light sleep instead whenever a USB host is detected ("tethered mode"). Otherwise press KEY to wake the board, or ask the owner to enter download mode (hold BOOT while powering on).
+12. The vendor factory firmware draws about 90 mA at 5.3 V, roughly 24 h on a battery. That is the baseline to beat by a wide margin.
+13. The RTC backup cell must be rechargeable (ML1220). Without one, the time is lost at PWR-off until the next sync or a manual set.
+
+Datasheets: [ST7305](https://files.waveshare.com/wiki/common/ST_7305_V0_2.pdf) · [ES8311](https://files.waveshare.com/wiki/common/ES8311.DS.pdf) · [PCF85063](https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf) · [SHTC3](https://files.waveshare.com/wiki/common/SHTC3_Datasheet.pdf) · [ESP32-S3](https://documentation.espressif.com/esp32-s3_datasheet_en.pdf)
+
+### 3.5 Reference code
+
+Clone reference repos into the gitignored `ref/` directory. Do not vendor them.
+
+```sh
+git clone --depth 1 https://github.com/waveshareteam/ESP32-S3-RLCD-4.2 ref/waveshare
+git clone --depth 1 https://github.com/JasonHEngineering/waveshare_RLCD_400x300_monochrome ref/jasonh
+```
+
+- **Waveshare** (Apache-2.0). Worth reusing, under `02_Example/ESP-IDF/10_FactoryProgram/components/`: the ST7305 init and pixel LUT (`port_bsp/display_bsp.cpp`), SHTC3 and PCF85063 access (`port_bsp/i2c_equipment.cpp`), the battery ADC (`port_bsp/adc_bsp.cpp`), buttons (`port_bsp/button_bsp.c`) and codec pins (`ExternLib/codec_board/board_cfg.txt`, board `S3_RLCD_4_2`). Also see the XiaoZhi board (`02_Example/XiaoZhi/XiaoZhiCode_V2.1.0/main/boards/waveshare-s3-rlcd-4.2/`) and the ESPHome YAMLs (`02_Example/ESPHome/`).
+- **JasonH smart clock** (MIT). An Arduino monolith with Singapore-specific APIs and no real low-power design. **We do not fork it.** Borrow ideas only: screen set, 1-bpp canvas, SD config, image converter script, and 3D-printable case STEP files.
+- Code copied from either keeps its licence header and gets listed in `THIRD_PARTY.md` *(planned)*.
+
+## 4. Requirements (from the owner)
+
+- Monitor the battery and charging.
+- Offer a few configurable layouts, watch-face style: each layout is fixed, and its data fields are optional. Presets can be stored and cycled automatically or by hand. Fields: time and date; SHTC3 temperature and humidity; weather from the internet; sunrise and sunset; data from other local devices (the owner will describe how later).
+- Keep time with the PCF85063 RTC.
+- Play audio for alarms and internet radio (ES8311 + ES7210).
+- Provide settings on the device and through a website the device hosts, opened from a phone: in AP mode (to set up the client Wi-Fi) and over the local network.
+- Save power: sync over Wi-Fi once a day, then switch Wi-Fi off. The owner can switch Wi-Fi on to reach the configurator.
+- Control everything with the board's buttons.
+- Suggest uses for the microSD slot (§5.8).
+- Later, integrate two-way with Home Assistant (ESPHome was mentioned): report device status and sensor data, and read chosen HA entities to show on the dashboard.
+- Verification: flash from this Mac; the agent reads logs and screenshots over USB; the owner confirms what the panel physically shows.
+
+## 5. Proposed architecture
+
+This is a proposal until it is ratified in `docs/specs/`. §9 lists the open decisions.
+
+### 5.1 Stack
+
+| Area | Proposal | Rationale / alternative |
+|---|---|---|
+| Framework | ESP-IDF **v5.5.x** (currently v5.5.5), target `esp32s3` | The vendor examples use 5.5.x (the wiki requires ≥ 5.5.0). v6.1 exists; revisit it once the core is stable |
+| Languages | C17 firmware, Python 3 host tools, plain HTML/CSS/JS web UI with no build step | Idiomatic for ESP-IDF and testable on the host. Use C++ only if a dependency forces it |
+| Graphics | Our own immediate-mode 1-bpp renderer (`gfx`): frame = f(data, preset, time) | A stateless render makes deep-sleep redraws, screenshots and host golden tests trivial. U8g2 (BSD-2) is a candidate for fonts and primitives. Alternative: LVGL 9 (retained widgets, heavier, tree rebuilt on every wake) |
+| Fonts | Bitmap fonts generated from TTF by a host script: Latin-1 + Latin Extended-A (Czech), `°` and needed symbols | Czech diacritics are required |
+| Settings / files | NVS with a versioned schema; a LittleFS partition for presets, web assets and sounds; FAT on microSD | |
+| Network | esp_wifi STA+AP, captive-portal DNS, mDNS `reflbo-XXXX.local`, esp_http_server, HTTPS through the cert bundle | |
+| Weather | Open-Meteo: forecast, sunrise/sunset, air quality and pollen, geocoding. No API key. Behind a provider interface | Alternative: MET Norway |
+| Home Assistant | MQTT (esp-mqtt) with HA MQTT discovery | The ESPHome native API exists only inside ESPHome firmware. ESPHome itself fits badly with presets, a web configurator and a daily-sync power model |
+| Audio | `esp_codec_dev` (ES8311/ES7210) and an MP3/AAC decoder from the Espressif component registry | |
+| OTA | Two OTA slots with rollback; upload through the web UI; optional image file on microSD | |
+
+Partition sketch for 16 MB: nvs (64 KB), otadata, phy_init, ota_0 (4 MB), ota_1 (4 MB), coredump (64 KB), storage/LittleFS (the rest, about 7.8 MB).
+
+Key `sdkconfig.defaults`: 16 MB QIO flash; octal PSRAM at 80 MHz with `CONFIG_SPIRAM_MEMTEST=n`; console on USB-Serial-JTAG; custom partition table; `CONFIG_PM_ENABLE`; tickless idle; app rollback; `CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP`; quiet bootloader logs.
+
+### 5.2 Components *(planned layout)*
+
+```
+main/            app_main: init order and wiring only
+components/
+  board/         pins, I²C bus, rails, buttons (short/long/double), wake sources
+  st7305/        panel init, LPM/HPM, frame push (row-major 1 bpp → panel layout)
+  gfx/           framebuffer, primitives, fonts, bitmaps, QR          [host-buildable]
+  datastore/     typed fields with timestamps and TTL, change events,
+                 RTC-RAM snapshot                                    [host-buildable]
+  ui/            layouts, widgets, presets, cycler, menu            [host-buildable core]
+  astro/         sunrise/sunset, day length, moon phase              [host-buildable]
+  locale/        cs/en strings, date formats, name days, CZ holidays [host-buildable]
+  sensors/       SHTC3, battery gauge (ADC, Li-ion curve, smoothing)
+  rtc/           PCF85063: time, alarms, minute interrupt, offset calibration
+  timesync/      SNTP, TZ, RTC <-> system time
+  netmgr/        Wi-Fi STA/AP state machine, captive DNS, mDNS
+  webui/         HTTP server, REST API, static assets
+  weather/       Open-Meteo client and parser (JSON fixtures for host tests)
+  ha_mqtt/       MQTT session, discovery, telemetry, commands, subscriptions
+  audio/         codec control, tone/alarm player, stream player (radio)
+  storage/       NVS settings, LittleFS, microSD mount/log/backup
+  power/         power states, sleep policy, sync scheduler
+  diag/          esp_console commands (screenshot, button simulation, dumps)
+web/             web UI sources, packed into the LittleFS image
+tools/           host helpers: idf wrapper, log capture, screenshot, font/image converters
+test/host/       host unit tests, render fixtures, golden images
+docs/            specs, plans, power measurements, hardware notes
+```
+
+Dependency direction: drivers (`board`, `st7305`, `rtc`, `sensors`, `audio`) sit under services (`timesync`, `weather`, `ha_mqtt`, `netmgr`, `storage`, `power`). Services write into `datastore`, and `ui` only reads from it. `gfx`, `ui`, `datastore`, `astro` and `locale` must not include ESP-IDF headers, so they can build on the host. Only `main` knows everything.
+
+### 5.3 Data model: fields, layouts, presets
+
+- **Field**: a stable string id plus a typed value, unit, `updated_at` and TTL. Examples: `time.clock`, `date.long`, `env.temp`, `env.hum`, `wx.now.temp`, `wx.today`, `sun.rise`, `sun.set`, `bat.pct`, `alarm.next`, `ha.<key>`, `dev.<id>.<metric>`. Providers write fields; the UI reads them. For a missing or stale field, each slot picks one policy: hide, show a placeholder `—`, or show a stale marker (e.g. "⟲ 14 h").
+- **Layout**: a template defined in code, with slots of {rect, size class XL/L/M/S, accepted field kinds}. Starting set: *Classic* (big time, date and name day, 3–4 small slots), *Weather*, *Grid 2×3*, *Focus* (one huge slot and two small), *Night* (minimal).
+- **Preset**: {name, layout, slot → field or empty, options (24 h, seconds, invert, date format), in-cycle flag, optional time-of-day schedule}. Stored as JSON on LittleFS with a versioned schema; defaults are compiled in. Presets change by KEY, by the auto-cycle interval, by schedule, or by MQTT command.
+- Rendering is a pure function. The web UI preview calls the same renderer (`/api/preview.bmp?preset=…`), so the preview is pixel-exact.
+- Field ideas beyond the brief: dew point and comfort, today's min/max and trends, air quality and pollen (relevant to Brno winter smog), Czech name day (*svátek*) and public holidays, week number, change in day length, moon phase, next alarm, age of the last sync, estimated battery days left, a text message from HA, a 1-bit image from microSD or a URL, and IDS JMK departures (data source not yet verified) as the Brno counterpart of JasonH's bus arrivals.
+
+### 5.4 Power model
+
+- **States**:
+  - *Active*: menu, Wi-Fi or audio in use.
+  - *Idle*: dashboard shown, CPU asleep, panel in LPM.
+  - *Sync*: a short radio window.
+  - *Config*: Wi-Fi and web server on demand; switches off after N minutes without activity.
+  - *Critical battery*: a final "charge me" screen; only KEY wakes the device.
+- **Idle design.** Design for deep sleep between updates. State needed after wake lives in RTC RAM (a datastore snapshot of at most 4 KB) or in NVS. Idle must also work with automatic light sleep (`esp_pm` plus tickless idle). The default is chosen after measuring both in M5.
+- **Wake sources**: PCF85063 minute interrupt or alarm (GPIO15), KEY (GPIO18) and BOOT (GPIO0), all through ext1 `ANY_LOW`. The ESP timer is a fallback. Check that waking with BOOT never lands in download mode.
+- **Sync profiles**:
+  - *Battery saver* (default): daily at 05:30 and on demand.
+  - *Balanced*: hourly.
+  - *Always connected*: on USB power, MQTT stays up.
+
+  Every sync has a hard cap on Wi-Fi-on time (about 45 s) and backs off exponentially after failures.
+- **Update cadence**: once a minute. Seconds only if the owner turns them on, which costs power. Quiet hours cut updates at night; the panel has no backlight anyway.
+- **Target (proposal)**: average current ≤ 2 mA in *Battery saver*, about 2 months on a 3000 mAh cell. Record every measurement in `docs/power.md`, taken with a USB meter or a PPK2 in series with the battery.
+
+### 5.5 Networking and configurator
+
+- The Wi-Fi manager keeps several saved STA networks. The fallback AP is `reflbo-XXXX` with WPA2 and a random password, shown on screen with a QR code. A captive portal points phones to the configurator.
+- On demand: a long press on BOOT enters Config. The device joins its STA network (or starts the AP), shows the URL and a QR code, and switches Wi-Fi off after 10 minutes without activity.
+- The web UI is mobile-first plain JS, stored gzipped in LittleFS. Pages: status, Wi-Fi, location (via Open-Meteo geocoding search), time zone, a preset editor with live preview, alarms, radio stations, MQTT/HA, sync profile, OTA, backup/restore, and "set time from phone".
+- The REST API is JSON under `/api/*`. Secrets are write-only: never returned and never logged. An admin PIN is optional.
+
+### 5.6 Home Assistant over MQTT
+
+- Broker: for example the Mosquitto add-on. Base topic: `reflbo/<device_id>/`.
+- The device publishes retained messages:
+  - `state`: JSON with temperature, humidity, battery % and V, charging, RSSI, preset, last sync and firmware version.
+  - HA discovery configs: sensors, a `select` for the preset, `button`s for sync-now and next-preset, and a `text` entity for messages.
+- **Sleepy-device rules.** The device is offline most of the time.
+  - Do not use availability/LWT to mark its entities unavailable.
+  - Set `expire_after` to about twice the sync interval.
+  - Publish state as retained.
+- **Commands** use `reflbo/<id>/cmd/#` with QoS 1 and a persistent session, so the broker queues them while the device is offline. Never act on a retained command without clearing it.
+- **HA → display.** During sync the device subscribes to configured topics and maps them to fields. Recommended HA side: `mqtt_statestream`, restricted with `include:`. It publishes `<base>/<domain>/<object_id>/state` with QoS 1, retained. An HA automation that publishes retained values also works. A generic topic → field mapping (with a JSON path) covers other MQTT devices too, for example Zigbee2MQTT.
+- Alternative source without a broker: the HA REST API, `GET /api/states/<entity_id>` with a long-lived token.
+
+### 5.7 Audio
+
+- Alarms work offline. An RTC alarm wakes the device, which plays a tone, WAV or MP3 from LittleFS or microSD with a volume ramp. The buttons snooze or stop it.
+- Internet radio starts only on an explicit action from the web UI or menu. It plays HTTP(S) MP3/AAC through a PSRAM ring buffer and shows ICY metadata on screen. On battery it warns about the cost. The station list is editable.
+- Later: ESP-SR (echo cancellation, noise suppression, wake word) using the mic array and the loopback channel.
+
+### 5.8 microSD (proposal)
+
+FAT32, mounted on demand; every feature is optional:
+
+- Config backup and restore, plus a first-boot provisioning file (`/sdcard/reflbo/provision.json`, deleted after import).
+- Sensor history as CSV (temperature, humidity and battery every 5–10 min), shown as 24 h / 7 d graphs on the device and downloadable from the web UI.
+- Alarm sounds, local audio and station lists.
+- 1-bit images from a host converter, for a picture layout or slot backgrounds.
+- A firmware update file.
+- Event logs, crash logs and saved screenshots.
+
+### 5.9 Controls (proposed defaults)
+
+| Context | KEY (GPIO18) | BOOT (GPIO0) |
+|---|---|---|
+| Dashboard | Short: next preset · Double: auto-cycle on/off · Long: menu | Short: refresh sensors · Long (3 s): Config mode (Wi-Fi on) |
+| Menu | Short: next item · Long: select | Short: back · Long: exit menu |
+| Alarm ringing | Short: snooze · Long: stop | Short: snooze · Long: stop |
+
+PWR is a hardware on/off switch only (§3.4).
+
+## 6. Environment and commands
+
+One-time setup on macOS:
+
+```sh
+brew install cmake ninja dfu-util ccache   # already present on the owner's Mac
+git clone -b v5.5.5 --depth 1 --recursive --shallow-submodules \
+  https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v5.5.5
+~/esp/esp-idf-v5.5.5/install.sh esp32s3
+```
+
+If `install.sh` fails under Homebrew Python 3.14, retry with Python 3.12 or 3.13 first on `PATH`.
+
+Every shell needs the IDF environment. For agents, each Bash call is a fresh shell:
+
+```sh
+. ~/esp/esp-idf-v5.5.5/export.sh >/dev/null
+```
+
+Build, flash and observe:
+
+```sh
+idf.py set-target esp32s3                  # once per clone
+idf.py build
+ls /dev/cu.usbmodem*                       # the board's USB-Serial-JTAG port
+idf.py -p /dev/cu.usbmodemXXXX flash
+tools/devlog.py -p /dev/cu.usbmodemXXXX -t 20 -o captures/log.txt        # (planned)
+tools/screenshot.py -p /dev/cu.usbmodemXXXX -o captures/screen.png       # (planned)
+tools/render.py --preset all -o captures/render/                         # (planned, host only)
+cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
+  && ctest --test-dir build-host                                         # (planned)
+```
+
+- Do not run `idf.py monitor` from an agent shell; it needs an interactive TTY. Use `tools/devlog.py`.
+- Do not run `idf.py erase-flash` or erase NVS without asking. Either wipes the owner's Wi-Fi credentials and presets.
+- If the port is missing, the board is probably in deep sleep. Press KEY. If it is still missing, ask the owner to enter download mode (hold BOOT while powering on).
+
+## 7. Verification
+
+Use the cheapest level that proves the change. Any UI change needs at least level 3.
+
+1. **Build**: `idf.py build` passes with no new warnings.
+2. **Host**: unit tests and golden render tests in `test/host/`. Look at the rendered PNGs.
+3. **Device**: flash, capture the boot log, exercise the change through the console, then take a screenshot and look at it.
+4. **Owner**: only for physical facts, such as panel orientation and contrast, audio, how the buttons behave, and current draw. Give an exact checklist with expected results.
+
+**Screenshots** *(planned, M1)*: the `screenshot` console command prints the canonical framebuffer as base64 PBM between `-----BEGIN RLCD PBM-----` and `-----END RLCD PBM-----`. `tools/screenshot.py` turns that into a PNG using only pyserial and the standard library. The web UI serves `/api/screenshot.bmp`. A screenshot shows what the firmware drew, not what the panel shows, because the ST7305 is write-only. After any display-driver change, have the owner confirm the test pattern.
+
+**Diagnostics console** *(planned, `diag`)*: `screenshot`, `btn <key|boot> <short|long|double>` (simulated presses), `sensors`, `battery`, `rtc get|set`, `wifi status|scan`, `sync now`, `preset list|set`, `field dump`, `sleep stats`, `audio tone`. Drive the UI with `btn` and `screenshot` instead of asking the owner to press buttons.
+
+**Done** means: the acceptance criteria pass at the right level, new logic has tests, power-affecting changes have measurements in `docs/power.md`, and this file and `docs/` are updated.
+
+## 8. Conventions
+
+**Code**
+
+- ESP-IDF style: 4-space indent and `snake_case`. Public APIs carry a component prefix (`st7305_…`, `ds_…`) and live in `include/`.
+- Return `esp_err_t` and use `ESP_RETURN_ON_ERROR` / `ESP_GOTO_ON_ERROR`. No `ESP_ERROR_CHECK` on recoverable paths such as network, SD or sensors.
+- Large buffers go in PSRAM (`MALLOC_CAP_SPIRAM`); DMA buffers go in internal RAM. No allocation inside render or audio hot loops.
+- One `TAG` per module. `ESP_LOGI` for state changes, `ESP_LOGD` for detail. Never log secrets.
+- Every task gets an explicit stack size, priority and core. Document who owns each shared resource (I²C bus, SPI).
+- Compile-time defaults come from Kconfig (`REFLBO_*`); runtime settings in NVS override them.
+- Dependencies come from the ESP Component Registry through `idf_component.yml`, with pinned versions. Commit `dependencies.lock`. Never edit `managed_components/`.
+- Change configuration through `sdkconfig.defaults`, then run `idf.py reconfigure` or delete `sdkconfig`. `sdkconfig` is generated and gitignored. Personal overrides, such as dev Wi-Fi credentials, go in the gitignored `sdkconfig.defaults.local`.
+- Never commit secrets: Wi-Fi passwords, MQTT credentials, tokens or API keys.
+
+**Git**
+
+- Branch `main`. The owner will add the remote.
+- Make small, focused commits in Conventional Commits style (`feat(st7305): …`, `fix: …`, `docs: …`), imperative mood. Commit only states that build.
+- No AI or assistant attribution anywhere: commits, PRs, code comments or docs.
+
+**Keep this file current.** When you add a command, component, decision or gotcha, update AGENTS.md in the same commit, and remove *(planned)* markers as things land.
+
+## 9. Open decisions (for the owner)
+
+1. Graphics: our own immediate-mode renderer (recommended) or LVGL 9?
+2. ESP-IDF v5.5.x (recommended) or v6.1?
+3. Idle strategy: deep sleep or light sleep. To be decided from the M5 measurements.
+4. Default UI language: Czech or English?
+5. HA data path: MQTT with `mqtt_statestream` (recommended) or REST pull?
+6. Battery-life target (proposal: at least 2 months on 3000 mAh).
+7. Data from other local devices: how does it arrive? Candidates: BLE/BTHome, ESP-NOW or MQTT. Each has a different power cost.
+8. Project licence.
+9. Is an ML1220 RTC backup cell fitted?

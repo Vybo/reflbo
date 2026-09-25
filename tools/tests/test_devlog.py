@@ -72,6 +72,58 @@ def after_sending(command):
     return lambda fake: bool(fake.written) and fake.written[-1] == (command + "\r").encode()
 
 
+class LineModelSerial:
+    """Models the DTR/RTS levels the board sees. When the port opens, the OS asserts both
+    lines; pyserial then applies the pre-set dtr state, then the rts state (serialposix.py)."""
+
+    def __init__(self):
+        self.is_open = False
+        self._dtr = True  # pyserial defaults
+        self._rts = True
+        self.port = self.baudrate = self.timeout = None
+        self.states = []  # (dtr, rts) after every change while open
+
+    def _changed(self):
+        if self.is_open:
+            self.states.append((self._dtr, self._rts))
+
+    @property
+    def dtr(self):
+        return self._dtr
+
+    @dtr.setter
+    def dtr(self, value):
+        self._dtr = value
+        self._changed()
+
+    @property
+    def rts(self):
+        return self._rts
+
+    @rts.setter
+    def rts(self, value):
+        self._rts = value
+        self._changed()
+
+    def open(self):
+        wanted_dtr, wanted_rts = self._dtr, self._rts
+        self.is_open = True
+        self._dtr, self._rts = True, True
+        self._changed()
+        self._dtr = wanted_dtr
+        self._changed()
+        self._rts = wanted_rts
+        self._changed()
+
+
+class OpenPortTest(unittest.TestCase):
+    def test_open_never_releases_dtr_while_rts_is_asserted(self):
+        # DTR released while RTS is asserted resets a USB-Serial-JTAG chip.
+        ser = devlog.open_port("/dev/cu.usbmodemTEST", serial_factory=LineModelSerial)
+        self.assertNotIn((False, True), ser.states)
+        self.assertEqual(ser.states[-1], (False, False))
+
+
 class StripAnsiTest(unittest.TestCase):
     def test_removes_color_codes(self):
         self.assertEqual(devlog.strip_ansi("\x1b[0;32mI (12) main: ok\x1b[0m"), "I (12) main: ok")

@@ -66,17 +66,26 @@ class LineSplitter:
         self._tail = ""
 
 
-def open_port(port):
-    """Open without toggling DTR/RTS, so opening the port never resets the chip."""
-    import serial  # imported here so the unit tests run without pyserial
+def open_port(port, serial_factory=None):
+    """Open the port without resetting the chip.
 
-    ser = serial.Serial()
+    The OS asserts DTR and RTS when the port opens, and releasing DTR while RTS is still
+    asserted resets a USB-Serial-JTAG chip. So open with both asserted, then release RTS
+    before DTR (the same order esp-idf-monitor uses for --no-reset).
+    """
+    if serial_factory is None:
+        import serial  # imported here so the unit tests run without pyserial
+
+        serial_factory = serial.Serial
+    ser = serial_factory()
     ser.port = port
     ser.baudrate = 115200
     ser.timeout = 0.1
-    ser.dtr = False
-    ser.rts = False
+    ser.dtr = True
+    ser.rts = True
     ser.open()
+    ser.rts = False
+    ser.dtr = False
     return ser
 
 

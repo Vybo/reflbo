@@ -269,7 +269,7 @@ Use the cheapest level that proves the change. Any UI change needs at least leve
 
 **Screenshots** *(planned, M1)*: the `screenshot` console command prints the canonical framebuffer as base64 PBM between `-----BEGIN RLCD PBM-----` and `-----END RLCD PBM-----`. `tools/screenshot.py` turns that into a PNG using only pyserial and the standard library. The web UI serves `/api/screenshot.bmp`. A screenshot shows what the firmware drew, not what the panel shows, because the ST7305 is write-only. After any display-driver change, have the owner confirm the test pattern.
 
-**Diagnostics console** *(planned, `diag`; full list in spec §15)*: `screenshot`, `btn <key|boot> <short|double|long>` (simulated presses), `sensors`, `battery`, `rtc get|set`, `field list|get|set`, `preset list|set`, `wifi status|scan`, `sync now`, `sleep stats`, `power idle <deep|light>`, `audio tone`. Drive the UI with `btn` and `screenshot` instead of asking the owner to press buttons. Inject test data with `field set`.
+**Diagnostics console** (`diag`; full list in spec §15). Available now: `help`, `version`, `heap`, `reboot`. Planned: `screenshot`, `btn <key|boot> <short|double|long>` (simulated presses), `sensors`, `battery`, `rtc get|set`, `field list|get|set`, `preset list|set`, `wifi status|scan`, `sync now`, `sleep stats`, `power idle <deep|light>`, `audio tone`. Drive the UI with `btn` and `screenshot` instead of asking the owner to press buttons. Inject test data with `field set`. Run commands with `tools/idf.sh exec python tools/devlog.py --cmd <command>`.
 
 **Done** means: the acceptance criteria pass at the right level, new logic has tests, power-affecting changes have measurements in `docs/power.md`, and this file and `docs/` are updated.
 

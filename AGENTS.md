@@ -222,34 +222,37 @@ One-time setup on macOS:
 
 ```sh
 brew install cmake ninja dfu-util ccache   # already present on the owner's Mac
+# Homebrew's Python 3.14 (3.14.6 and 3.14.7 checked) can't load pyexpat on macOS 26
+# (it expects a newer libexpat than the system's), so pip, and the ESP-IDF installer
+# with it, fail. ESP-IDF uses uv's Python 3.13 through a shim directory instead:
+mkdir -p ~/esp/python-shim
+ln -sf "$(~/.local/bin/uv python find 3.13)" ~/esp/python-shim/python3
+ln -sf "$(~/.local/bin/uv python find 3.13)" ~/esp/python-shim/python
 git clone -b v5.5.5 --depth 1 --recursive --shallow-submodules \
   https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v5.5.5
-~/esp/esp-idf-v5.5.5/install.sh esp32s3
+PATH="$HOME/esp/python-shim:$PATH" ~/esp/esp-idf-v5.5.5/install.sh esp32s3
 ```
 
-If `install.sh` fails under Homebrew Python 3.14, retry with Python 3.12 or 3.13 first on `PATH`.
+`tools/idf.sh` runs `idf.py`, or any command after `exec`, inside the IDF environment. Before that it puts the shim on `PATH`, loads `export.sh` (showing its banner only if it fails) and changes to the repo root. It therefore works from any fresh shell, which matters for agents because every Bash call is one. Paths passed to it are relative to the repo root.
 
-Every shell needs the IDF environment. For agents, each Bash call is a fresh shell:
-
-```sh
-. ~/esp/esp-idf-v5.5.5/export.sh >/dev/null
-```
+It takes ESP-IDF from `REFLBO_IDF_PATH` (default `~/esp/esp-idf-v5.5.5`) and deliberately ignores an inherited `IDF_PATH`. That keeps an older install from being picked up by accident; an ESP-IDF 5.2 environment already exists in `~/.espressif` on the owner's Mac.
 
 Build, flash and observe:
 
 ```sh
-idf.py set-target esp32s3                  # once per clone
-idf.py build
+tools/idf.sh set-target esp32s3            # once per clone (planned, M0 Task 5)
+tools/idf.sh build                         # (planned, M0 Task 5)
 ls /dev/cu.usbmodem*                       # the board's USB-Serial-JTAG port
-idf.py -p /dev/cu.usbmodemXXXX flash
-tools/devlog.py -p /dev/cu.usbmodemXXXX -t 20 -o captures/log.txt        # (planned)
-tools/screenshot.py -p /dev/cu.usbmodemXXXX -o captures/screen.png       # (planned)
-tools/render.py --preset all -o captures/render/                         # (planned, host only)
+tools/idf.sh -p /dev/cu.usbmodemXXXX flash # (planned, M0 Task 5)
+tools/idf.sh exec python tools/devlog.py --reset --until "reflbo ready" -t 20 -o captures/boot.log   # (planned, M0 Task 4)
+tools/idf.sh exec python tools/devlog.py --cmd version --cmd heap                                   # (planned, M0 Task 4)
+tools/idf.sh exec python tools/screenshot.py -o captures/screen.png                                 # (planned, M1)
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
-  && ctest --test-dir build-host                                         # (planned)
+  && ctest --test-dir build-host --output-on-failure                                                # (planned, M0 Task 3)
 ```
 
-- Do not run `idf.py monitor` from an agent shell; it needs an interactive TTY. Use `tools/devlog.py`.
+- `devlog.py` picks the port itself when exactly one `/dev/cu.usbmodem*` exists; otherwise pass `-p`. Exit codes: 0 ok, 2 port problem, 3 console prompt never appeared, 4 `--until` not seen in time.
+- Do not run `idf.py monitor` from an agent shell; it needs an interactive TTY. Use `devlog.py`.
 - Do not run `idf.py erase-flash` or erase NVS without asking. Either wipes the owner's Wi-Fi credentials and presets.
 - If the port is missing, the board is probably in deep sleep. Press KEY. If it is still missing, ask the owner to enter download mode (hold BOOT while powering on).
 - Power measurements follow the USB power-meter method in spec §9.4. Record them in `docs/power.md`.

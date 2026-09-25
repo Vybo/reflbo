@@ -68,6 +68,12 @@ add_library(power_logic STATIC ${REPO_ROOT}/components/power/power_policy.c)
 target_include_directories(power_logic PUBLIC ${REPO_ROOT}/components/power/include)
 target_compile_options(power_logic PRIVATE ${REFLBO_WARNINGS})
 
+# ui: pure C on top of gfx.
+add_library(ui STATIC ${REPO_ROOT}/components/ui/ui_clock.c)
+target_include_directories(ui PUBLIC ${REPO_ROOT}/components/ui/include)
+target_compile_options(ui PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(ui PUBLIC gfx)
+
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
     add_executable(${name} ${name}.c)
@@ -99,6 +105,13 @@ target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_
 add_executable(render_test_pattern render_test_pattern.c)
 target_compile_options(render_test_pattern PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(render_test_pattern PRIVATE gfx)
+
+reflbo_host_test(test_ui_clock_golden ui)
+target_compile_definitions(test_ui_clock_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+
+add_executable(render_clock render_clock.c)
+target_compile_options(render_clock PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(render_clock PRIVATE ui)
 
 # Python tool tests (stdlib unittest; pyserial is not needed).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

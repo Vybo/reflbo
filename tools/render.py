@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render host-side images to PNG (spec §15) with the renderers built in build-host.
   cmake -S test/host -B build-host -G Ninja && cmake --build build-host
-  python3 tools/render.py            # captures/render/test_pattern.{pbm,png}
+  python3 tools/render.py            # captures/render/<name>.{pbm,png}
 """
 import argparse
 import pathlib
@@ -11,7 +11,13 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import pbm_png  # noqa: E402
 
-RENDERERS = {"test_pattern": "render_test_pattern"}
+# name -> renderer executable in the build directory and its arguments (the output path comes last)
+RENDERERS = {
+    "test_pattern": ["render_test_pattern"],
+    "clock_valid": ["render_clock", "valid"],
+    "clock_invalid": ["render_clock", "invalid"],
+    "clock_cold": ["render_clock", "cold"],
+}
 
 
 def main(argv=None):
@@ -21,9 +27,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     out_dir = pathlib.Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    for name, exe in RENDERERS.items():
+    for name, command in RENDERERS.items():
         pbm = out_dir / f"{name}.pbm"
-        subprocess.run([str(pathlib.Path(args.build_dir) / exe), str(pbm)], check=True)
+        exe = pathlib.Path(args.build_dir) / command[0]
+        subprocess.run([str(exe), *command[1:], str(pbm)], check=True)
         (out_dir / f"{name}.png").write_bytes(pbm_png.png_from_pbm(pbm.read_bytes()))
         print(f"{name}: {pbm} and {pbm.with_suffix('.png')}")
     return 0

@@ -7,3 +7,5 @@ extern const gfx_font_t gfx_font_sans_12;
 extern const gfx_font_t gfx_font_sans_16;
 extern const gfx_font_t gfx_font_sans_20;
 extern const gfx_font_t gfx_font_sans_bold_20;
+extern const gfx_font_t gfx_font_sans_bold_28;
+extern const gfx_font_t gfx_font_num_cb_130; /* DejaVu Sans Condensed Bold; digits, : . - ° % only */

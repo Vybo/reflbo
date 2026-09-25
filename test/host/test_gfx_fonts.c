@@ -3,7 +3,7 @@
 #include "unity.h"
 
 static const gfx_font_t *const s_fonts[] = {
-    &gfx_font_sans_12, &gfx_font_sans_16, &gfx_font_sans_20, &gfx_font_sans_bold_20,
+    &gfx_font_sans_12, &gfx_font_sans_16, &gfx_font_sans_20, &gfx_font_sans_bold_20, &gfx_font_sans_bold_28,
 };
 #define FONT_COUNT (sizeof(s_fonts) / sizeof(s_fonts[0]))
 

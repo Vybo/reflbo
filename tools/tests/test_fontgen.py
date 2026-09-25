@@ -39,6 +39,11 @@ class EmitCTest(unittest.TestCase):
         self.assertIn("0xE0, 0xA0,", text)
         self.assertIn("const gfx_font_t gfx_font_tiny = { s_bitmap, s_glyphs, 2, 7, 9 };", text)
 
+    def test_names_the_font_licence_in_the_header(self):
+        text = fontgen.emit_c("tiny", "Tiny.ttf", 8, [], ascent=7, line_height=9,
+                              licence="assets/fonts/LICENSE-Tiny.txt")
+        self.assertIn("Font licence: assets/fonts/LICENSE-Tiny.txt", text.splitlines()[1])
+
     def test_rejects_glyphs_that_do_not_fit_the_c_types(self):
         glyph = dict(cp=0x41, width=300, height=1, x=0, y=0, advance=1, rows=[[1] * 300])
         with self.assertRaises(ValueError):

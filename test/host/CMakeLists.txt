@@ -40,6 +40,11 @@ add_library(scheduler STATIC ${REPO_ROOT}/components/scheduler/scheduler.c)
 target_include_directories(scheduler PUBLIC ${REPO_ROOT}/components/scheduler/include)
 target_compile_options(scheduler PRIVATE ${REFLBO_WARNINGS})
 
+# board: only the pure gesture recogniser builds on the host.
+add_library(board_logic STATIC ${REPO_ROOT}/components/board/gesture.c)
+target_include_directories(board_logic PUBLIC ${REPO_ROOT}/components/board/include)
+target_compile_options(board_logic PRIVATE ${REFLBO_WARNINGS})
+
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
     add_executable(${name} ${name}.c)
@@ -58,6 +63,7 @@ reflbo_host_test(test_st7305_frame st7305_frame)
 reflbo_host_test(test_util_snapshot util)
 reflbo_host_test(test_util_time util)
 reflbo_host_test(test_scheduler scheduler)
+reflbo_host_test(test_gesture board_logic)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

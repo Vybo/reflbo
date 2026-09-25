@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 
+#include "board_pins.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_attr.h"
@@ -14,12 +15,12 @@
 #include "freertos/task.h"
 #include "util_ticks.h"
 
-#define PIN_MOSI    12
-#define PIN_SCLK    11
-#define PIN_DC      5
-#define PIN_CS      40
-#define PIN_RST     41
-#define PIN_TE      6
+#define PIN_MOSI    BOARD_PIN_LCD_MOSI
+#define PIN_SCLK    BOARD_PIN_LCD_SCK
+#define PIN_DC      BOARD_PIN_LCD_DC
+#define PIN_CS      BOARD_PIN_LCD_CS
+#define PIN_RST     BOARD_PIN_LCD_RST
+#define PIN_TE      BOARD_PIN_LCD_TE
 #define SPI_HOST_ID SPI3_HOST
 
 static const char *TAG = "st7305";

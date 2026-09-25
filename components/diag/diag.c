@@ -72,6 +72,7 @@ esp_err_t diag_start(void)
     ESP_RETURN_ON_ERROR(esp_console_register_help_command(), TAG, "help command");
     ESP_RETURN_ON_ERROR(diag_register_system_commands(), TAG, "system commands");
     ESP_RETURN_ON_ERROR(diag_register_display_commands(), TAG, "display commands");
+    ESP_RETURN_ON_ERROR(diag_register_button_commands(), TAG, "button commands");
 
     BaseType_t created = xTaskCreatePinnedToCore(diag_repl_task, "diag_repl", DIAG_REPL_STACK_SIZE, NULL,
                                                  DIAG_REPL_PRIORITY, NULL, DIAG_REPL_CORE);

@@ -22,7 +22,7 @@ Guide for coding agents (and humans) working in this repository. Read it fully b
 Guiding principles:
 
 1. **Standalone first.** Works with no network: RTC time, local sensors and computed sun times. Wi-Fi, weather and Home Assistant only add to that.
-2. **Battery first.** The radio is off by default. Sync runs on a schedule (default once a day) and Wi-Fi turns on when the owner asks. Every feature states its power cost.
+2. **Battery first.** The radio is off by default. A *sync* is a Wi-Fi session for time, weather and MQTT; it runs on a configurable schedule (default once a day), and Wi-Fi also turns on when the owner asks. A *display update* redraws from local data, every minute by default (configurable), with no Wi-Fi. Every feature states its power cost.
 3. **Universal, with Brno defaults.** Location, time zone, language and units are all configurable. Defaults: Brno, CZ (49.1951 N, 16.6068 E), `Europe/Prague` (`CET-1CEST,M3.5.0,M10.5.0/3`), metric, `cz.pool.ntp.org`. The UI is in English, organised as language packs so more languages can be added.
 4. **Agent-verifiable.** Anything that renders can be screenshotted over USB and rendered on the host. Changes can be checked without the owner's eyes.
 5. **Small, testable modules.** Pure logic (layout, formatting, astro, parsing, scheduling) builds and runs tests on the host.
@@ -122,7 +122,8 @@ Numbering follows the schematic. Check the silkscreen before wiring.
 10. The SHTC3 reads high because the board heats it; vendor code subtracts a constant 4 °C. Provide a calibration offset, and sample right after wake, before Wi-Fi and the CPU warm the board.
 11. USB-Serial-JTAG disappears during deep sleep, which breaks flashing and the console. Dev builds should use light sleep instead whenever a USB host is detected ("tethered mode"). Otherwise press KEY to wake the board, or ask the owner to enter download mode (hold BOOT while powering on).
 12. The vendor factory firmware draws about 90 mA at 5.3 V, roughly 24 h on a battery. That is the baseline to beat by a wide margin.
-13. **RTC backup cell.** It plugs into a small 2-pin 1.0 mm connector (J7 in the schematic), not a coin holder, and must be a rechargeable cell with leads (ML1220). Without one, the time is lost at PWR-off until the next sync or a manual set, and the RTC's oscillator-stop flag reports the loss. The owner hasn't located the connector yet.
+13. **RTC backup cell: none is fitted now; one can be added later.** It plugs into a small 2-pin 1.0 mm connector (J7 in the schematic), not a coin holder, and must be a rechargeable cell with leads (ML1220), because the board charges it. Per the schematic, J7 pin 1 is + and pin 2 is GND; check the polarity before plugging a cell in. Without a cell, the time is lost at PWR-off and the RTC's oscillator-stop flag reports it. The firmware then syncs at boot if Wi-Fi is configured, and otherwise asks for the time to be set (spec §7).
+14. **Partial updates exist but don't save panel power.** CASET/RASET/RAMWR can write a RAM window in 12×2 px cells (landscape *y* × *x*), and RAM may be written in LPM; new content shows at the next panel frame. The panel still re-drives every line each frame, so a partial write saves only SPI time (about 0.03–0.1 mAh/day). v1 pushes full frames and skips the push when nothing changed (spec §4.2).
 
 Datasheets: [ST7305](https://files.waveshare.com/wiki/common/ST_7305_V0_2.pdf) · [ES8311](https://files.waveshare.com/wiki/common/ES8311.DS.pdf) · [PCF85063](https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf) · [SHTC3](https://files.waveshare.com/wiki/common/SHTC3_Datasheet.pdf) · [ESP32-S3](https://documentation.espressif.com/esp32-s3_datasheet_en.pdf)
 
@@ -148,7 +149,7 @@ The spec (§1.1) lists these with IDs.
 - Keep time with the PCF85063 RTC.
 - Play audio for alarms and internet radio (ES8311 + ES7210).
 - Provide settings on the device and through a website the device hosts, opened from a phone: in AP mode (to set up the client Wi-Fi) and over the local network.
-- Save power: sync over Wi-Fi once a day, then switch Wi-Fi off. The owner can switch Wi-Fi on to reach the configurator.
+- Save power: sync over Wi-Fi on a configurable schedule (default once a day), then switch Wi-Fi off. The owner can switch Wi-Fi on to reach the configurator.
 - Control everything with the board's buttons.
 - Suggest uses for the microSD slot (list agreed at M8).
 - Later, integrate two-way with Home Assistant over MQTT: report device status and sensor data, and read chosen HA entities to show on the dashboard.
@@ -310,5 +311,6 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 | D6 | Power is best effort; an average below 2 mA is the stretch goal |
 | D7 | Data from other local devices arrives over MQTT |
 | D8 | Open source with credit. Apache-2.0 proposed; **owner to confirm** |
-| D9 | Whether an RTC backup cell is fitted is unknown; firmware must cope without one |
+| D9 | No RTC backup cell is fitted now (one can be added later); firmware must work without it |
 | D10 | Extra features are discussed at the relevant milestone before they are built |
+| D11 | The sync schedule (`times` / `interval` / `always` / `manual`) and the display update interval are both configurable |

@@ -1,7 +1,7 @@
 # reflbo firmware: design spec
 
 - **Date:** 2026-09-25
-- **Status:** Draft, waiting for owner review
+- **Status:** Draft r2, waiting for owner review (changes listed in §21)
 - **Covers:** firmware v1, milestones M0–M8
 - **Related:** `AGENTS.md` (hardware reference §3, workflow §6–§8)
 
@@ -19,7 +19,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | R4 | Keep time with the PCF85063 RTC |
 | R5 | Audio: alarms and internet radio |
 | R6 | Settings on the device and on a website the device hosts, reachable from a phone in AP mode and over the LAN |
-| R7 | Save power: sync once a day, keep Wi-Fi off otherwise, turn Wi-Fi on when asked so the configurator is reachable |
+| R7 | Save power: sync on a configurable schedule (default once a day), keep Wi-Fi off otherwise, turn Wi-Fi on when asked so the configurator is reachable |
 | R8 | Control everything with the board buttons |
 | R9 | Use the microSD slot (feature set agreed at M8) |
 | R10 | Two-way Home Assistant integration: publish status and sensors, and show chosen HA entities |
@@ -28,7 +28,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | ID | Non-functional requirement |
 |---|---|
 | N1 | Works fully offline; network features only add data |
-| N2 | Battery life as long as practical. Stretch goal: average current below 2 mA in the default profile |
+| N2 | Battery life as long as practical. Stretch goal: average current below 2 mA with the default sync schedule |
 | N3 | English UI, with strings and formats organised as language packs |
 | N4 | Location, time zone and units are configurable. Defaults: Brno, Europe/Prague, metric |
 | N5 | Open source, with third-party code credited |
@@ -45,8 +45,9 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D6 | Power is best effort; an average below 2 mA is the stretch goal | |
 | D7 | Other local devices publish to MQTT, and the device maps topics to fields | Same mechanism as HA values (§12.5) |
 | D8 | Licence Apache-2.0, plus `NOTICE` and `THIRD_PARTY.md` (**proposed; owner confirms**) | Same licence as the Waveshare code we adapt. `NOTICE` carries attribution into forks |
-| D9 | Whether an RTC backup cell is fitted is unknown; firmware must cope without one | Owner checks later |
+| D9 | No RTC backup cell is fitted now; one can be fitted later. Firmware must work without it (§7) | The owner may fit an ML1220 |
 | D10 | Features beyond R1–R11 and N1–N5 are proposals, discussed at the relevant milestone (§19) | |
+| D11 | The sync schedule and the display update interval are both configurable (§9.2, §9.3) | Owner adjustment in r2 |
 
 ### 1.3 Out of scope for v1
 
@@ -55,6 +56,15 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 - Voice features.
 - Network services other than Open-Meteo, NTP and the owner's MQTT broker.
 - Portrait orientation.
+
+### 1.4 Terms
+
+| Term | Meaning | Frequency | Radio |
+|---|---|---|---|
+| **Sync** | A network session: Wi-Fi on → time (NTP) → weather → MQTT → Wi-Fi off | Configurable schedule (§9.3); default once a day at 05:30 | Yes |
+| **Display update** | Redraw from local data (RTC time, the latest readings, stored weather and MQTT values) and push to the panel | Configurable (§9.2); default every minute | No |
+| **Sensor sample** | A reading from the SHTC3 and the battery gauge | Every 5 min (configurable) | No |
+| **Wake** | The CPU leaving sleep for any of the above, or for a button, an alarm or a timeout | — | — |
 
 ## 2. Hardware constraints that shape the design
 
@@ -133,7 +143,8 @@ Initial task plan (finalised in the implementation plan): app (core 1), sync (co
   3. Mount storage and load settings and presets.
   4. Read the RTC and check its oscillator-stop flag, then set system time.
   5. Restore the last persisted datastore snapshot. Its data is shown as stale according to its age.
-  6. Read the sensors, render, then go idle.
+  6. Read the sensors and render.
+  7. If the time is invalid and Wi-Fi is configured, start a sync at once to fetch the time (§7). Then go idle.
 - **Wake from deep sleep**:
   1. Decode the wake cause.
   2. Restore the RTC-RAM snapshot (magic, version, CRC). If it is invalid, take the cold-boot path but skip the panel reset.
@@ -179,6 +190,16 @@ Both strategies live behind `power_idle()` until the M2 measurements pick the de
 - **`st7305_set_mode(HPM | LPM)`.** Sends `38h`/`39h` using the switching sequence in datasheet §7.11. The LPM frame rate is set by `B2h` (0.25–8 Hz). Default 1 Hz; tune it at M2/M5.
   - Idle uses LPM.
   - Menu and config mode use HPM, so new frames appear without lag.
+- **RAM writes in LPM.** The panel RAM can be written in any power mode. The datasheet (§7.3) guarantees no visible artefacts when the interface writes while the panel reads. New content appears at the next panel frame, so at 1 Hz LPM a minute update shows within 1 s. Idle updates therefore stay in LPM and need no mode switch.
+- **Partial updates (verified in datasheet §7.2.3, §7.4, §8.1.14–16).**
+  - CASET/RASET define a RAM window, and RAMWR fills only that window. One window cell is 3 bytes: 12 source pixels × 2 gate lines. In our landscape orientation that is 12 px of *y* by 2 px of *x*.
+  - Partial writes shorten only the SPI transfer. They do **not** lower panel power: every frame, the controller re-drives the whole active-matrix panel from its RAM, whether or not anything changed. Panel power depends on the power mode and frame rate.
+  - What they save is CPU-awake time, and not much of it.
+    - At 40 MHz a full frame takes about 3 ms. A typical clock-digit window saves about 2 ms per update, roughly 0.03 mAh/day at one update a minute.
+    - At 10 MHz the saving is about 0.1 mAh/day.
+    - For scale, the panel in LPM costs about 24 mAh/day.
+  - The controller's Partial Display Mode (`PTLON`, 12h) is something else. It drives fewer gate lines and leaves the rest of the panel undriven, so it can't show a full-screen dashboard.
+  - **v1 decision:** push full frames, and skip the push when the frame CRC is unchanged. Windowed pushes stay an optimisation candidate in case M2 measurements show they matter (§9.4).
 - **Before deep sleep.** Drive CS high and RESET high, then call `gpio_hold_en()` on both and `gpio_deep_sleep_hold_en()`. Release the holds on wake.
 - **Test pattern (M1).** 1-px border, corner labels TL/TR/BL/BR, a 10-px grid, a checkerboard patch and a glyph sample. The owner confirms orientation and contrast, and the screenshot must match the panel.
 
@@ -223,14 +244,14 @@ Both strategies live behind `power_idle()` until the M2 measurements pick the de
 | `env.temp` | number, °C | SHTC3 | Stale after 15 min without a reading |
 | `env.hum` | number, % | SHTC3 | Same |
 | `bat.level` | battery (%, V, charging state) | gauge | Stale after 15 min |
-| `wx.now` | weather (code, temperature) | Weather data (see below) | Normal for 26 h after the last fetch, stale after that, missing past the forecast range |
+| `wx.now` | weather (code, temperature) | Weather data (see below) | Normal until the expected sync interval (§9.3) plus 2 h has passed since the last fetch; stale after that; missing past the forecast range |
 | `wx.today` | weather day (code, min, max, precipitation %) | forecast | Same |
 | `wx.hourly` | series: next 12 h (temperature, code) | forecast | Same |
 | `wx.daily` | series: 3 days | forecast | Same |
 | `sun.times` | pair (sunrise, sunset) | `astro`, computed locally | Always, given a valid date and location |
-| `mqtt.<key>` | number or text, with unit and label | MQTT mapping (§12.5) | Configured TTL; default twice the sync interval |
+| `mqtt.<key>` | number or text, with unit and label | MQTT mapping (§12.5) | Configured TTL; default twice the expected sync interval (§9.3) |
 
-`wx.now` uses the `current` block while it is at most 60 minutes old. After that it uses the hourly forecast entry for the current local hour. This keeps "now" meaningful between daily syncs in battery-saver mode.
+`wx.now` uses the `current` block while it is at most 60 minutes old. After that it uses the hourly forecast entry for the current local hour. This keeps "now" meaningful between syncs, even with a once-a-day schedule.
 
 ### 5.2 Layouts (v1)
 
@@ -332,9 +353,9 @@ Presets    ▸ Active preset · Auto-cycle on/off · Interval (10 s … 1 h)
 Alarms     ▸ Alarm 1–8: on/off · Time · Days · Sound · Volume        (M7)
 Radio      ▸ Play/stop · Station · Volume                            (M7)
 Wi-Fi      ▸ Config mode · Forget networks
-Sync       ▸ Sync now · Profile · Daily time
+Sync       ▸ Sync now · Schedule (times / interval / always / manual) · Times or interval
 Time       ▸ Set date and time · 24-hour clock · Time zone (short list)
-Display    ▸ Contrast
+Display    ▸ Contrast · Update interval (1–15 min)
 Sensors    ▸ Temperature offset · Humidity offset · Units (°C/°F)
 Info       ▸ Battery V/% · Firmware · IP/MAC · Last sync result · Uptime · Free heap
 System     ▸ Reboot · Factory reset (with confirmation)
@@ -377,6 +398,15 @@ System     ▸ Reboot · Factory reset (with confirmation)
 - SNTP runs during each sync (servers `cz.pool.ntp.org` and `pool.ntp.org`, 5 s timeout) and writes the result to the RTC.
 - Manual set: the date/time editor in the menu, or "set time from phone" in the web UI (sends the epoch and time zone).
 - RTC configuration: CLKOUT is disabled (`COF = 111`) to save current. The RTC alarm serves the wake scheduler (§9.2). User alarms are evaluated in firmware.
+- **Without a backup cell (the current state, D9).**
+  - The RTC keeps time as long as the board has power: while running on battery, and through deep and light sleep.
+  - It loses the time when PWR switches the board off, or when the battery is removed or runs flat with no USB attached.
+  - On the next boot the oscillator-stop flag is set. With Wi-Fi configured, the firmware syncs at once to fetch the time. Without Wi-Fi it shows "Set time" and waits for a manual set.
+  - Alarms stay suspended until the time is valid.
+- **Fitting a cell later.**
+  - Use a rechargeable ML1220 with leads and a 2-pin 1.0 mm plug for connector J7. Never use a CR1220: the board charges the cell whenever it is powered.
+  - Per the schematic, J7 pin 1 is + (RTC_BAT) and pin 2 is GND. Pre-wired cells don't all share one pinout, so check the polarity with a multimeter before plugging one in.
+  - No firmware change is needed.
 
 ## 8. Sensors and battery
 
@@ -420,7 +450,7 @@ System     ▸ Reboot · Factory reset (with confirmation)
 ### 9.2 Wake scheduler
 
 - `scheduler_next_wake(now, state)` returns the earliest of these:
-  - The next display update: next minute, or next second when seconds are shown, or the next cycle switch.
+  - The next display update: every `display.update_min` minutes (1–15, default 1, aligned to the minute), every second when a preset shows seconds, and the next cycle switch.
   - The next sensor sample.
   - The next user alarm, including snoozes.
   - The next sync.
@@ -431,13 +461,27 @@ System     ▸ Reboot · Factory reset (with confirmation)
   - On spring-forward, a time that doesn't exist fires at the first valid minute after it.
   - On fall-back, a repeated time fires once.
 
-### 9.3 Sync profiles and sequence
+### 9.3 Sync schedule and sequence
 
-| Profile | Behaviour |
-|---|---|
-| Battery saver (default) | Daily at 05:30 local, plus on demand |
-| Balanced | Every 60 min |
-| Always connected | Wi-Fi and MQTT stay up. State is published on change (at most every 30 s) and every 5 min. Commands and MQTT fields apply at once. Meant for USB power; not auto-detected |
+The sync schedule (`settings.sync`) is fully configurable from the menu and the web UI:
+
+| Mode | Behaviour | Parameters |
+|---|---|---|
+| `times` (default) | Sync at fixed local times | 1–8 times of day; default `05:30` |
+| `interval` | Sync every N minutes, aligned to the clock | N = 15–1440 |
+| `always` | Wi-Fi and MQTT stay up. Weather refreshes every 60 min. State is published on change (at most every 30 s) and every 5 min. Commands and MQTT fields apply at once. Meant for USB power; not auto-detected | — |
+| `manual` | Sync only on demand | — |
+
+- The UI offers shortcuts: *Battery saver* = `times ["05:30"]`, *Balanced* = `interval 60`, *Always connected* = `always`.
+- In every mode a sync can also be started on demand: from the menu, the web UI or `sync now`.
+- **Expected sync interval.** Data freshness and MQTT `expire_after` depend on it:
+
+  | Mode | Expected interval |
+  |---|---|
+  | `times` | Largest gap between consecutive times (24 h for a single time) |
+  | `interval` | N |
+  | `always` | 10 min |
+  | `manual` | None: data never expires and only shows its age |
 
 Sequence. The steps are independent and each has a timeout. The radio may be on for at most 45 s in total.
 
@@ -479,7 +523,7 @@ On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync
 | Once-a-minute wakes | ~0.17 mA | 1440 × ~0.2 s × ~50 mA ≈ 4 mAh/day |
 | Daily sync | ~0.01 mA | ~10 s × ~100 mA per day |
 
-Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU frequency, SHTC3 mode and interval, Wi-Fi fast connect and TX power, fast-boot options, and skipping unchanged frames (already designed in).
+Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU frequency, SHTC3 mode and interval, Wi-Fi fast connect and TX power, fast-boot options, windowed panel pushes (§4.2), and skipping unchanged frames (already designed in).
 
 ## 10. Networking and web configurator
 
@@ -524,7 +568,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 
 ### 10.4 Security
 
-- The configurator is reachable only in config mode, or on the LAN in the always-connected profile.
+- The configurator is reachable only in config mode, or on the LAN in `always` sync mode.
 - The AP uses WPA2.
 - Secrets are write-only and never logged.
 - The JSON content-type check blocks cross-site form posts.
@@ -587,7 +631,7 @@ State example:
 | `select` | Active preset. Options are the preset names; `command_topic` is `.../cmd/preset`; `qos: 1` |
 
 - All entities share one `device` block: identifiers `reflbo-XXXX`, model "ESP32-S3-RLCD-4.2", manufacturer "Waveshare", software version.
-- **Sleepy-device settings.** Sensors set `expire_after` to twice the sync interval plus 10 min, and there is no availability topic. Entities therefore keep their last value while the device sleeps.
+- **Sleepy-device settings.** Sensors set `expire_after` to twice the expected sync interval (§9.3) plus 10 min, and omit it in `manual` mode. There is no availability topic. Entities therefore keep their last value while the device sleeps.
 - Discovery is published at the first sync, and again whenever preset names, relevant settings or the firmware change. A hash of it is stored in NVS.
 
 ### 12.4 Commands (v1)
@@ -614,7 +658,7 @@ Mappings live in `/cfg/mqtt_fields.json` (edited in the web UI), up to 32:
 ```
 
 - **Field id.** `mqtt.<key>`. The payload is parsed as a number or text. `json_path` takes dotted keys (`a.b.c`); arrays are not supported in v1.
-- **Delivery.** Values arrive during a sync as retained messages, or live in the always-connected profile.
+- **Delivery.** Values arrive during a sync as retained messages, or live in `always` sync mode.
 - **Publisher requirement.** Publishers must retain their messages, or go through HA statestream, for a sleeping device to see them. Zigbee2MQTT needs `retain: true` per device; document this in the web UI.
 
 ### 12.6 Home Assistant side (example)
@@ -708,9 +752,9 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
   "time": { "tz_iana": "Europe/Prague", "tz_posix": "CET-1CEST,M3.5.0,M10.5.0/3",
             "clock_24h": true, "ntp": ["cz.pool.ntp.org", "pool.ntp.org"] },
   "units": { "temp": "C" },
-  "sync": { "profile": "battery_saver", "daily_at": "05:30", "interval_min": 60 },
+  "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60 },
   "sensors": { "interval_min": 5, "temp_offset_c": 0.0, "hum_offset_pct": 0.0 },
-  "display": { "contrast": "default" },
+  "display": { "contrast": "default", "update_min": 1 },
   "mqtt": { "enabled": false, "host": "", "port": 1883, "user": "",
             "discovery_prefix": "homeassistant", "discovery": true }
 }
@@ -810,8 +854,8 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M2 | `board` (I²C, buttons, gestures), `rtc`, `sensors` (SHTC3, battery), `timekeeping` (RTC → system time; manual set through the console), Classic clock screen, `power` with both idle strategies, `scheduler` minute wakes | Screen values match the console (3); owner measures deep vs light sleep with the USB meter; the idle strategy is chosen and recorded (4) |
 | M3 | `datastore`, `locale` (en), 4 layouts, widgets, presets JSON and defaults, cycling, status bar, menu v1, special screens | Owner reviews golden renders (2); presets switch with KEY/`btn` and survive a reboot (3) |
 | M4 | `netmgr` (STA/AP, captive portal, mDNS), config screen with QR, `webui` and REST API, preset editor with preview, set time from phone, OTA with rollback | Owner sets up Wi-Fi from a phone in AP mode (4); the preview matches a device screenshot (3); OTA upload and rollback work (3) |
-| M5 | SNTP → RTC, `weather`, `astro`, `sync` with profiles and backoff, weather widgets, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); sync energy and the daily average are measured and `docs/power.md` is updated (4) |
-| M6 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings, always-connected profile | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
+| M5 | SNTP → RTC, `weather`, `astro`, `sync` with the configurable schedule and backoff, weather widgets, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); sync energy and the daily average are measured and `docs/power.md` is updated (4) |
+| M6 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings, `always` sync mode | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
 | M7 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
 | M8 | microSD features agreed at the start of M8 | Per the agreed list |
 
@@ -840,5 +884,12 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | SHTC3 self-heating | Offset calibration; sample right after wake |
 | `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M7; pick another decoder if needed |
 | Open-Meteo's free tier is for non-commercial use | Low request rate (daily sync); the provider can be swapped |
-| RTC backup cell (D9) | Firmware handles the oscillator-stop flag; owner looks for the J7 connector |
+| No RTC backup cell (D9): the time is lost at every PWR-off | Sync at boot when Wi-Fi is configured, otherwise a "Set time" prompt; the owner may fit an ML1220 (§7) |
 | Licence (D8) | Owner confirms Apache-2.0 in the spec review |
+
+## 21. Revision history
+
+| Rev | Date | Changes |
+|---|---|---|
+| r1 | 2026-09-25 | First draft |
+| r2 | 2026-09-25 | Configurable sync schedule (`times` / `interval` / `always` / `manual`) and display update interval (D11, §9.2, §9.3); terms defined (§1.4); no RTC cell fitted, so a boot with invalid time syncs at once (§3.3, §7); ST7305 partial-update findings: RAM windows are supported but don't lower panel power, so v1 pushes full frames (§4.2) |

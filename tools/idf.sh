@@ -12,6 +12,26 @@
 # checked) cannot load pyexpat on macOS 26 (AGENTS.md §6).
 set -eo pipefail
 
+# Commands that talk to the board need an explicit port (-p or ESPPORT). Without one, idf.py
+# probes every serial port and uses the first ESP chip that answers, which can flash or erase
+# the wrong board (AGENTS.md quick rule 3).
+if [[ "${1:-}" != "exec" && -z "${ESPPORT:-}" ]]; then
+    needs_port=0
+    has_port=0
+    for arg in "$@"; do
+        case "$arg" in
+            -p | --port | -p?* | --port=*) has_port=1 ;;
+            flash | *-flash | erase* | read-otadata | monitor | efuse-* | secure-*) needs_port=1 ;;
+        esac
+    done
+    if ((needs_port && !has_port)); then
+        shopt -s nullglob
+        ports=(/dev/cu.usbmodem*)
+        echo "idf.sh: this command talks to the board; pass its port with -p (found: ${ports[*]:-none})" >&2
+        exit 2
+    fi
+fi
+
 IDF_PATH="${REFLBO_IDF_PATH:-$HOME/esp/esp-idf-v5.5.5}"
 if [[ ! -f "$IDF_PATH/export.sh" ]]; then
     echo "idf.sh: ESP-IDF not found at $IDF_PATH (see AGENTS.md §6)" >&2

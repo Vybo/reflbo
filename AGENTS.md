@@ -256,6 +256,7 @@ cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
 
 - `tools/idf.sh` refuses commands that talk to the board (`flash`, `erase-*`, `monitor`, …) unless the port is given with `-p` or `ESPPORT`. Otherwise idf.py would probe every serial port and use the first ESP chip that answers.
 - `devlog.py` picks the port itself when exactly one `/dev/cu.usbmodem*` exists; otherwise pass `-p`. Exit codes: 0 ok, 2 port problem, 3 console prompt never appeared, 4 `--until` not seen in time.
+- After adding a component directory, run `tools/idf.sh reconfigure` once. ESP-IDF finds components when CMake configures, so a plain `build` in an existing build directory silently leaves the new component out.
 - Do not run `idf.py monitor` from an agent shell; it needs an interactive TTY. Use `devlog.py`.
 - Do not run `idf.py erase-flash` or erase NVS without asking. Either wipes the owner's Wi-Fi credentials and presets.
 - If the port is missing, the board is probably in deep sleep. Press KEY. If it is still missing, ask the owner to enter download mode (hold BOOT while powering on).

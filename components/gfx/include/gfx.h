@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "gfx_font.h"
+
 /*
  * 1-bpp drawing (spec §4.3). Framebuffer: row-major, MSB = leftmost pixel, bit 1 = black,
  * which is the PBM P4 raster layout. Pure C with no ESP-IDF headers, so it builds on the host.
@@ -49,3 +51,23 @@ void gfx_fill_rect(gfx_fb_t *fb, gfx_rect_t r, gfx_color_t color);
 /* PBM P4 image of the framebuffer: header "P4\n<w> <h>\n" followed by the raster. */
 size_t gfx_pbm_size(const gfx_fb_t *fb);
 size_t gfx_pbm_encode(const gfx_fb_t *fb, uint8_t *out, size_t out_size); /* 0 if out_size is too small */
+
+
+typedef enum {
+    GFX_ALIGN_LEFT,
+    GFX_ALIGN_CENTER,
+    GFX_ALIGN_RIGHT,
+} gfx_align_t;
+
+/* Decodes one UTF-8 codepoint and advances *s. Returns 0 at the terminating NUL and U+FFFD for
+ * malformed input; never reads past the NUL. */
+uint32_t gfx_utf8_next(const char **s);
+
+bool gfx_font_has_glyph(const gfx_font_t *font, uint32_t codepoint);
+int gfx_text_width(const gfx_font_t *font, const char *utf8);
+/* Draws one line with its baseline at `baseline`; returns the pen x after the text.
+ * A codepoint missing from the font is drawn as a hollow box. */
+int gfx_text(gfx_fb_t *fb, const gfx_font_t *font, int x, int baseline, const char *utf8, gfx_color_t color);
+/* One line aligned in r, vertically centred on the font's line box, clipped to r. */
+void gfx_text_in_rect(gfx_fb_t *fb, const gfx_font_t *font, gfx_rect_t r, gfx_align_t align, const char *utf8,
+                      gfx_color_t color);

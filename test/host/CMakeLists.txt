@@ -39,6 +39,7 @@ endfunction()
 
 reflbo_host_test(test_util_crc32 util)
 reflbo_host_test(test_gfx gfx)
+reflbo_host_test(test_gfx_text gfx)
 
 # Python tool tests (stdlib unittest; pyserial is not needed).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

@@ -287,6 +287,7 @@ Use the cheapest level that proves the change. Any UI change needs at least leve
 - One `TAG` per module. `ESP_LOGI` for state changes, `ESP_LOGD` for detail. Never log secrets.
 - Every task gets an explicit stack size, priority and core. Document who owns each shared resource (I²C bus, SPI).
 - Compile-time defaults come from Kconfig (`REFLBO_*`); runtime settings in NVS or LittleFS override them.
+- List a component's sources explicitly in `SRCS`, not `SRC_DIRS`. ESP-IDF globs `SRC_DIRS` only when CMake configures, so a new file would be left out of the build without any error.
 - Dependencies come from the ESP Component Registry through `idf_component.yml`, with pinned versions. Commit `dependencies.lock`. Never edit `managed_components/`.
 - Change configuration through `sdkconfig.defaults`, then run `idf.py reconfigure` or delete `sdkconfig`. `sdkconfig` is generated and gitignored. Personal overrides, such as dev Wi-Fi credentials, go in the gitignored `sdkconfig.defaults.local`.
 - Never commit secrets: Wi-Fi passwords, MQTT credentials, tokens or API keys.

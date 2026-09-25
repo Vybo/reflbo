@@ -18,7 +18,8 @@ add_library(unity STATIC third_party/unity/unity.c)
 target_include_directories(unity PUBLIC third_party/unity)
 
 # Components under test: the same sources the firmware compiles.
-add_library(util STATIC ${REPO_ROOT}/components/util/util_crc32.c)
+file(GLOB UTIL_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/util/*.c)
+add_library(util STATIC ${UTIL_SOURCES})
 target_include_directories(util PUBLIC ${REPO_ROOT}/components/util/include)
 target_compile_options(util PRIVATE ${REFLBO_WARNINGS})
 
@@ -38,6 +39,7 @@ function(reflbo_host_test name)
 endfunction()
 
 reflbo_host_test(test_util_crc32 util)
+reflbo_host_test(test_util_base64 util)
 reflbo_host_test(test_gfx gfx)
 reflbo_host_test(test_gfx_text gfx)
 reflbo_host_test(test_gfx_fonts gfx)

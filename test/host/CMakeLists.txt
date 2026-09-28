@@ -141,6 +141,13 @@ add_executable(render_clock render_clock.c)
 target_compile_options(render_clock PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(render_clock PRIVATE ui)
 
+reflbo_host_test(test_ui_dashboard_golden ui)
+target_compile_definitions(test_ui_dashboard_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+
+add_executable(render_dashboard render_dashboard.c)
+target_compile_options(render_dashboard PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(render_dashboard PRIVATE ui)
+
 # Python tool tests (stdlib unittest; pyserial is not needed).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME tools_unittests

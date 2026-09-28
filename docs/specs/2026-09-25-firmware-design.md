@@ -50,6 +50,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D11 | The sync schedule and the display update interval are both configurable (§9.2, §9.3) | Owner adjustment in r2 |
 | D12 | Panel: the factory init sequence, with the LPM refresh rate set separately (default 1 Hz; `panel rate` changes it from 0.25 to 8 Hz) (§4.2) | Owner check at M1: factory contrast is visibly better than XiaoZhi's, and it looks the same at 1 Hz as at 8 Hz |
 | D13 | Landscape only | Portrait orientation declined at M1 |
+| D14 | Light sleep is entered explicitly by the app (`power_sleep_light()`); esp_pm automatic light sleep is not used. A tethered board stays awake (§3.4) | M2: the USB console drops in any light sleep, and automatic light sleep would need level-type interrupts on the button and RTC pins all the time |
 
 ### 1.3 Out of scope for v1
 
@@ -87,7 +88,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | Component | Responsibility | Depends on | Host build |
 |---|---|---|---|
 | `main` | Init order, wiring, app event loop | all | — |
-| `board` | Pin map, I²C bus, GPIO setup, buttons → gestures, wake-cause decoding | IDF | gesture logic |
+| `board` | Pin map, I²C bus, GPIO setup and ISR service, buttons → gestures, codec standby | IDF | gesture logic |
 | `st7305` | Panel init, frame push, LPM/HPM, deep-sleep retention | board | frame conversion |
 | `display` | Canonical framebuffer; pushes it to the panel when its CRC changes | gfx, st7305, util | — |
 | `gfx` | Framebuffer, primitives, text, fonts, bitmaps, QR, PBM/BMP encoders | — | ✓ |
@@ -98,9 +99,9 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `ui` | Layouts, widgets, presets, cycler, screens, menu, input handling | gfx, locale, datastore | ✓ |
 | `scheduler` | Next-wake computation for display, sensors, alarms, sync, timeouts | — | ✓ |
 | `sensors` | SHTC3, battery gauge | board | curve and filter logic |
-| `rtc` | PCF85063: time, oscillator-stop flag, alarm → INT | board | — |
+| `rtc` | PCF85063 (API prefix `pcf85063_`, because ESP-IDF owns `rtc_*`): time, oscillator-stop flag, alarm → INT | board | register codec |
 | `timekeeping` | System time from the RTC, time zone, SNTP, manual set | rtc | TZ logic |
-| `power` | Power states, idle strategy, wake sources, sleep entry | board, rtc, st7305 | — |
+| `power` | Power states, idle strategy, wake sources and wake cause, sleep entry, sleep statistics | board, rtc, st7305 | sleep policy |
 | `netmgr` | Wi-Fi STA/AP state machine, captive DNS, mDNS | IDF | — |
 | `webui` | HTTP server, REST API, embedded web assets | netmgr, storage, ui | — |
 | `weather` | Open-Meteo client and parser | netmgr | parser |
@@ -161,17 +162,17 @@ Initial task plan (finalised in the implementation plan): app (core 1), sync (co
 
 ### 3.4 Idle strategies (D3)
 
-Both strategies live behind `power_idle()` until the M2 measurements pick the default.
+Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) until the M2 measurements pick the default. The app calls one of them when it has nothing to do (D14).
 
-| | Deep sleep | Automatic light sleep (tickless) |
+| | Deep sleep | Light sleep (`power_sleep_light()`) |
 |---|---|---|
 | RAM state | Lost; RTC-RAM snapshot of at most 4 KB | Kept |
-| Wake latency | Full boot, about 100–300 ms (measure) | Under 1 ms |
+| Wake latency | Full boot; 168 ms of app time per wake (M2), plus ROM and bootloader | Under 1 ms; 88 ms of app time per wake (M2) |
 | ESP32-S3 floor current | µA range | Hundreds of µA (measure, PSRAM included) |
-| USB console | Disconnects | Stays up |
-| Extra complexity | Snapshot and fast-boot path | GPIO wake interrupts |
+| USB console | Disconnects: the USB PHY is off | Unusable while asleep: the pad is disabled; the Mac keeps the port |
+| Extra complexity | Snapshot, pin holds, a panel attach without reset | GPIO wake with level interrupts, restored to edges after wake |
 
-- **Tethered mode.** If `usb_serial_jtag_is_connected()` is true at boot, the device uses light sleep whatever the setting is. The console and flashing then keep working.
+- **Tethered mode.** While a USB host is connected (`usb_serial_jtag_is_connected()`, checked before every sleep), the board stays awake, because either sleep interrupts the console and flashing. After a cold boot or a button wake it stays awake 2 s so a PC can find it. `sleep test <deep|light> <n>` forces sleep cycles while tethered, for testing.
 - **Decision rule at M2.** Choose deep sleep if the measured average current is clearly lower (guideline: at least 20 % lower at the one-minute cadence). Otherwise choose light sleep.
 
 ## 4. Display and rendering
@@ -727,7 +728,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 | Namespace | Contents |
 |---|---|
-| `sys` | Device id, AP password, schema version |
+| `sys` | Device id, AP password, schema version, idle strategy override (`idle`) |
 | `wifi` | Saved networks (SSIDs and passwords), fast-connect cache |
 | `secrets` | MQTT password; future tokens |
 | `ctr` | Counters: boots, sync statistics |
@@ -792,7 +793,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 | `preset list` · `preset set <id>` | Presets |
 | `wifi status` · `wifi scan` | Wi-Fi |
 | `sync now` | Run a sync |
-| `sleep stats` · `power idle <deep\|light>` | Power debugging |
+| `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging; `sleep test` forces sleep cycles while tethered |
 | `audio tone <Hz> <ms>` | Audio check (M7) |
 
 Screenshot framing:
@@ -902,3 +903,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r2 | 2026-09-25 | Configurable sync schedule (`times` / `interval` / `always` / `manual`) and display update interval (D11, §9.2, §9.3); terms defined (§1.4); no RTC cell fitted, so a boot with invalid time syncs at once (§3.3, §7); ST7305 partial-update findings: RAM windows are supported but don't lower panel power, so v1 pushes full frames (§4.2) |
 | r3 | 2026-09-25 | Approved by the owner; licence confirmed (D8); Python toolchain risk recorded (§20) |
 | r4 | 2026-09-25 | M1 panel check: factory init sequence with a separate LPM rate, default 1 Hz, configurable at runtime (D12, §4.2); a 120 ms wait after a panel reset (datasheet §12.1.4); HPM/LPM switching delays from datasheet §7.11; `panel rate` and `panel fps` (§15); landscape only (D13); `display` and `util` components (§3.1) |
+| r5 | 2026-09-28 | M2: a tethered board stays awake and light sleep is entered explicitly (D14, §3.4), with measured wake costs; board, rtc and power rows updated (§3.1); NVS `sys/idle` (§14.2); `sleep test` (§15) |

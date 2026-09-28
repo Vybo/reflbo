@@ -14,19 +14,25 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "power.h"
 #include "pcf85063.h"
 #include "scheduler.h"
 #include "sdkconfig.h"
 #include "sensors.h"
 #include "timekeeping.h"
 #include "ui_clock.h"
+#include "util_snapshot.h"
 #include "util_ticks.h"
 
-#define APP_STACK         8192
+#define APP_STACK         8192 /* internal RAM: deep-sleep entry requires it */
 #define APP_PRIORITY      5
 #define APP_CORE          1
 #define QUEUE_DEPTH       16
 #define BACKUP_S          5    /* wake anyway this long after a missed RTC alarm (spec §9.2) */
+#define GRACE_MS          2000 /* stay awake after boot or a button so a PC can find the board */
+#define TETHER_RECHECK_MS 1000
+#define SNAP_MAGIC        0x72666c62u /* "rflb" */
+#define SNAP_VERSION      1
 
 #if CONFIG_REFLBO_PANEL_INIT_XIAOZHI
 #define PANEL_VARIANT ST7305_VARIANT_XIAOZHI
@@ -57,6 +63,14 @@ typedef struct {
     };
 } app_event_t;
 
+/* Kept in RTC RAM through deep sleep; invalid after any other reset (spec §3.3). */
+typedef struct {
+    util_snapshot_hdr_t hdr;
+    sensors_state_t sensors;
+    display_state_t display;
+} app_snapshot_t;
+
+static RTC_DATA_ATTR app_snapshot_t s_snap;
 static QueueHandle_t s_queue;
 static time_t s_next_wake;
 
@@ -182,6 +196,7 @@ static void on_tick(bool force)
 
 static void handle_button(board_button_t button, gesture_t gesture)
 {
+    power_hold_awake_ms(GRACE_MS);
     if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_SHORT) {
         sample_sensors(time(NULL)); /* spec §5.6: refresh sensors */
         render();
@@ -215,8 +230,41 @@ static void handle_event(const app_event_t *ev)
     case EV_CALL:
         ev->call.fn(ev->call.arg);
         xSemaphoreGive(ev->call.done);
+        power_hold_awake_ms(GRACE_MS);
         break;
     }
+}
+
+static void handle_wake(power_wake_t wake)
+{
+    switch (wake) {
+    case POWER_WAKE_RTC:
+        on_tick(false);
+        break;
+    case POWER_WAKE_TIMER:
+        ESP_LOGW(TAG, "RTC alarm missed; backup wake");
+        on_tick(false);
+        break;
+    case POWER_WAKE_KEY:
+    case POWER_WAKE_BOOT:
+        board_buttons_resync(); /* edges during sleep raised no interrupt */
+        power_hold_awake_ms(GRACE_MS);
+        break;
+    default:
+        break;
+    }
+}
+
+static void enter_deep_sleep(void)
+{
+    sensors_export(&s_snap.sensors);
+    display_export(&s_snap.display);
+    util_snapshot_seal(&s_snap, sizeof(s_snap), SNAP_MAGIC, SNAP_VERSION);
+    esp_err_t err = display_prepare_deep_sleep();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "panel pins: %s", esp_err_to_name(err));
+    }
+    power_sleep_deep(s_next_wake + BACKUP_S);
 }
 
 static esp_err_t start_rtc_int(void)
@@ -233,23 +281,44 @@ static esp_err_t start_rtc_int(void)
 
 static esp_err_t boot(void)
 {
-    ESP_RETURN_ON_ERROR(board_init(true), TAG, "board");
+    ESP_RETURN_ON_ERROR(power_init(), TAG, "power");
+    power_wake_t wake = power_boot_wake();
+    bool warm = wake != POWER_WAKE_COLD && util_snapshot_valid(&s_snap, sizeof(s_snap), SNAP_MAGIC, SNAP_VERSION);
+
+    ESP_RETURN_ON_ERROR(board_init(wake == POWER_WAKE_COLD), TAG, "board");
     ESP_RETURN_ON_ERROR(pcf85063_init(board_i2c()), TAG, "RTC");
     ESP_RETURN_ON_ERROR(timekeeping_init(CONFIG_REFLBO_TZ), TAG, "time zone");
     esp_err_t err = timekeeping_load_from_rtc();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RTC read: %s", esp_err_to_name(err));
     }
-    ESP_RETURN_ON_ERROR(sensors_init(board_i2c(), true), TAG, "sensors");
-    ESP_RETURN_ON_ERROR(display_init(PANEL_VARIANT), TAG, "display");
+    ESP_RETURN_ON_ERROR(sensors_init(board_i2c(), !warm), TAG, "sensors");
+    if (warm) {
+        sensors_import(&s_snap.sensors);
+        ESP_RETURN_ON_ERROR(display_init_warm(&s_snap.display), TAG, "display");
+    } else if (wake != POWER_WAKE_COLD) {
+        /* Woke from deep sleep without a valid snapshot: the panel still runs, don't reset it. */
+        display_state_t fallback = { .variant = PANEL_VARIANT, .mode = ST7305_MODE_LPM, .lpm_rate = ST7305_LPM_1HZ };
+        ESP_RETURN_ON_ERROR(display_init_warm(&fallback), TAG, "display");
+    } else {
+        ESP_RETURN_ON_ERROR(display_init(PANEL_VARIANT), TAG, "display");
+    }
     ESP_RETURN_ON_ERROR(board_buttons_start(on_button, k_dashboard_buttons), TAG, "buttons");
     ESP_RETURN_ON_ERROR(start_rtc_int(), TAG, "RTC INT");
-    on_tick(true);
-    ESP_LOGI(TAG, "reflbo ready");
+
+    if (wake == POWER_WAKE_KEY) {
+        board_buttons_woke(BOARD_BUTTON_KEY);
+    } else if (wake == POWER_WAKE_BOOT) {
+        board_buttons_woke(BOARD_BUTTON_BOOT);
+    }
+    if (wake == POWER_WAKE_COLD || wake == POWER_WAKE_KEY || wake == POWER_WAKE_BOOT) {
+        power_hold_awake_ms(GRACE_MS);
+    }
+    on_tick(!warm);
+    ESP_LOGI(TAG, "reflbo ready (%s wake%s)", power_wake_name(wake), warm ? ", warm" : "");
     return ESP_OK;
 }
 
-/* Awake-only loop: sleep arrives with the power component (M2 Task 13). */
 static void app_task(void *arg)
 {
     (void)arg;
@@ -259,8 +328,18 @@ static void app_task(void *arg)
     }
     for (;;) {
         check_clock_jump();
+        bool pending = uxQueueMessagesWaiting(s_queue) > 0 || board_buttons_busy();
+        power_plan_t plan = err == ESP_OK ? power_plan(pending) : POWER_PLAN_AWAKE;
+        if (plan == POWER_PLAN_LIGHT) {
+            handle_wake(power_sleep_light(s_next_wake + BACKUP_S));
+            continue;
+        }
+        if (plan == POWER_PLAN_DEEP) {
+            enter_deep_sleep();
+        }
         int64_t backup_ms = ((int64_t)(s_next_wake + BACKUP_S) - time(NULL)) * 1000;
-        TickType_t wait = backup_ms <= 0 ? 0 : util_ticks_at_least((uint32_t)backup_ms, portTICK_PERIOD_MS);
+        int64_t wait_ms = backup_ms < TETHER_RECHECK_MS ? backup_ms : TETHER_RECHECK_MS;
+        TickType_t wait = wait_ms <= 0 ? 0 : util_ticks_at_least((uint32_t)wait_ms, portTICK_PERIOD_MS);
         app_event_t ev;
         if (xQueueReceive(s_queue, &ev, wait) == pdTRUE) {
             handle_event(&ev);

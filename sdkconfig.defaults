@@ -25,3 +25,7 @@ CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 # `tasks` console command
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+
+# Faster deep-sleep wakes: skip image validation, quiet bootloader (spec §9.4 optimisation candidates)
+CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

@@ -38,6 +38,11 @@ typedef enum {
 
 /* Cold start: SPI bus, hardware reset, init sequence. The panel RAM is undefined until the first push. */
 esp_err_t st7305_init(st7305_variant_t variant);
+/* After a deep-sleep wake: attaches the SPI bus without resetting the panel, which kept its
+ * image, mode and rate (AGENTS.md gotcha 4). Releases the pin holds set before sleeping. */
+esp_err_t st7305_init_warm(st7305_variant_t variant, st7305_mode_t mode, st7305_lpm_rate_t rate);
+/* Holds CS and RESET through deep sleep. Call last, just before sleeping. */
+esp_err_t st7305_prepare_deep_sleep(void);
 /* Resets the panel and runs another init sequence (the SPI clock follows the variant). */
 esp_err_t st7305_reinit(st7305_variant_t variant);
 /* Converts and sends a canonical frame (spec §4.1); blocks until the DMA transfer has finished. */

@@ -50,4 +50,15 @@ menu "reflbo"
         range 1 30
         default 5
 
+    choice REFLBO_IDLE_DEFAULT
+        prompt "Idle strategy until the owner picks one (D3)"
+        default REFLBO_IDLE_DEFAULT_LIGHT
+        help
+            `power idle deep|light` overrides this at runtime and keeps the choice in NVS.
+        config REFLBO_IDLE_DEFAULT_LIGHT
+            bool "Light sleep"
+        config REFLBO_IDLE_DEFAULT_DEEP
+            bool "Deep sleep"
+    endchoice
+
 endmenu

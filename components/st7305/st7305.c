@@ -135,7 +135,9 @@ static esp_err_t create_io(uint32_t pclk_hz)
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
     };
-    return esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI_HOST_ID, &cfg, &s_io);
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI_HOST_ID, &cfg, &s_io), TAG, "IO");
+    /* Light sleep would float the pad and could select the panel; keep CS driven (idles high). */
+    return gpio_sleep_sel_dis(PIN_CS);
 }
 
 static void hardware_reset(void)
@@ -171,14 +173,12 @@ static esp_err_t write_frame_rate(void)
     return esp_lcd_panel_io_tx_param(s_io, 0xB2, &frctrl, 1);
 }
 
-esp_err_t st7305_init(st7305_variant_t variant)
+static esp_err_t bus_init(void)
 {
-    ESP_RETURN_ON_FALSE(!s_bus_ready, ESP_ERR_INVALID_STATE, TAG, "already initialised");
     s_done = xSemaphoreCreateBinary();
     ESP_RETURN_ON_FALSE(s_done != NULL, ESP_ERR_NO_MEM, TAG, "semaphore");
     s_panel = heap_caps_malloc(ST7305_FRAME_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     ESP_RETURN_ON_FALSE(s_panel != NULL, ESP_ERR_NO_MEM, TAG, "panel buffer");
-
     spi_bus_config_t bus = {
         .mosi_io_num = PIN_MOSI,
         .miso_io_num = -1,
@@ -187,15 +187,59 @@ esp_err_t st7305_init(st7305_variant_t variant)
         .quadhd_io_num = -1,
         .max_transfer_sz = ST7305_FRAME_BYTES,
     };
-    ESP_RETURN_ON_ERROR(spi_bus_initialize(SPI_HOST_ID, &bus, SPI_DMA_CH_AUTO), TAG, "SPI bus");
+    return spi_bus_initialize(SPI_HOST_ID, &bus, SPI_DMA_CH_AUTO);
+}
+
+static esp_err_t reset_pin_init(void)
+{
     gpio_config_t rst = {
         .pin_bit_mask = 1ULL << PIN_RST,
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
     ESP_RETURN_ON_ERROR(gpio_config(&rst), TAG, "reset pin");
+    return gpio_sleep_sel_dis(PIN_RST); /* RESET must stay high in light sleep, or the panel resets */
+}
+
+esp_err_t st7305_init(st7305_variant_t variant)
+{
+    ESP_RETURN_ON_FALSE(!s_bus_ready, ESP_ERR_INVALID_STATE, TAG, "already initialised");
+    ESP_RETURN_ON_ERROR(bus_init(), TAG, "SPI bus");
+    ESP_RETURN_ON_ERROR(reset_pin_init(), TAG, "reset pin");
     s_bus_ready = true;
     return st7305_reinit(variant);
+}
+
+esp_err_t st7305_init_warm(st7305_variant_t variant, st7305_mode_t mode, st7305_lpm_rate_t rate)
+{
+    ESP_RETURN_ON_FALSE(!s_bus_ready, ESP_ERR_INVALID_STATE, TAG, "already initialised");
+    ESP_RETURN_ON_ERROR(bus_init(), TAG, "SPI bus");
+    /* The pads are still held from before deep sleep. Drive the same levels, then release them. */
+    gpio_set_level(PIN_RST, 1);
+    ESP_RETURN_ON_ERROR(reset_pin_init(), TAG, "reset pin");
+    ESP_RETURN_ON_ERROR(gpio_hold_dis(PIN_RST), TAG, "release RESET");
+    s_bus_ready = true;
+    const bool xiaozhi = variant == ST7305_VARIANT_XIAOZHI;
+    ESP_RETURN_ON_ERROR(create_io(xiaozhi ? 40 * 1000 * 1000 : 10 * 1000 * 1000), TAG, "panel IO");
+    ESP_RETURN_ON_ERROR(gpio_hold_dis(PIN_CS), TAG, "release CS");
+    s_variant = variant;
+    s_mode = mode;
+    s_lpm_rate = rate;
+    ESP_LOGI(TAG, "attached without reset (%s, %s, LPM %s Hz)", xiaozhi ? "XiaoZhi" : "factory",
+             mode == ST7305_MODE_LPM ? "LPM" : "HPM", st7305_lpm_rate_name(rate));
+    return ESP_OK;
+}
+
+esp_err_t st7305_prepare_deep_sleep(void)
+{
+    ESP_RETURN_ON_FALSE(s_io != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    /* CS (idle high) and RESET are digital pads: they lose their level in deep sleep unless held
+     * (AGENTS.md gotcha 4). The hold takes effect at once, so this is the last panel access. */
+    gpio_set_level(PIN_RST, 1);
+    ESP_RETURN_ON_ERROR(gpio_hold_en(PIN_CS), TAG, "hold CS");
+    ESP_RETURN_ON_ERROR(gpio_hold_en(PIN_RST), TAG, "hold RESET");
+    gpio_deep_sleep_hold_en();
+    return ESP_OK;
 }
 
 esp_err_t st7305_reinit(st7305_variant_t variant)
@@ -204,6 +248,7 @@ esp_err_t st7305_reinit(st7305_variant_t variant)
     const bool xiaozhi = variant == ST7305_VARIANT_XIAOZHI;
     ESP_RETURN_ON_ERROR(create_io(xiaozhi ? 40 * 1000 * 1000 : 10 * 1000 * 1000), TAG, "panel IO");
     hardware_reset();
+    s_mode = ST7305_MODE_HPM; /* the panel is in HPM after a reset, even if the init below fails */
     if (xiaozhi) {
         ESP_RETURN_ON_ERROR(run_init(s_init_xiaozhi, sizeof(s_init_xiaozhi) / sizeof(s_init_xiaozhi[0])), TAG,
                             "XiaoZhi init");
@@ -213,7 +258,6 @@ esp_err_t st7305_reinit(st7305_variant_t variant)
     }
     ESP_RETURN_ON_ERROR(write_frame_rate(), TAG, "frame rate");
     s_variant = variant;
-    s_mode = ST7305_MODE_HPM;
     ESP_LOGI(TAG, "%s init sequence, SPI %d MHz, LPM %s Hz", xiaozhi ? "XiaoZhi" : "factory", xiaozhi ? 40 : 10,
              st7305_lpm_rate_name(s_lpm_rate));
     return ESP_OK;

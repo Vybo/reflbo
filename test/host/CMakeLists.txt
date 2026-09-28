@@ -91,7 +91,8 @@ target_compile_options(cjson PRIVATE -Wno-deprecated-declarations) # its sprintf
 target_link_libraries(cjson PUBLIC m)
 
 # storage: the settings codec and the config-file logic build on the host; the mount does not.
-add_library(storage_logic STATIC ${REPO_ROOT}/components/storage/settings.c)
+add_library(storage_logic STATIC
+            ${REPO_ROOT}/components/storage/settings.c ${REPO_ROOT}/components/storage/storage_file.c)
 target_include_directories(storage_logic PUBLIC ${REPO_ROOT}/components/storage/include)
 target_compile_options(storage_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(storage_logic PRIVATE cjson m)
@@ -133,6 +134,8 @@ reflbo_host_test(test_datastore datastore)
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
 reflbo_host_test(test_settings storage_logic)
+reflbo_host_test(test_storage_file storage_logic)
+target_compile_definitions(test_storage_file PRIVATE TEST_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/storage_tmp")
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

@@ -40,7 +40,11 @@ typedef struct {
 esp_err_t sensors_init(i2c_master_bus_handle_t bus, bool cold);
 esp_err_t sensors_sample_env(time_t now);
 esp_err_t sensors_sample_battery(time_t now);
+/* Calibration offsets added to every reading (settings sensors.temp_offset_c, hum_offset_pct). */
+void sensors_set_offsets(int temp_c100, int hum_pct100);
 sensors_env_t sensors_env(void);
 sensors_battery_t sensors_battery(time_t now);
+/* 0.1 days of battery left, or -1 (battery_gauge_days_left10). */
+int sensors_battery_days_left10(time_t now);
 void sensors_export(sensors_state_t *out);
 void sensors_import(const sensors_state_t *in);

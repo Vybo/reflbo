@@ -31,6 +31,8 @@ static i2c_master_dev_handle_t s_shtc3;
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_cali;
 static sensors_state_t s_state;
+static int s_temp_offset_c100 = CONFIG_REFLBO_TEMP_OFFSET_C10 * 10;
+static int s_hum_offset_pct100 = CONFIG_REFLBO_HUM_OFFSET_PCT10 * 10;
 
 static esp_err_t shtc3_command(uint16_t cmd)
 {
@@ -125,8 +127,8 @@ esp_err_t sensors_sample_env(time_t now)
     ESP_RETURN_ON_ERROR(err, TAG, "SHTC3");
     s_state.env = (sensors_env_t){
         .valid = true,
-        .temp_c100 = t + CONFIG_REFLBO_TEMP_OFFSET_C10 * 10,
-        .hum_pct100 = h + CONFIG_REFLBO_HUM_OFFSET_PCT10 * 10,
+        .temp_c100 = t + s_temp_offset_c100,
+        .hum_pct100 = h + s_hum_offset_pct100,
         .time = now,
     };
     return ESP_OK;
@@ -153,6 +155,17 @@ esp_err_t sensors_sample_battery(time_t now)
     s_state.battery_time = now;
     battery_gauge_add(&s_state.gauge, (uint32_t)now, mv);
     return ESP_OK;
+}
+
+void sensors_set_offsets(int temp_c100, int hum_pct100)
+{
+    s_temp_offset_c100 = temp_c100;
+    s_hum_offset_pct100 = hum_pct100;
+}
+
+int sensors_battery_days_left10(time_t now)
+{
+    return battery_gauge_days_left10(&s_state.gauge, (uint32_t)now);
 }
 
 sensors_env_t sensors_env(void)

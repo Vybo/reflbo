@@ -8,6 +8,8 @@
 #define CHARGE_RISE_MV    30
 #define FULL_MV           4150
 #define STEADY_MV         10
+#define LEVEL_SPACING_S   3600  /* one days-left point per hour */
+#define DAYS_MIN_SPAN_S   21600 /* 6 h of discharge before estimating */
 
 /* Right after a point is added, the oldest one must already be a full window old, at any sample
  * interval, or the state falls back to UNKNOWN until the next point arrives. */
@@ -37,6 +39,21 @@ int battery_percent_from_mv(int mv)
         }
     }
     return 100;
+}
+
+int battery_percent10_from_mv(int mv)
+{
+    if (mv <= k_ocv[0].mv) {
+        return 0;
+    }
+    for (unsigned i = 1; i < OCV_POINTS; i++) {
+        if (mv <= k_ocv[i].mv) {
+            int dv = k_ocv[i].mv - k_ocv[i - 1].mv;
+            int dp = k_ocv[i].pct - k_ocv[i - 1].pct;
+            return k_ocv[i - 1].pct * 10 + ((mv - k_ocv[i - 1].mv) * dp * 10 + dv / 2) / dv;
+        }
+    }
+    return 1000;
 }
 
 void battery_gauge_init(battery_gauge_t *g)
@@ -103,6 +120,38 @@ void battery_gauge_add(battery_gauge_t *g, uint32_t now_s, int mv)
     if (first || state == BATTERY_CHARGING || state == BATTERY_FULL || pct < g->level) {
         g->level = (uint8_t)pct;
     }
+
+    if (state == BATTERY_CHARGING || state == BATTERY_FULL) {
+        g->level_count = 0; /* the discharge rate starts over once the charger lets go */
+        return;
+    }
+    const battery_level_point_t *last =
+        g->level_count ? &g->levels[(g->level_head + BATTERY_LEVEL_HISTORY - 1) % BATTERY_LEVEL_HISTORY] : NULL;
+    if (last == NULL || now_s - last->time_s >= LEVEL_SPACING_S) {
+        g->levels[g->level_head] =
+            (battery_level_point_t){ .time_s = now_s, .pct10 = (uint16_t)battery_percent10_from_mv(battery_gauge_mv(g)) };
+        g->level_head = (uint8_t)((g->level_head + 1) % BATTERY_LEVEL_HISTORY);
+        if (g->level_count < BATTERY_LEVEL_HISTORY) {
+            g->level_count++;
+        }
+    }
+}
+
+int battery_gauge_days_left10(const battery_gauge_t *g, uint32_t now_s)
+{
+    if (g->level_count == 0 || battery_gauge_state(g, now_s) != BATTERY_DISCHARGING) {
+        return -1;
+    }
+    const battery_level_point_t *oldest =
+        &g->levels[(g->level_head + BATTERY_LEVEL_HISTORY - g->level_count) % BATTERY_LEVEL_HISTORY];
+    uint32_t span = now_s - oldest->time_s;
+    int now_pct10 = battery_percent10_from_mv(battery_gauge_mv(g));
+    int drop = oldest->pct10 - now_pct10;
+    if (span < DAYS_MIN_SPAN_S || drop <= 0) {
+        return -1;
+    }
+    int64_t days10 = (int64_t)now_pct10 * span * 10 / ((int64_t)drop * 86400);
+    return days10 > 9999 ? 9999 : (int)days10;
 }
 
 int battery_gauge_mv(const battery_gauge_t *g)

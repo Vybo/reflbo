@@ -141,6 +141,102 @@ static void test_pbm_has_header_and_raster(void)
     TEST_ASSERT_EQUAL_INT(0, (int)gfx_pbm_encode(&s_fb, out, 15));
 }
 
+/* A clip assigned by hand may reach past the buffer; pixels there must still be dropped. */
+static void test_pixel_ignores_a_clip_that_reaches_outside_the_buffer(void)
+{
+    s_fb.clip = (gfx_rect_t){ -8, -8, 64, 64 };
+    gfx_pixel(&s_fb, -1, 0, GFX_BLACK);
+    gfx_pixel(&s_fb, 16, 3, GFX_BLACK);
+    gfx_pixel(&s_fb, 0, 4, GFX_BLACK);
+    assert_guards_intact();
+    TEST_ASSERT_EQUAL_INT(0, count_black());
+}
+
+/* The review found that lines stepped their whole unclipped length and 2*err could overflow. */
+static void test_huge_line_draws_only_its_visible_part(void)
+{
+    gfx_line(&s_fb, -2000000000, 2, 2000000000, 2, GFX_BLACK);
+    TEST_ASSERT_EQUAL_INT(16, count_black());
+    for (int x = 0; x < 16; x++) {
+        TEST_ASSERT_TRUE(gfx_get_pixel(&s_fb, x, 2));
+    }
+    gfx_line(&s_fb, -50, -50, -10, -40, GFX_BLACK);
+    TEST_ASSERT_EQUAL_INT(16, count_black());
+    assert_guards_intact();
+}
+
+static uint8_t s_big[16 * 16 / 8];
+static gfx_fb_t s_big_fb;
+
+static int count_big(void)
+{
+    int n = 0;
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 16; x++) {
+            n += gfx_get_pixel(&s_big_fb, x, y) ? 1 : 0;
+        }
+    }
+    return n;
+}
+
+static void big_setup(void)
+{
+    memset(s_big, 0, sizeof(s_big));
+    gfx_fb_init(&s_big_fb, s_big, 16, 16);
+}
+
+static void test_circle_is_symmetric_and_draws_each_pixel_once(void)
+{
+    big_setup();
+    gfx_circle(&s_big_fb, 8, 8, 5, GFX_INVERT);
+    int n = count_big();
+    TEST_ASSERT_TRUE(gfx_get_pixel(&s_big_fb, 13, 8));
+    TEST_ASSERT_TRUE(gfx_get_pixel(&s_big_fb, 3, 8));
+    TEST_ASSERT_TRUE(gfx_get_pixel(&s_big_fb, 8, 3));
+    TEST_ASSERT_TRUE(gfx_get_pixel(&s_big_fb, 8, 13));
+    TEST_ASSERT_FALSE(gfx_get_pixel(&s_big_fb, 8, 8));
+    for (int y = 1; y < 16; y++) {
+        for (int x = 1; x < 16; x++) { /* mirror images around (8, 8) */
+            TEST_ASSERT_EQUAL(gfx_get_pixel(&s_big_fb, x, y), gfx_get_pixel(&s_big_fb, 16 - x, y));
+            TEST_ASSERT_EQUAL(gfx_get_pixel(&s_big_fb, x, y), gfx_get_pixel(&s_big_fb, y, x));
+        }
+    }
+    gfx_circle(&s_big_fb, 8, 8, 5, GFX_INVERT); /* a pixel drawn twice would survive the second pass */
+    TEST_ASSERT_EQUAL_INT(0, count_big());
+    TEST_ASSERT_TRUE(n > 20);
+}
+
+static void test_filled_circle_covers_its_outline(void)
+{
+    big_setup();
+    gfx_circle(&s_big_fb, 8, 8, 5, GFX_BLACK);
+    int outline = count_big();
+    big_setup();
+    gfx_fill_circle(&s_big_fb, 8, 8, 5, GFX_BLACK);
+    int filled = count_big();
+    TEST_ASSERT_INT_WITHIN(8, 95, filled); /* pi * 5.5^2: the fill reaches the outline's rim */
+    gfx_circle(&s_big_fb, 8, 8, 5, GFX_INVERT);
+    TEST_ASSERT_EQUAL_INT(filled - outline, count_big()); /* every outline pixel was inside the fill */
+    TEST_ASSERT_TRUE(gfx_get_pixel(&s_big_fb, 8, 8));
+    TEST_ASSERT_FALSE(gfx_get_pixel(&s_big_fb, 14, 8));
+}
+
+static void test_bitmap_draws_ink_only_and_clips(void)
+{
+    static const uint8_t bits[] = { 0xA0, 0x40, 0xA0 }; /* #.# / .#. / #.# */
+    const gfx_bitmap_t x_mark = { bits, 3, 3 };
+    gfx_fill_rect(&s_fb, (gfx_rect_t){ 0, 0, 16, 4 }, GFX_BLACK);
+    gfx_bitmap(&s_fb, 1, 0, &x_mark, GFX_WHITE);
+    TEST_ASSERT_FALSE(gfx_get_pixel(&s_fb, 1, 0));
+    TEST_ASSERT_TRUE(gfx_get_pixel(&s_fb, 2, 0)); /* not ink: left alone */
+    TEST_ASSERT_FALSE(gfx_get_pixel(&s_fb, 2, 1));
+    TEST_ASSERT_EQUAL_INT(64 - 5, count_black());
+    gfx_bitmap(&s_fb, 14, 2, &x_mark, GFX_WHITE); /* runs off the right and bottom edges */
+    TEST_ASSERT_FALSE(gfx_get_pixel(&s_fb, 14, 2));
+    assert_guards_intact();
+    gfx_bitmap(&s_fb, 0, 0, NULL, GFX_WHITE);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -153,5 +249,10 @@ int main(void)
     RUN_TEST(test_rect_outline_draws_each_pixel_once);
     RUN_TEST(test_line_includes_both_endpoints_in_either_direction);
     RUN_TEST(test_pbm_has_header_and_raster);
+    RUN_TEST(test_pixel_ignores_a_clip_that_reaches_outside_the_buffer);
+    RUN_TEST(test_huge_line_draws_only_its_visible_part);
+    RUN_TEST(test_circle_is_symmetric_and_draws_each_pixel_once);
+    RUN_TEST(test_filled_circle_covers_its_outline);
+    RUN_TEST(test_bitmap_draws_ink_only_and_clips);
     return UNITY_END();
 }

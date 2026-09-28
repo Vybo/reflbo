@@ -1,5 +1,7 @@
 #include "gfx.h"
 
+#include <string.h>
+
 uint32_t gfx_utf8_next(const char **s)
 {
     const uint8_t *p = (const uint8_t *)*s;
@@ -73,8 +75,16 @@ bool gfx_font_has_glyph(const gfx_font_t *font, uint32_t codepoint)
     return find_glyph(font, codepoint) != NULL;
 }
 
+const gfx_glyph_t *gfx_font_glyph(const gfx_font_t *font, uint32_t codepoint)
+{
+    return find_glyph(font, codepoint);
+}
+
 int gfx_text_width(const gfx_font_t *font, const char *utf8)
 {
+    if (utf8 == NULL) {
+        return 0;
+    }
     int width = 0;
     uint32_t cp;
     while ((cp = gfx_utf8_next(&utf8)) != 0) {
@@ -104,8 +114,21 @@ static void draw_glyph(gfx_fb_t *fb, const gfx_font_t *font, const gfx_glyph_t *
     }
 }
 
+/* The fallback box, drawn with int coordinates: a gfx_rect_t would wrap at x > 32767. */
+static void draw_missing_box(gfx_fb_t *fb, int x, int baseline, int w, int h, gfx_color_t color)
+{
+    int top = baseline - h;
+    gfx_hline(fb, x, top, w, color);
+    gfx_hline(fb, x, baseline - 1, w, color);
+    gfx_vline(fb, x, top + 1, h - 2, color);
+    gfx_vline(fb, x + w - 1, top + 1, h - 2, color);
+}
+
 int gfx_text(gfx_fb_t *fb, const gfx_font_t *font, int x, int baseline, const char *utf8, gfx_color_t color)
 {
+    if (utf8 == NULL) {
+        return x;
+    }
     uint32_t cp;
     while ((cp = gfx_utf8_next(&utf8)) != 0) {
         const gfx_glyph_t *g = find_glyph(font, cp);
@@ -115,7 +138,7 @@ int gfx_text(gfx_fb_t *fb, const gfx_font_t *font, int x, int baseline, const ch
         } else {
             int w, h;
             missing_box(font, &w, &h);
-            gfx_rect(fb, (gfx_rect_t){ (int16_t)(x + 1), (int16_t)(baseline - h), (int16_t)w, (int16_t)h }, color);
+            draw_missing_box(fb, x + 1, baseline, w, h, color);
             x += w + 2;
         }
     }
@@ -125,6 +148,9 @@ int gfx_text(gfx_fb_t *fb, const gfx_font_t *font, int x, int baseline, const ch
 void gfx_text_in_rect(gfx_fb_t *fb, const gfx_font_t *font, gfx_rect_t r, gfx_align_t align, const char *utf8,
                       gfx_color_t color)
 {
+    if (utf8 == NULL) {
+        return;
+    }
     gfx_rect_t saved = fb->clip;
     fb->clip = gfx_rect_intersect(saved, r);
 
@@ -137,4 +163,48 @@ void gfx_text_in_rect(gfx_fb_t *fb, const gfx_font_t *font, gfx_rect_t r, gfx_al
     gfx_text(fb, font, x, baseline, utf8, color);
 
     fb->clip = saved;
+}
+
+int gfx_text_ellipsize(const gfx_font_t *font, const char *utf8, int max_width, char *out, size_t out_size)
+{
+    if (out_size == 0) {
+        return 0;
+    }
+    out[0] = '\0';
+    if (utf8 == NULL) {
+        return 0;
+    }
+    const char *dots = gfx_font_has_glyph(font, 0x2026) ? "\xE2\x80\xA6" : "...";
+    int full = gfx_text_width(font, utf8);
+    int dots_w = gfx_text_width(font, dots);
+    int budget = full <= max_width ? full : max_width - dots_w;
+    const char *s = utf8, *end = utf8;
+    int width = 0;
+    for (;;) {
+        const char *before = s;
+        uint32_t cp = gfx_utf8_next(&s);
+        if (cp == 0) {
+            break;
+        }
+        char one[5] = { 0 };
+        memcpy(one, before, (size_t)(s - before));
+        int w = gfx_text_width(font, one);
+        if (width + w > budget || (size_t)(s - utf8) + (full <= max_width ? 0 : strlen(dots)) >= out_size) {
+            break;
+        }
+        width += w;
+        end = s;
+    }
+    size_t n = (size_t)(end - utf8);
+    memcpy(out, utf8, n);
+    out[n] = '\0';
+    if (*end != '\0') {
+        size_t room = out_size - 1 - n;
+        size_t d = strlen(dots);
+        if (d <= room) {
+            memcpy(out + n, dots, d + 1);
+            width += dots_w;
+        }
+    }
+    return width;
 }

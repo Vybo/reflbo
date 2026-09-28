@@ -57,6 +57,7 @@ static void test_malformed_utf8_becomes_replacement_and_stops_at_nul(void)
             TEST_ASSERT_EQUAL_HEX32(0xFFFD, gfx_utf8_next(&s));
         }
         TEST_ASSERT_EQUAL_HEX32(0, gfx_utf8_next(&s));
+        TEST_ASSERT_EQUAL_PTR(cases[i] + strlen(cases[i]), s); /* stopped on the NUL, not past it */
     }
 }
 
@@ -86,14 +87,54 @@ static void test_glyph_is_placed_relative_to_pen_and_baseline(void)
     TEST_ASSERT_EQUAL_INT(6, count_black());
 }
 
+/* No ink at all: a tall line box, so the fallback box is big enough to be hollow (6x6). */
+static const gfx_font_t s_tall = { s_bitmap, s_glyphs, 3, 9, 12 };
+
 static void test_missing_glyph_draws_a_hollow_box(void)
 {
-    TEST_ASSERT_EQUAL_INT(4, gfx_text(&s_fb, &s_font, 0, 4, "B", GFX_BLACK));
-    TEST_ASSERT_TRUE(gfx_get_pixel(&s_fb, 1, 2));
-    TEST_ASSERT_TRUE(gfx_get_pixel(&s_fb, 2, 2));
-    TEST_ASSERT_TRUE(gfx_get_pixel(&s_fb, 1, 3));
-    TEST_ASSERT_TRUE(gfx_get_pixel(&s_fb, 2, 3));
-    TEST_ASSERT_EQUAL_INT(4, count_black());
+    TEST_ASSERT_EQUAL_INT(8, gfx_text(&s_fb, &s_tall, 0, 7, "B", GFX_BLACK));
+    TEST_ASSERT_TRUE(gfx_get_pixel(&s_fb, 1, 1));
+    TEST_ASSERT_TRUE(gfx_get_pixel(&s_fb, 6, 6));
+    TEST_ASSERT_FALSE(gfx_get_pixel(&s_fb, 3, 3));
+    TEST_ASSERT_EQUAL_INT(20, count_black());
+}
+
+/* The review found the box's x was cut to int16_t, so far off-screen text drew phantom boxes. */
+static void test_missing_glyph_far_right_draws_nothing(void)
+{
+    gfx_text(&s_fb, &s_font, 65536, 4, "B", GFX_BLACK);
+    TEST_ASSERT_EQUAL_INT(0, count_black());
+}
+
+static void test_null_strings_are_empty(void)
+{
+    TEST_ASSERT_EQUAL_INT(0, gfx_text_width(&s_font, NULL));
+    TEST_ASSERT_EQUAL_INT(3, gfx_text(&s_fb, &s_font, 3, 4, NULL, GFX_BLACK));
+    gfx_text_in_rect(&s_fb, &s_font, (gfx_rect_t){ 0, 0, 16, 8 }, GFX_ALIGN_CENTER, NULL, GFX_BLACK);
+    char out[8];
+    TEST_ASSERT_EQUAL_INT(0, gfx_text_ellipsize(&s_font, NULL, 10, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("", out);
+    TEST_ASSERT_EQUAL_INT(0, count_black());
+}
+
+/* 'A' (advance 4) and the ellipsis (advance 3). */
+static const gfx_glyph_t s_dot_glyphs[] = {
+    { 0x0041, 0, 3, 3, 0, -3, 4 },
+    { 0x2026, 0, 1, 1, 0, -1, 3 },
+};
+static const gfx_font_t s_dots = { s_bitmap, s_dot_glyphs, 2, 3, 4 };
+
+static void test_ellipsize_keeps_text_that_fits_and_cuts_the_rest(void)
+{
+    char out[16];
+    TEST_ASSERT_EQUAL_INT(8, gfx_text_ellipsize(&s_dots, "AA", 13, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("AA", out);
+    TEST_ASSERT_EQUAL_INT(11, gfx_text_ellipsize(&s_dots, "AAAAAA", 13, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("AA\xE2\x80\xA6", out);
+    TEST_ASSERT_EQUAL_INT(3, gfx_text_ellipsize(&s_dots, "AAAAAA", 4, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("\xE2\x80\xA6", out);
+    TEST_ASSERT_EQUAL_INT(4, gfx_text_ellipsize(&s_dots, "AAAAAA", 100, out, 2)); /* one A fits the buffer */
+    TEST_ASSERT_EQUAL_STRING("A", out);
 }
 
 static void test_text_in_rect_centres_horizontally_and_vertically(void)
@@ -134,6 +175,9 @@ int main(void)
     RUN_TEST(test_missing_glyph_uses_box_advance);
     RUN_TEST(test_glyph_is_placed_relative_to_pen_and_baseline);
     RUN_TEST(test_missing_glyph_draws_a_hollow_box);
+    RUN_TEST(test_missing_glyph_far_right_draws_nothing);
+    RUN_TEST(test_null_strings_are_empty);
+    RUN_TEST(test_ellipsize_keeps_text_that_fits_and_cuts_the_rest);
     RUN_TEST(test_text_in_rect_centres_horizontally_and_vertically);
     RUN_TEST(test_text_in_rect_aligns_right);
     RUN_TEST(test_text_in_rect_clips_to_the_rect_and_restores_the_clip);

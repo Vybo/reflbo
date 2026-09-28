@@ -47,6 +47,19 @@ void gfx_vline(gfx_fb_t *fb, int x, int y, int h, gfx_color_t color);
 void gfx_line(gfx_fb_t *fb, int x0, int y0, int x1, int y1, gfx_color_t color);
 void gfx_rect(gfx_fb_t *fb, gfx_rect_t r, gfx_color_t color); /* outline, each pixel drawn once */
 void gfx_fill_rect(gfx_fb_t *fb, gfx_rect_t r, gfx_color_t color);
+void gfx_circle(gfx_fb_t *fb, int cx, int cy, int r, gfx_color_t color); /* outline, each pixel drawn once */
+void gfx_fill_circle(gfx_fb_t *fb, int cx, int cy, int r, gfx_color_t color);
+
+/* 1-bpp image in the glyph format: rows MSB first, each row padded to whole bytes, 1 = ink. */
+typedef struct {
+    const uint8_t *bits;
+    uint8_t width;
+    uint8_t height;
+} gfx_bitmap_t;
+
+/* Draws the bitmap's ink in `color` with its top-left corner at (x, y); other pixels are left
+ * alone. For an opaque image, fill its rectangle first. */
+void gfx_bitmap(gfx_fb_t *fb, int x, int y, const gfx_bitmap_t *bm, gfx_color_t color);
 
 /* PBM P4 image of the framebuffer: header "P4\n<w> <h>\n" followed by the raster. */
 size_t gfx_pbm_size(const gfx_fb_t *fb);
@@ -64,6 +77,7 @@ typedef enum {
 uint32_t gfx_utf8_next(const char **s);
 
 bool gfx_font_has_glyph(const gfx_font_t *font, uint32_t codepoint);
+const gfx_glyph_t *gfx_font_glyph(const gfx_font_t *font, uint32_t codepoint); /* NULL if missing */
 int gfx_text_width(const gfx_font_t *font, const char *utf8);
 /* Draws one line with its baseline at `baseline`; returns the pen x after the text.
  * A codepoint missing from the font is drawn as a hollow box. */
@@ -71,3 +85,8 @@ int gfx_text(gfx_fb_t *fb, const gfx_font_t *font, int x, int baseline, const ch
 /* One line aligned in r, vertically centred on the font's line box, clipped to r. */
 void gfx_text_in_rect(gfx_fb_t *fb, const gfx_font_t *font, gfx_rect_t r, gfx_align_t align, const char *utf8,
                       gfx_color_t color);
+/* Copies `utf8` into `out`. If it is wider than max_width, cuts it at a codepoint and ends it
+ * with an ellipsis ("…", or "..." if the font lacks it). Returns the width of the result. */
+int gfx_text_ellipsize(const gfx_font_t *font, const char *utf8, int max_width, char *out, size_t out_size);
+
+/* The text functions treat a NULL string as empty. */

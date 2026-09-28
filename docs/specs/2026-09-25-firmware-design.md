@@ -94,10 +94,10 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `display` | Canonical framebuffer; pushes it to the panel when its CRC changes | gfx, st7305, util | — |
 | `gfx` | Framebuffer, primitives, text, fonts, bitmaps, QR, PBM/BMP encoders | — | ✓ |
 | `util` | Small pure-C helpers: CRC-32, base64, delay ticks | — | ✓ |
-| `locale` | Language packs: strings, date and number formats | — | ✓ |
+| `locale` | Language packs (API prefix `lang_`, because libc owns `locale_t`): strings, date and number formats, name days and holidays | — | ✓ |
 | `astro` | Sunrise, sunset, day length | — | ✓ |
-| `datastore` | Field registry, values, freshness, change events, snapshot | — | ✓ |
-| `ui` | Layouts, widgets, presets, cycler, screens, menu, input handling | gfx, locale, datastore | ✓ |
+| `datastore` | Measured and fetched values, freshness, derived values and trends, change mask (§6) | — | ✓ |
+| `ui` | Field catalogue, layouts, widgets, status bar, presets and their JSON codec, cycle order, screens, menu, input handling | gfx, locale, datastore, util | ✓ |
 | `scheduler` | Next-wake computation for display, sensors, alarms, sync, timeouts | — | ✓ |
 | `sensors` | SHTC3, battery gauge | board | curve and filter logic |
 | `rtc` | PCF85063 (API prefix `pcf85063_`, because ESP-IDF owns `rtc_*`): time, oscillator-stop flag, alarm → INT | board | register codec |
@@ -109,7 +109,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `ha_mqtt` | MQTT session, discovery, state, commands, field mappings | netmgr, datastore | payload builders |
 | `sync` | Runs the sync sequence, handles backoff | timekeeping, weather, ha_mqtt, netmgr | — |
 | `audio` | Codec control, tone/WAV/stream players, alarm ringing | board, storage | — |
-| `storage` | NVS (identity, secrets), LittleFS config files, microSD mount | IDF | JSON schemas |
+| `storage` | NVS (identity, secrets), LittleFS config files, microSD mount | IDF | settings codec, config-file backup logic |
 | `diag` | Console commands, screenshot export | most | — |
 
 Rules:
@@ -137,7 +137,7 @@ How events are handled:
 
 1. The app task takes an event and updates its state (UI state machine, scheduler inputs). If the output changed, it renders into the framebuffer. It pushes the frame to the panel only if the frame's CRC32 changed.
 2. Long-running work runs in its own task (sync, HTTP server, audio) and reports back with events.
-3. When the queue is empty and the power state allows it, the app task calls `power_idle()` (§3.4).
+3. When the queue is empty, the app task asks `power_plan()` whether and how to sleep, then calls `power_sleep_light()` or `power_sleep_deep()` (§3.4).
 
 Initial task plan (finalised in the implementation plan): app (core 1), sync (core 0, created per sync), httpd (IDF default), audio stream and decode (core 1, only while playing), console REPL (low priority).
 
@@ -235,13 +235,13 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
   - This covers Czech and most European languages.
   - MQTT/HA text with diacritics therefore renders correctly even with the English UI.
 - **Numeric display fonts.** Large sizes can carry only digits, `: . - °` and a few letters.
-- **Sizes.** Initial: text 12, 16, 20, 28 px; numeric 48, 72, 110 px. Tuned in M1/M3.
-- **Choice.** Specific fonts are picked in M1, for example a pixel font for small sizes and a clean sans for large digits. Every font needs a licence that allows redistribution in this repository.
+- **Sizes (M3a).** Text: DejaVu Sans 12, 16 and 20 px, and Sans Bold 16, 20 and 28 px. Numeric: DejaVu Sans Condensed Bold 48, 72, 110 and 130 px. `fontgen` trims blank glyph rows and columns, and grows the ascent and line height to fit every glyph's ink.
+- **Choice.** DejaVu 2.37, picked at M1 (`THIRD_PARTY.md`). Every font needs a licence that allows redistribution in this repository.
 
 ### 4.5 Icons
 
-- A 1-bpp icon set generated into C bitmaps by `tools/imggen.py`, at sizes 16, 24, 48 and 64 px.
-- Contents: weather codes (day and night variants), battery levels, charging, Wi-Fi, sync/stale, alarm bell, thermometer, humidity, sunrise, sunset.
+- A 1-bpp icon set generated into C bitmaps by `tools/imggen.py` (`tools/gen_icons.sh`) from Google's Material Icons font (Apache-2.0, pinned to one upstream commit). `assets/icons/icons.txt` lists each icon's name and sizes.
+- M3a: thermometer, drop, dew, bolt (charging), stale, clock, calendar, person, celebration and cloud, at 16, 24 or 48 px as the list says. The battery and the moon are drawn with primitives. Weather codes (day and night), Wi-Fi, sync, the alarm bell, sunrise and sunset join with their milestones.
 - Sources and licences are recorded in `THIRD_PARTY.md`.
 
 ## 5. UI
@@ -275,7 +275,12 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 
 ### 5.2 Layouts (v1)
 
-Every layout can show a status bar (top 20 px). It carries the battery icon and %, charging state, Wi-Fi/sync state or a stale warning, and the next alarm (M7).
+Every layout has a status bar (top 20 px):
+
+- Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale.
+- Middle: a small clock, if the preset sets `status_clock`. It is meant for data-first presets (owner request, 2026-09-28).
+- Right: the charging bolt and the battery icon, with the parts `status_battery` lists: level %, voltage, days left. The default is the level.
+- Later: Wi-Fi and sync state (M4, M5) and the next alarm (M7).
 
 | Layout | Slots |
 |---|---|
@@ -284,16 +289,16 @@ Every layout can show a status bar (top 20 px). It carries the battery icon and 
 | Grid | `g1`–`g6` M, in 3×2 |
 | Focus | `main` XL, `s1`–`s2` M |
 
-- Slot rectangles are fixed per layout and defined in code. They are finalised in M3 from host renders the owner reviews.
+- Slot rectangles are fixed per layout and defined in code (`components/ui/ui_layout.c`). The owner approved them from the M3a host renders on 2026-09-28.
 - Each slot declares which field kinds it accepts. The preset editor offers only compatible fields.
 
 ### 5.3 Widgets
 
-- There is one renderer per field kind and size class (XL/L/M/S). For example, a number widget shows label, value and unit, while the S size shows only an icon and the value.
+- There is one renderer per field kind and size class (XL/L/M/S). For example, a number widget in M shows label, value and unit; in S it shows an icon, the value and a short label. XL steps its font down (130, 110, 72, 48 px) until the value fits. Text that still doesn't fit ends in an ellipsis, and a widget never draws outside its slot.
 - Each slot sets a policy for missing or stale data (a preset option):
   - `hide`: leave the slot empty.
   - `placeholder`: show `—`.
-  - `stale`: show the value with an age marker, e.g. "⟲ 2 d".
+  - `stale`: show the value with an age marker: the stale icon and the age, e.g. "2 d", at the slot's bottom right.
 
   Default: `stale` for data that has a value, `placeholder` for data that doesn't.
 - If the time is invalid (RTC oscillator-stop flag set, and the time was never synced or set), time fields show `--:--` and the status bar shows "Set time".
@@ -315,20 +320,37 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
       "in_cycle": true,
       "slots": {
         "main": "time.clock", "sub": "date.day",
-        "s1": "env.temp", "s2": "env.hum", "s3": "wx.now", "s4": "bat.level"
+        "s1": "env.temp", "s2": "env.hum", "s3": "moon.phase", "s4": "bat.level"
       },
-      "options": { "clock_24h": true, "seconds": false, "invert": false, "stale_policy": "stale" }
+      "options": { "clock_24h": true, "seconds": false, "invert": false, "stale_policy": "stale",
+                   "status_clock": false, "status_battery": ["percent"] }
     }
   ]
 }
 ```
 
-- **Built-in defaults.** Home (Classic), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. There can be at most 16 presets.
+- **Built-in defaults.** Home (Classic), Indoor (Grid, with the status clock), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. Weather stays out of the cycle until M5 brings weather data. There can be at most 16 presets.
+- **Options.** `clock_24h` overrides the time setting when present. `status_clock` and `status_battery` shape the status bar (§5.2).
+- **Validation.** A file with a structural error is rejected as a whole, and the error names it. Structural errors:
+  - not JSON, or another schema;
+  - no presets, or more than 16;
+  - a bad or duplicate id;
+  - an unknown layout, slot or field, or a field the slot can't show;
+  - an unknown `stale_policy` or `status_battery` value.
+
+  Everything else is lenient:
+  - an unknown `active` selects the first preset;
+  - the cycle interval is clamped to 10 s–1 h;
+  - a missing name takes the id;
+  - missing options take their defaults;
+  - `null` or `""` leaves a slot empty.
 - **Switching.** Presets change by:
   - KEY short: next preset in cycle order.
   - The auto-cycle timer: interval at least 10 s; each switch costs a wake-up.
   - The HA `select` entity (§12.3).
   - The web UI or the menu.
+
+  A manual switch is saved in `presets.json`, so it survives a reboot. An auto-cycle switch is not saved.
 - **Seconds.** `seconds: true` needs a wake-up every second. It is allowed, and the web UI shows the power cost.
 - **Schedule** (D15). `presets.json` holds `"schedule": { "enabled": true, "entries": [...] }` with up to 8 entries: `{ "at": "22:30", "days": 127, "action": "preset", "preset": "focus" }` or `{ "at": "23:00", "days": 127, "action": "night", "until": "06:00" }`. `days` is a Mon–Sun bitmask (bit 0 = Monday, default all). An entry runs at its local minute, with the same DST rules as user alarms (§9.2).
   - `preset` makes that preset active. Manual switching and auto-cycling carry on from there.
@@ -404,18 +426,18 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
 ## 6. Datastore
 
-- **Table.** An entry for each built-in field, plus up to 32 dynamic `mqtt.<key>` entries.
+- **Table.** An entry for each measured or fetched field: `env.*` and `bat.*` since M3a, weather from M5, and up to 32 dynamic `mqtt.<key>` entries from M6. Fields that follow from the clock (`time.*`, `date.*`, `moon.phase`) are computed by `ui` at render time and never stored.
 - **Entry contents.**
-  - Id and kind.
-  - Value: a number (float plus precision), short text (at most 48 bytes of UTF-8), a time, or a weather struct/series.
-  - Unit and label.
-  - `updated_at` (UTC) and `ttl_s`.
-  - Flags.
+  - A fixed-point value: 0.01 °C, 0.01 %, whole %, or 0.1 days. Short text (at most 48 bytes of UTF-8), times and weather structs arrive with the fields that need them.
+  - The trend and `updated` (UTC); a `ttl_s` per field. The battery entry also holds the voltage and the charging state.
+  - Units and labels live in the `ui` field catalogue.
+- **Derived values.** Each SHTC3 reading also sets:
+  - `env.dew`, from the Magnus formula (17.62 and 243.12 °C);
+  - today's `env.temp_min` and `env.temp_max`, restarted at local midnight;
+  - the trends: the change since the newest reading that is 60–90 min old, from a 16-point history spaced at least 5 min apart.
 - **Weather storage.** Kept compact: 72 hourly entries (int16 temperature ×10, uint8 code, uint8 precipitation %) and 3 daily entries.
-- **API.** Typed setters and getters, a freshness check, and a change mask posted as `DATA_CHANGED`. A mutex protects the table; getters copy values out.
-- **Snapshot.** Binary format: magic, version, CRC32, entries, at most 4 KB in total. It is written:
-  - To RTC RAM before every idle.
-  - To `/state/datastore.bin` after every sync, so data survives a power-off and reappears marked as stale.
+- **API.** Setters and getters, a freshness check (missing, fresh, stale) and a change mask. The app task owns the datastore (`AGENTS.md` §5.3). Other tasks reach it through events, and console commands through the app's executor, so it needs no mutex.
+- **Snapshot.** The datastore is plain data inside the app's RTC-RAM snapshot (magic, version, CRC32, at most 4 KB in total), sealed before every deep sleep. From M5 it is also written to `/state/datastore.bin` after every sync, so data survives a power-off and reappears marked as stale.
 
 ## 7. Timekeeping
 
@@ -777,7 +799,8 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 - Every file carries a schema version, and migrations run at boot.
 - Writes are atomic: write `*.tmp`, fsync, rename, keeping the previous file as `*.bak`.
-- If a file is invalid, the firmware uses `*.bak`; if that is invalid too, it uses defaults and shows a toast.
+- If a file is invalid, the firmware uses `*.bak`; if that is invalid too, it uses defaults and shows a toast (from M3b; M3a logs it).
+- The partition is mounted at `/fs`, so the files are `/fs/cfg/settings.json` and so on.
 
 `settings.json` sketch:
 
@@ -796,6 +819,8 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
             "discovery_prefix": "homeassistant", "discovery": true }
 }
 ```
+
+M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
 
 ### 14.4 Backup, restore, factory reset
 
@@ -819,7 +844,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 | `btn <key\|boot> <short\|double\|long>` | Inject button gestures |
 | `sensors` · `battery` | Readings |
 | `rtc get` · `rtc set <ISO 8601>` | RTC |
-| `field list` · `field get <id>` · `field set <id> <value>` | Inspect and inject data, e.g. fixtures on the device |
+| `field list` · `field get <id>` · `field set <id> <value>` · `field clear <id>` | Inspect and inject data, e.g. fixtures on the device |
 | `preset list` · `preset set <id>` | Presets |
 | `wifi status` · `wifi scan` | Wi-Fi |
 | `sync now` | Run a sync |
@@ -842,9 +867,9 @@ Screenshot framing:
 | `tools/devlog.py` | Capture the serial log for N seconds, reconnect when USB re-enumerates, optionally reset first | pyserial |
 | `tools/screenshot.py` | Request a screenshot and write a PNG (and the PBM) | pyserial, stdlib |
 | `tools/render.py` | Run the host renderer on presets and fixtures, writing PNGs | Host build |
-| `tools/fontgen.py` · `tools/imggen.py` | Turn fonts and icons into C sources | Pillow (tools venv) |
+| `tools/fontgen.py` · `tools/imggen.py`, run by `tools/gen_fonts.sh` · `tools/gen_icons.sh` | Turn fonts and icons into C sources | uv, Pillow |
 
-pyserial comes from the ESP-IDF Python environment. Pillow lives in a separate tools venv (`tools/requirements.txt`).
+pyserial comes from the ESP-IDF Python environment. The generators run through `uv` with the pinned versions in `tools/requirements.txt`.
 
 ## 16. Error handling and robustness
 
@@ -870,9 +895,11 @@ pyserial comes from the ESP-IDF Python environment. Pillow lives in a separate t
   - astro: against fixture sunrise/sunset values.
   - Weather parser: against fixtures.
   - Preset and settings JSON: validation and migrations.
+  - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
   - MQTT payload builders: golden JSON.
   - locale formatting.
-- **Golden renders.** Each built-in preset, the menu and each special screen are rendered with fixture data at fixed times. Each render is compared with `test/host/golden/*.pbm`. After the owner reviews the PNGs, `--update` rewrites the goldens.
+- **Golden renders.** Each built-in preset, the menu and each special screen are rendered with fixture data at fixed times. Each render is compared with `test/host/golden/*.pbm`. After an intentional change, the renderer rewrites the golden (`build-host/render_dashboard <fixture> <file>`), and the owner reviews the PNGs from `tools/render.py`.
+- **Sanitizers.** `-DREFLBO_SANITIZE=ON` builds the host tests with AddressSanitizer and UndefinedBehaviorSanitizer.
 - **JSON on the host.** cJSON is built from the ESP-IDF tree (`$IDF_PATH/components/json/cJSON`).
 
 **Device.**
@@ -939,3 +966,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r6 | 2026-09-28 | M2 review: routine wakes skip the console, NVS and info logs (§3.3), which cuts a deep wake from 168 to 63 ms of app time (§3.4); a failed boot keeps the console up while tethered, otherwise it sleeps 5 min and boots again (§3.3); `sleep stats` reports per-cycle slept times (§15); a boot that comes alive reports a stored core dump (§16) |
 | r7 | 2026-09-28 | M2 measurement: D3 is light sleep (§1.2, §3.4); the forced-PWM 3V3 converter sets a ~60 mW floor and puts the stretch goal out of reach without a board rework (§9.4, §20) |
 | r8 | 2026-09-28 | M3 scope: accepted proposals (D15): the LPM rate setting (§4.2), extra local fields and trends (§5.1), the schedule (§5.4), night sleep (§9.1, §9.2), the `cs` pack (§5.8); hidden menu items for later features (§5.7); M3 split into M3a and M3b (§18) |
+| r9 | 2026-09-29 | M3a as built: the status bar's `status_clock` and `status_battery` options and the built-in Indoor preset, from the owner's render review (§5.2, §5.4); preset validation (§5.4); widget sizing and ellipsis (§5.3); the datastore's scope, ownership and snapshot (§6); fonts and Material icons (§4.4, §4.5); the `lang_` prefix and storage's host-tested parts (§3.1); `power_plan()` in the runtime model (§3.2); the settings keys read and the `/fs` mount (§14.3); `field clear` (§15); golden updates and the sanitizer build (§17) |

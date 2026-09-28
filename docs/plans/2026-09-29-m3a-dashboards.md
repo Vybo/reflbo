@@ -5065,9 +5065,9 @@ git commit -m "feat(ui): add the four layouts, the built-in presets and their JS
   - The trend arrow goes beside the label; in narrow S cells, beside the icon.
   - A stale value shows the stale icon and its age at the bottom right, or follows the preset's `stale_policy`.
 - The status bar (20 px):
-  - The date on the left (or "Set time" with an invalid clock).
+  - "Set time" on the left while the clock is invalid, otherwise a stale warning when a shown value is stale.
   - An optional clock in the middle (`status_clock`).
-  - A stale warning icon, the charging bolt, and the battery with the percentage, voltage and days left that `status_battery` selects.
+  - The charging bolt and the battery, with the percentage, voltage and days left that `status_battery` selects.
 
 - [ ] **Step 1: Write the failing test and the renderer.** The fixtures cover the four built-in presets and seven edge cases: invalid time, stale data, 12 h and charging, below zero in °F with the placeholder policy, seconds, the full battery details, and inverted.
 
@@ -8706,11 +8706,12 @@ EDITS = {
         ("Every layout can show a status bar (top 20 px). It carries the battery icon and %, charging state, "
          "Wi-Fi/sync state or a stale warning, and the next alarm (M7).",
          "Every layout has a status bar (top 20 px):\n\n"
-         "- Left: the date, or \"Set time\" while the time is invalid.\n"
+         "- Left: \"Set time\" while the time is invalid (§5.3); otherwise a stale warning when a shown value is "
+         "stale.\n"
          "- Middle: a small clock, if the preset sets `status_clock`. It is meant for data-first presets (owner "
          "request, 2026-09-28).\n"
-         "- Right: a stale warning when a shown value is stale, the charging bolt, and the battery icon with the "
-         "parts `status_battery` lists: level %, voltage, days left. The default is the level.\n"
+         "- Right: the charging bolt and the battery icon, with the parts `status_battery` lists: level %, voltage, "
+         "days left. The default is the level.\n"
          "- Later: Wi-Fi and sync state (M4, M5) and the next alarm (M7)."),
         ("- Slot rectangles are fixed per layout and defined in code. They are finalised in M3 from host renders the "
          "owner reviews.",

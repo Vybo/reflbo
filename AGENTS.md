@@ -29,7 +29,7 @@ Guiding principles:
 
 ## 2. Status and roadmap
 
-- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 is in progress as two plans: M3a (storage, datastore, locale, layouts, widgets, presets) and then M3b (menu, screens, settings, schedule and night sleep, Czech pack).
+- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 runs as two plans. M3a is done: LittleFS config files, the datastore with the extra fields, the English pack, four layouts with widgets and a status bar, and presets that KEY switches and auto-cycles and that survive a reboot. M3b is next (menu, screens, settings, schedule and night sleep, Czech pack); its plan gets written before it starts.
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
 - **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-29-m3a-dashboards.md`](docs/plans/2026-09-29-m3a-dashboards.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
@@ -113,12 +113,12 @@ Numbering follows the schematic. Check the silkscreen before wiring.
 1. **The PWR button cannot be read.** It toggles a hardware latch that cuts all power except the RTC backup cell. Firmware can neither see presses nor switch itself off; it can only sleep. The only buttons firmware can use are **KEY (GPIO18)** and **BOOT (GPIO0)**.
 2. The first power-up with a freshly inserted 18650 needs USB connected, to release the battery protection. After that the battery runs the board.
 3. **Charging and USB presence are not wired to any GPIO.** Infer them from the VBAT trend, or from `usb_serial_jtag_is_connected()`, which only works with a PC host. Optional mod: VBUS (header pin 2) → 100k/100k divider → GPIO1, 2 or 3.
-4. **Keeping the image through deep sleep.** The ST7305 keeps showing its image while powered. RESET (GPIO41) and CS (GPIO40) are digital-only pads that lose state in deep sleep, so hold them with `gpio_hold_en()` plus `gpio_deep_sleep_hold_en()`. On wake from deep sleep, skip the panel reset and init: re-attach SPI and push the frame. The hold latches at once, so `st7305_prepare_deep_sleep()` is the last panel access before `esp_deep_sleep_start()`. On wake, `st7305_init_warm()` drives the same levels, configures the pins, then calls `gpio_hold_dis()`. Checked at M2: the panel still ran at 1.00 Hz (`panel fps`) after deep sleep, so it kept its image. Between updates use LPM (`0x39`, 0.25–8 Hz). Use HPM (`0x38`, 16–51 Hz) only for fast interaction. A community driver reports about 10 µA in sleep-in (image hidden), about 1 mA in LPM and about 5 mA in HPM. Measure these.
+4. **Keeping the image through deep sleep.** The ST7305 keeps showing its image while powered. RESET (GPIO41) and CS (GPIO40) are digital-only pads that lose state in deep sleep, so hold them with `gpio_hold_en()` plus `gpio_deep_sleep_hold_en()`. On wake from deep sleep, skip the panel reset and init: re-attach SPI and push the frame. The hold latches at once, so `st7305_prepare_deep_sleep()` is the last panel access before `esp_deep_sleep_start()`. On wake, `st7305_init_warm()` drives the same levels, configures the pins, then calls `gpio_hold_dis()`. Checked at M2: the owner watched six deep-sleep cycles and the image stayed, updating every minute; afterwards `panel fps` still measured 1.00 Hz. Between updates use LPM (`0x39`, 0.25–8 Hz). Use HPM (`0x38`, 16–51 Hz) only for fast interaction. A community driver reports about 10 µA in sleep-in (image hidden), about 1 mA in LPM and about 5 mA in HPM. Measure these.
 5. **Framebuffer format.** In landscape the panel packs 2×4-pixel blocks into each byte (vendor `InitLandscapeLUT`), and in the panel buffer bit 1 means white. Our canonical buffer is row-major 1 bpp, MSB first, 1 = black (the PBM P4 layout). Convert it when flushing (spec §4.1).
 6. The two vendor init sequences differ: the factory firmware runs SPI at 10 MHz, XiaoZhi at 40 MHz, and they use different source voltages (contrast: VSHP/VSHN 0x41 vs 0x69/0x4B), oscillator settings (HPM 16 vs 25.5 Hz) and LPM frame rates (8 vs 1 Hz). **Chosen at M1 (owner check 2026-09-25): the factory sequence**, which has visibly better contrast. The driver replaces its LPM rate with its own setting (default 1 Hz, `panel rate`), because at 1 Hz the owner saw the same contrast and no flicker. The XiaoZhi sequence stays available as `panel init xiaozhi`.
    - The LPM rate (FRCTRL `B2h`) can be changed at any time and applies at once, even in LPM. `panel fps` measures the real frame rate by counting TE pulses on GPIO6. M1 measured 1.00 Hz in LPM and about 16–17 Hz in HPM with the factory sequence.
    - Switching between HPM and LPM follows datasheet §7.11 (figure on page 53): about 120 ms into LPM and 320 ms into HPM, because of mandatory delays.
-7. **Use the PCF85063 for timing.** The ESP32 has no 32 kHz crystal, so its sleep timer drifts; the PCF85063 is the time source. Wake scheduling uses its alarm: the alarm flag (AF) latches and INT stays low until firmware clears it, which ext1 catches reliably. Don't use the minute interrupt. Depending on TI_TP it is a 1/64 s pulse or a level held until TF is cleared (datasheet §8.2.2.3, unverified here), and it shares INT with the alarm. **CLKOUT is on after power-up, and CLKOE (pin 3) is not connected** on the schematic, so firmware writes COF = 111 at every boot. The board puts 22 pF on each crystal pin, above the usual load rating, so expect the RTC to run slow (estimate 2–9 s/day); trim the Offset register against NTP at M5. The vendor firmware overwrote the time on every boot and never checked the oscillator-stop flag. A 5 s PWR-off can set that flag while keeping the time (seen at M2: VDD sags through D2 and C11); `rtc set` clears it.
+7. **Use the PCF85063 for timing.** The ESP32 has no 32 kHz crystal, so its sleep timer drifts; the PCF85063 is the time source. Wake scheduling uses its alarm: the alarm flag (AF) latches and INT stays low until firmware clears it, which ext1 catches reliably. Don't use the minute interrupt. Depending on TI_TP it is a 1/64 s pulse or a level held until TF is cleared (datasheet §8.2.2.3, unverified here), and it shares INT with the alarm. **CLKOUT is on after power-up, and CLKOE (pin 3) is not connected** on the schematic, so firmware writes COF = 111 at every boot. The board puts 22 pF on each crystal pin, above the usual load rating, so the RTC runs slow: about 3.4 s/day at M2 (9 s in 2.6 days, against an estimate of 2–9 s/day). Trim the Offset register against NTP at M5. The vendor firmware overwrote the time on every boot and never checked the oscillator-stop flag. A 5 s PWR-off can set that flag while keeping the time (seen at M2: VDD sags through D2 and C11); `rtc set` clears it.
 8. **The audio analog rail is always on** (RT9193). Put the ES8311 and ES7210 into standby over I²C and keep PA_CTRL low when nothing is playing. The vendor firmware never puts the codecs into standby and keeps the amp enabled; `board_init()` writes the esp_codec_dev standby sequences at every cold boot (they keep that state through deep sleep).
 9. **The microSD slot is always powered and has no card detect.** An inserted card adds idle current. Mount it on demand and detect a card by probing.
 10. The SHTC3 reads high because the board heats it; vendor code subtracts a constant 4 °C. Provide a calibration offset, and sample right after wake, before Wi-Fi and the CPU warm the board. The SHTC3 idles at 45 µA unless sent to sleep, which the vendor code never did; `sensors.c` sleeps it after every read.
@@ -149,7 +149,7 @@ git clone --depth 1 https://github.com/JasonHEngineering/waveshare_RLCD_400x300_
 
 - **Waveshare** (Apache-2.0). Worth reusing, under `02_Example/ESP-IDF/10_FactoryProgram/components/`: the ST7305 init and pixel LUT (`port_bsp/display_bsp.cpp`), SHTC3 and PCF85063 access (`port_bsp/i2c_equipment.cpp`), the battery ADC (`port_bsp/adc_bsp.cpp`), buttons (`port_bsp/button_bsp.c`) and codec pins (`ExternLib/codec_board/board_cfg.txt`, board `S3_RLCD_4_2`). Also see the XiaoZhi board (`02_Example/XiaoZhi/XiaoZhiCode_V2.1.0/main/boards/waveshare-s3-rlcd-4.2/`) and the ESPHome YAMLs (`02_Example/ESPHome/`).
 - **JasonH smart clock** (MIT). An Arduino monolith with Singapore-specific APIs and no real low-power design. **We do not fork it.** Borrow ideas only: screen set, 1-bpp canvas, SD config, image converter script, and 3D-printable case STEP files.
-- Code copied from either keeps its licence header and gets listed in `THIRD_PARTY.md` *(planned)*.
+- Code copied from either keeps its licence header and gets listed in `THIRD_PARTY.md`.
 
 ## 4. Requirements (from the owner)
 
@@ -196,7 +196,7 @@ components/
   st7305/        panel init, LPM/HPM, frame push, deep-sleep retention
   display/       canonical framebuffer, CRC-skipped pushes to the panel
   gfx/           framebuffer, primitives, text, fonts, bitmaps, QR    [host]
-  locale/        language packs (en in v1)                            [host]
+  locale/        language packs: en, cs (M3b); API prefix lang_       [host]
   astro/         sunrise/sunset, day length                           [host]
   datastore/     fields, freshness, change events, snapshot           [host]
   ui/            layouts, widgets, presets, screens, menu             [host]
@@ -240,6 +240,7 @@ brew install cmake ninja dfu-util ccache   # already present on the owner's Mac
 # Homebrew's Python 3.14 (3.14.6 and 3.14.7 checked) can't load pyexpat on macOS 26
 # (it expects a newer libexpat than the system's), so pip, and the ESP-IDF installer
 # with it, fail. ESP-IDF uses uv's Python 3.13 through a shim directory instead:
+~/.local/bin/uv python install 3.13        # a fresh Mac has none yet
 mkdir -p ~/esp/python-shim
 ln -sf "$(~/.local/bin/uv python find 3.13)" ~/esp/python-shim/python3
 ln -sf "$(~/.local/bin/uv python find 3.13)" ~/esp/python-shim/python
@@ -264,9 +265,12 @@ tools/idf.sh exec python tools/devlog.py --cmd version --cmd heap
 tools/idf.sh exec python tools/devlog.py --cmd "rtc set $(date -u +%Y-%m-%dT%H:%M:%SZ)"   # set the RTC from this Mac
 tools/idf.sh exec python tools/devlog.py --cmd "power idle deep"   # or light; kept in NVS (sys/idle)
 tools/idf.sh exec python tools/devlog.py --cmd "sleep test deep 2" # sleep cycles while tethered; then: sleep stats
+tools/idf.sh exec python tools/devlog.py --cmd "preset list" --cmd "field set env.temp -5.5"   # redraws at once
 tools/idf.sh exec python tools/screenshot.py -o captures/screen.png --compare test/host/golden/test_pattern.pbm
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
   && ctest --test-dir build-host --output-on-failure
+cmake -S test/host -B build-host-asan -G Ninja -DREFLBO_SANITIZE=ON && cmake --build build-host-asan \
+  && ctest --test-dir build-host-asan --output-on-failure   # the same tests with ASan and UBSan
 tools/gen_fonts.sh                          # regenerate components/gfx/fonts (needs uv; versions in tools/requirements.txt)
 tools/gen_icons.sh                          # regenerate components/gfx/icons from assets/icons (needs uv)
 python3 tools/render.py                     # host renderings to captures/render/*.png (after the host build)
@@ -275,6 +279,8 @@ python3 tools/render.py                     # host renderings to captures/render
 - `tools/idf.sh` refuses commands that talk to the board (`flash`, `erase-*`, `monitor`, …) unless the port is given with `-p` or `ESPPORT`. Otherwise idf.py would probe every serial port and use the first ESP chip that answers.
 - `devlog.py` picks the port itself when exactly one `/dev/cu.usbmodem*` exists; otherwise pass `-p`. Exit codes: 0 ok, 2 port problem, 3 console prompt never appeared, 4 `--until` not seen in time. `screenshot.py` picks the port the same way and adds 5 (the image differs from `--compare`) and 6 (no complete, valid image arrived). It writes the PNG and the raw PBM next to it.
 - After adding a component directory, run `tools/idf.sh reconfigure` once. ESP-IDF finds components when CMake configures, so a plain `build` in an existing build directory silently leaves the new component out.
+- Config files live on LittleFS, mounted at `/fs`: `/fs/cfg/settings.json` and `/fs/cfg/presets.json`, each with a `.bak` of the previous version (spec §14.3). The first boot formats a blank `storage` partition; `idf.py flash` never writes it.
+- Golden renders: after an intentional UI change, rewrite a golden with `build-host/render_dashboard <fixture> test/host/golden/dash_<fixture>.pbm` (fixtures in `test/host/dashboard_fixtures.h`), look at the PNGs from `tools/render.py`, then commit.
 - Do not run `idf.py monitor` from an agent shell; it needs an interactive TTY. Use `devlog.py`.
 - Do not run `idf.py erase-flash` or erase NVS without asking. Either wipes the owner's Wi-Fi credentials and presets.
 - If the port is missing, the board is probably in deep sleep. Press KEY. If it is still missing, ask the owner to enter download mode (hold BOOT while powering on).
@@ -293,7 +299,7 @@ Use the cheapest level that proves the change. Any UI change needs at least leve
 
 **Screenshots**: the `screenshot` console command prints the canonical framebuffer as base64 PBM between `-----BEGIN RLCD PBM-----` and `-----END RLCD PBM-----`. `tools/screenshot.py` turns that into a PNG using only pyserial and the standard library. The web UI will serve `/api/screenshot.bmp` *(planned, M4)*. A screenshot shows what the firmware drew, not what the panel shows, because the ST7305 is write-only. After any display-driver change, have the owner confirm the test pattern.
 
-**Diagnostics console** (`diag`; full list in spec §15). Available now: `help`, `version`, `heap`, `reboot`, `screenshot`, `panel status|test|clear|mode <hpm|lpm>|rate <0.25|0.5|1|2|4|8>|fps [s]|init <factory|xiaozhi>`, `btn <key|boot> <short|double|long>` (simulated presses), `sensors`, `battery`, `rtc get|set <ISO 8601>`, `tasks`, `power idle [deep|light]`, `sleep stats [reset]|test <deep|light> <n>`. Planned: `field list|get|set`, `preset list|set`, `wifi status|scan`, `sync now`, `audio tone`. Drive the UI with `btn` and `screenshot` instead of asking the owner to press buttons. Inject test data with `field set`. Run commands with `tools/idf.sh exec python tools/devlog.py --cmd <command>`. The console runs in plain line mode on purpose: no history, arrow keys or tab completion, even in a terminal. It never sends escape-code queries that a script can't answer (spec §15, `components/diag/diag.c`).
+**Diagnostics console** (`diag`; full list in spec §15). Available now: `help`, `version`, `heap`, `reboot`, `screenshot`, `panel status|test|clear|mode <hpm|lpm>|rate <0.25|0.5|1|2|4|8>|fps [s]|init <factory|xiaozhi>`, `btn <key|boot> <short|double|long>` (simulated presses), `sensors`, `battery`, `rtc get|set <ISO 8601>`, `tasks`, `power idle [deep|light]`, `sleep stats [reset]|test <deep|light> <n>`, `field list|get <id>|set <id> <value>|clear <id>`, `preset list|set <id>`. Planned: `wifi status|scan`, `sync now`, `audio tone`. Drive the UI with `btn` and `screenshot` instead of asking the owner to press buttons. Inject test data with `field set`. Run commands with `tools/idf.sh exec python tools/devlog.py --cmd <command>`. The console runs in plain line mode on purpose: no history, arrow keys or tab completion, even in a terminal. It never sends escape-code queries that a script can't answer (spec §15, `components/diag/diag.c`).
 
 **Done** means: the acceptance criteria pass at the right level, new logic has tests, power-affecting changes have measurements in `docs/power.md`, and this file and `docs/` are updated.
 
@@ -309,7 +315,7 @@ Use the cheapest level that proves the change. Any UI change needs at least leve
 - Compile-time defaults come from Kconfig (`REFLBO_*`, the `reflbo` menu in `main/Kconfig.projbuild`); runtime settings in NVS or LittleFS override them.
 - List a component's sources explicitly in `SRCS`, not `SRC_DIRS`. ESP-IDF globs `SRC_DIRS` only when CMake configures, so a new file would be left out of the build without any error.
 - Dependencies come from the ESP Component Registry through `idf_component.yml`, with pinned versions. Commit `dependencies.lock`. Never edit `managed_components/`.
-- Change configuration through `sdkconfig.defaults`, then run `idf.py reconfigure` or delete `sdkconfig`. `sdkconfig` is generated and gitignored. Personal overrides, such as dev Wi-Fi credentials, go in the gitignored `sdkconfig.defaults.local`.
+- Change configuration through `sdkconfig.defaults`, then delete `sdkconfig` and build. An existing `sdkconfig` keeps the values it has, so `reconfigure` only adds options that are new. `sdkconfig` is generated and gitignored. Personal overrides, such as dev Wi-Fi credentials, go in the gitignored `sdkconfig.defaults.local`.
 - Never commit secrets: Wi-Fi passwords, MQTT credentials, tokens or API keys.
 
 **Licence**

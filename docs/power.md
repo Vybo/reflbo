@@ -25,3 +25,4 @@ Firmware at M2 (4704a19), measured with `sleep test` and `sleep stats` on 2026-0
 
 | Date | Commit | Scenario | Settings | Meter | Window | mAh | Mean at 5 V | Est. battery current | Notes |
 |---|---|---|---|---|---|---|---|---|---|
+| 2026-09-28 | 4704a19 | Deep sleep, idle | `power idle deep`; display every 1 min, sensors every 5 min; LPM 1 Hz; 18650 removed; wall charger | Owner's USB meter | 1 h 55 min | 21.78 (0.114 Wh) | 11.4 mA at 5.23 V (meter: a fairly steady 11.18 mA) | — | The clock was invalid throughout. With no battery, moving the cable cut the power, which stopped the RTC, so the screen showed "Set time" and most wakes pushed no frame. Also includes the charger running with no battery. The battery estimate waits for the USB-path overhead (PWR-off reading) |

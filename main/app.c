@@ -5,15 +5,19 @@
 #include "board.h"
 #include "board_buttons.h"
 #include "board_pins.h"
+#include "diag.h"
 #include "display.h"
 #include "driver/gpio.h"
+#include "esp_app_desc.h"
 #include "esp_attr.h"
 #include "esp_check.h"
+#include "esp_core_dump.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
 #include "power.h"
 #include "pcf85063.h"
 #include "scheduler.h"
@@ -280,16 +284,58 @@ static esp_err_t start_rtc_int(void)
     return gpio_isr_handler_add(BOARD_PIN_RTC_INT, on_rtc_int, NULL);
 }
 
+/* The RTC alarm or its backup timer: back to sleep in a fraction of a second, unless the board
+ * then decides to stay awake. */
+static bool routine_wake(power_wake_t wake)
+{
+    return wake == POWER_WAKE_RTC || wake == POWER_WAKE_TIMER;
+}
+
+/* Logs, settings and the console: what a board needs once it stays awake. Routine wakes skip
+ * them, because they cost time on every wake and nobody can use them (spec §3.3). */
+static void come_alive(void)
+{
+    static bool s_alive;
+    if (s_alive) {
+        return;
+    }
+    s_alive = true;
+    esp_log_level_set("*", ESP_LOG_INFO);
+    ESP_LOGI(TAG, "reflbo %s starting", esp_app_get_description()->version);
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_OK) {
+        err = power_load_settings();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "power settings: %s", esp_err_to_name(err));
+        }
+    } else {
+        /* Never erase NVS on our own (AGENTS.md quick rule 3): settings fall back to defaults. */
+        ESP_LOGE(TAG, "NVS unavailable (%s); settings use their defaults", esp_err_to_name(err));
+    }
+    err = diag_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "diagnostics console failed to start: %s", esp_err_to_name(err));
+    }
+    size_t dump_addr, dump_size; /* spec §16; IDF's own boot check is off, it would run every wake */
+    if (esp_core_dump_image_get(&dump_addr, &dump_size) == ESP_OK) {
+        ESP_LOGW(TAG, "a %u-byte core dump is in flash; read it with `idf.py coredump-info`", (unsigned)dump_size);
+    }
+}
+
 static esp_err_t boot(void)
 {
-    ESP_RETURN_ON_ERROR(power_init(), TAG, "power");
+    esp_err_t err = power_init();
     power_wake_t wake = power_boot_wake();
+    if (!routine_wake(wake)) {
+        come_alive();
+    }
+    ESP_RETURN_ON_ERROR(err, TAG, "power");
     bool warm = wake != POWER_WAKE_COLD && util_snapshot_valid(&s_snap, sizeof(s_snap), SNAP_MAGIC, SNAP_VERSION);
 
     ESP_RETURN_ON_ERROR(board_init(wake == POWER_WAKE_COLD), TAG, "board");
     ESP_RETURN_ON_ERROR(pcf85063_init(board_i2c()), TAG, "RTC");
     ESP_RETURN_ON_ERROR(timekeeping_init(CONFIG_REFLBO_TZ), TAG, "time zone");
-    esp_err_t err = timekeeping_load_from_rtc();
+    err = timekeeping_load_from_rtc();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RTC read: %s", esp_err_to_name(err));
     }
@@ -346,6 +392,7 @@ static void app_task(void *arg)
             power_sleep_retry(RETRY_S);
             break;
         case POWER_PLAN_AWAKE:
+            come_alive();
             break;
         }
         int64_t wait_ms = TETHER_RECHECK_MS; /* a failed boot has no schedule to wait for */

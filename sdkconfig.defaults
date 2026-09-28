@@ -18,9 +18,12 @@ CONFIG_SPIRAM_MEMTEST=n
 # Console and logs on the USB-Serial-JTAG port
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
-# Core dumps go to the coredump partition (spec §16)
+# Core dumps go to the coredump partition (spec §16). Read them with `idf.py coredump-info`. Every
+# boot, deep-sleep wakes included, would otherwise print its log lines and checksum a stored dump.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECK_BOOT=n
+CONFIG_ESP_COREDUMP_LOGS=n
 
 # `tasks` console command
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
@@ -29,3 +32,9 @@ CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
 # Faster deep-sleep wakes: skip image validation, quiet bootloader (spec §9.4 optimisation candidates)
 CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP=y
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# Routine deep-sleep wakes print nothing: each line costs time on every wake, and untethered a
+# full USB FIFO stalls the first write for up to 50 ms. The app raises logs to INFO at runtime
+# once it knows the board stays awake, so INFO stays compiled in.
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y

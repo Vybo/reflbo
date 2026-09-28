@@ -40,8 +40,12 @@ typedef struct {
     uint32_t slept_ms_min;
 } power_stats_t;
 
-/* Call once at boot, after nvs_flash_init(): decodes and counts the wake cause. */
+/* Call once at boot, before anything else: decodes and counts the wake cause. The idle strategy
+ * comes from the copy in RTC RAM until power_load_settings() runs. */
 esp_err_t power_init(void);
+/* Reads the settings from NVS (after nvs_flash_init()). Routine deep-sleep wakes skip NVS and use
+ * the copy kept in RTC RAM. */
+esp_err_t power_load_settings(void);
 /* The app could not start: the policy keeps the board awake for the console while a PC is
  * attached, and returns POWER_PLAN_RETRY otherwise. */
 void power_boot_failed(void);

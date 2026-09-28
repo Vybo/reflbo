@@ -156,6 +156,7 @@ Initial task plan (finalised in the implementation plan): app (core 1), sync (co
   3. Re-attach SPI without resetting the panel.
   4. Re-read the RTC.
   5. Post the event (`MINUTE_TICK`, `BUTTON` or `ALARM_DUE`), handle it normally, then go idle.
+- **Routine wakes** (the RTC alarm or its backup timer): skip the console, NVS and info-level logs. Each costs time on every wake, and no PC can enumerate the board before it sleeps again. The app starts all three once it decides to stay awake: after a button, while tethered, or when a `sleep test` ends. Settings needed on routine wakes (the idle strategy) are mirrored in RTC RAM.
 - **Boot failure** (a driver fails to start): while a PC is attached, stay awake with the console up. Otherwise deep-sleep for 5 min, or until KEY or BOOT, then boot from scratch with a reset, so every driver and the panel start over. The RTC alarm is not a wake source then, because whatever broke the boot may hold INT low.
 - **Button presses after a deep-sleep wake.** The press that woke the chip may be over by the time the app runs, roughly 100–300 ms later.
   - If the pin is already high, treat it as a short press. When the current context binds a double press, wait out the double-press window first.
@@ -819,7 +820,7 @@ pyserial comes from the ESP-IDF Python environment. Pillow lives in a separate t
 
 ## 16. Error handling and robustness
 
-- **Crashes.** The task watchdog is on. A panic writes a core dump to flash. The next boot reports the dump in the log and makes it available through the console and the web UI, then erases it.
+- **Crashes.** The task watchdog is on. A panic writes a core dump to flash. The next boot that comes alive (not a routine wake, §3.3) reports the dump in the log; `idf.py coredump-info` reads it. Later the console and the web UI make it available, then erase it.
 - **Power.** The brownout detector is on. Critical battery is handled before a brownout happens (§8).
 - **Network.** Every network call has a timeout. Failures are recorded per sync step and shown in Info and the web UI. Network work never blocks the UI.
 - **Config files.** Atomic writes, `.bak` copies, schema validation, falling back to defaults (§14.3).

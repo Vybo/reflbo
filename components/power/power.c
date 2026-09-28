@@ -19,7 +19,7 @@
 #include "util_snapshot.h"
 
 #define STATE_MAGIC   0x72666c70u /* "rflp" */
-#define STATE_VERSION 3
+#define STATE_VERSION 4
 #define NVS_NAMESPACE "sys"
 #define NVS_KEY_IDLE  "idle"
 #define TEST_END_HOLD_MS 3000
@@ -33,6 +33,8 @@ typedef struct {
     int32_t test_cycles;
     uint8_t test_mode;
     uint8_t test_ended; /* the last test cycle just ran: stay awake so the PC finds the board */
+    uint8_t idle_valid; /* `idle` mirrors NVS, so routine wakes need not open it */
+    uint8_t idle;
     uint8_t retry;      /* boot failed: boot from scratch at the next wake */
 } power_state_t;
 
@@ -40,6 +42,7 @@ static RTC_DATA_ATTR power_state_t s_rtc; /* survives deep sleep only */
 static power_idle_t s_strategy;
 static power_wake_t s_boot_wake;
 static bool s_boot_failed;
+static bool s_cpu_pd_ready;
 static int64_t s_hold_until_us;
 static int64_t s_awake_since_us; /* esp_timer time this awake phase began; -1 after a stats reset */
 
@@ -78,15 +81,34 @@ esp_err_t power_init(void)
 #else
     s_strategy = POWER_IDLE_LIGHT;
 #endif
+    if (s_rtc.idle_valid && s_rtc.idle <= POWER_IDLE_DEEP) {
+        s_strategy = (power_idle_t)s_rtc.idle;
+    }
+    return ESP_OK;
+}
+
+static void cache_strategy(void)
+{
+    s_rtc.idle = (uint8_t)s_strategy;
+    s_rtc.idle_valid = 1;
+    seal();
+}
+
+esp_err_t power_load_settings(void)
+{
     nvs_handle_t nvs;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
         uint8_t v;
-        if (nvs_get_u8(nvs, NVS_KEY_IDLE, &v) == ESP_OK && v <= POWER_IDLE_DEEP) {
+        err = nvs_get_u8(nvs, NVS_KEY_IDLE, &v);
+        nvs_close(nvs);
+        if (err == ESP_OK && v <= POWER_IDLE_DEEP) {
             s_strategy = (power_idle_t)v;
         }
-        nvs_close(nvs);
     }
-    ESP_RETURN_ON_ERROR(esp_sleep_cpu_pd_low_init(), TAG, "CPU power-down in light sleep");
+    /* NOT_FOUND: nothing stored yet, so the Kconfig default stands. */
+    ESP_RETURN_ON_FALSE(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND, err, TAG, "NVS read");
+    cache_strategy();
     return ESP_OK;
 }
 
@@ -213,6 +235,13 @@ static uint64_t sleep_us_until(time_t until_utc)
 
 power_wake_t power_sleep_light(time_t until_utc)
 {
+    if (!s_cpu_pd_ready) { /* on first use: boots that only deep-sleep never need the buffer */
+        s_cpu_pd_ready = true;
+        esp_err_t err = esp_sleep_cpu_pd_low_init();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "CPU stays powered in light sleep: %s", esp_err_to_name(err));
+        }
+    }
     count_sleep(false);
     for (size_t i = 0; i < sizeof(k_wake_pins) / sizeof(k_wake_pins[0]); i++) {
         gpio_intr_disable(k_wake_pins[i]);
@@ -295,6 +324,7 @@ esp_err_t power_set_idle_strategy(power_idle_t idle)
     nvs_close(nvs);
     ESP_RETURN_ON_ERROR(err, TAG, "NVS write");
     s_strategy = idle;
+    cache_strategy();
     return ESP_OK;
 }
 

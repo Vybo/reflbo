@@ -89,6 +89,35 @@ static void test_is_slot_needs_a_whole_minute(void)
     TEST_ASSERT_FALSE(scheduler_is_slot(utc(2026, 9, 25, 8, 6, 0), 5));
 }
 
+static void test_seconds_display_wakes_every_second_and_keeps_the_minute_alarm(void)
+{
+    time_t now = utc(2026, 9, 25, 18, 48, 20);
+    sched_wake_t w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, 0, true });
+    TEST_ASSERT_EQUAL_INT64(now + 1, w.when);
+    TEST_ASSERT_EQUAL_HEX(SCHED_SECOND, w.reasons);
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 25, 18, 49, 0), w.alarm);
+}
+
+static void test_cycle_switch_before_the_next_minute_comes_first(void)
+{
+    time_t now = utc(2026, 9, 25, 18, 48, 20);
+    sched_wake_t w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, now + 15, false });
+    TEST_ASSERT_EQUAL_INT64(now + 15, w.when);
+    TEST_ASSERT_EQUAL_HEX(SCHED_CYCLE, w.reasons);
+    w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, utc(2026, 9, 25, 18, 49, 0), false });
+    TEST_ASSERT_EQUAL_HEX(SCHED_DISPLAY | SCHED_CYCLE, w.reasons); /* same second: both */
+    w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, now + 3600, false });
+    TEST_ASSERT_EQUAL_INT64(w.alarm, w.when);
+}
+
+static void test_an_overdue_cycle_switch_runs_in_the_next_second(void)
+{
+    time_t now = utc(2026, 9, 25, 18, 48, 20);
+    sched_wake_t w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, now - 30, false });
+    TEST_ASSERT_EQUAL_INT64(now + 1, w.when);
+    TEST_ASSERT_EQUAL_HEX(SCHED_CYCLE, w.reasons);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -99,5 +128,8 @@ int main(void)
     RUN_TEST(test_spring_forward_skips_the_missing_hour);
     RUN_TEST(test_fall_back_keeps_quarter_hours);
     RUN_TEST(test_is_slot_needs_a_whole_minute);
+    RUN_TEST(test_seconds_display_wakes_every_second_and_keeps_the_minute_alarm);
+    RUN_TEST(test_cycle_switch_before_the_next_minute_comes_first);
+    RUN_TEST(test_an_overdue_cycle_switch_runs_in_the_next_second);
     return UNITY_END();
 }

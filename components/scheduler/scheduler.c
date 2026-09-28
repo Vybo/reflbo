@@ -27,12 +27,18 @@ sched_wake_t scheduler_next_wake(const sched_input_t *in)
 {
     time_t display = next_slot(in->now, in->display_every_min);
     time_t sensors = next_slot(in->now, in->sensors_every_min);
-    sched_wake_t wake = { .when = display < sensors ? display : sensors, .reasons = 0 };
-    if (display == wake.when) {
-        wake.reasons |= SCHED_DISPLAY;
+    time_t cycle = in->cycle_at == 0 ? 0 : in->cycle_at > in->now ? in->cycle_at : in->now + 1; /* overdue: now */
+    time_t second = in->every_second ? in->now + 1 : 0;
+
+    sched_wake_t wake = { .alarm = display < sensors ? display : sensors };
+    wake.when = wake.alarm;
+    if (cycle != 0 && cycle < wake.when) {
+        wake.when = cycle;
     }
-    if (sensors == wake.when) {
-        wake.reasons |= SCHED_SENSORS;
+    if (second != 0 && second < wake.when) {
+        wake.when = second;
     }
+    wake.reasons = (display == wake.when ? SCHED_DISPLAY : 0) | (sensors == wake.when ? SCHED_SENSORS : 0) |
+                   (cycle == wake.when ? SCHED_CYCLE : 0) | (second == wake.when ? SCHED_SECOND : 0);
     return wake;
 }

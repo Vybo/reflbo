@@ -24,9 +24,9 @@ target_link_libraries(util PUBLIC m)
 target_include_directories(util PUBLIC ${REPO_ROOT}/components/util/include)
 target_compile_options(util PRIVATE ${REFLBO_WARNINGS})
 
-# gfx: every source in the component, generated fonts included.
+# gfx: every source in the component, generated fonts and icons included.
 file(GLOB GFX_SOURCES CONFIGURE_DEPENDS
-     ${REPO_ROOT}/components/gfx/*.c ${REPO_ROOT}/components/gfx/fonts/*.c)
+     ${REPO_ROOT}/components/gfx/*.c ${REPO_ROOT}/components/gfx/fonts/*.c ${REPO_ROOT}/components/gfx/icons/*.c)
 add_library(gfx STATIC ${GFX_SOURCES})
 target_include_directories(gfx PUBLIC ${REPO_ROOT}/components/gfx/include)
 target_compile_options(gfx PRIVATE ${REFLBO_WARNINGS})

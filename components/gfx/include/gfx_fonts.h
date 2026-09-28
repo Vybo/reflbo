@@ -6,6 +6,11 @@
 extern const gfx_font_t gfx_font_sans_12;
 extern const gfx_font_t gfx_font_sans_16;
 extern const gfx_font_t gfx_font_sans_20;
+extern const gfx_font_t gfx_font_sans_bold_16;
 extern const gfx_font_t gfx_font_sans_bold_20;
 extern const gfx_font_t gfx_font_sans_bold_28;
-extern const gfx_font_t gfx_font_num_cb_130; /* DejaVu Sans Condensed Bold; digits, : . - ° % only */
+/* DejaVu Sans Condensed Bold; digits, space, % + , - . / : ° and the minus sign only */
+extern const gfx_font_t gfx_font_num_cb_48;
+extern const gfx_font_t gfx_font_num_cb_72;
+extern const gfx_font_t gfx_font_num_cb_110;
+extern const gfx_font_t gfx_font_num_cb_130;

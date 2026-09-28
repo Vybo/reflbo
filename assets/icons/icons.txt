@@ -1,0 +1,12 @@
+# Icons rendered into components/gfx/icons by tools/gen_icons.sh (spec §4.5).
+# C name       Material Icons name   sizes (px)
+thermometer    device_thermostat     16 24 48
+drop           water_drop            16 24 48
+dew            dew_point             24 48
+bolt           bolt                  16 24
+stale          sync_problem          16 24
+clock          schedule              24 48
+calendar       calendar_today        24 48
+person         person                24 48
+celebration    celebration           24 48
+cloud          cloud                 24 48

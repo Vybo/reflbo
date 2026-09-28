@@ -268,6 +268,7 @@ tools/idf.sh exec python tools/screenshot.py -o captures/screen.png --compare te
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
   && ctest --test-dir build-host --output-on-failure
 tools/gen_fonts.sh                          # regenerate components/gfx/fonts (needs uv; versions in tools/requirements.txt)
+tools/gen_icons.sh                          # regenerate components/gfx/icons from assets/icons (needs uv)
 python3 tools/render.py                     # host renderings to captures/render/*.png (after the host build)
 ```
 

@@ -1,0 +1,42 @@
+#pragma once
+
+#include <stdint.h>
+
+#include "gfx.h"
+
+/* Layouts (spec §5.2): fixed slot rectangles below a 20 px status bar. Pure C, host-buildable. */
+
+#define UI_STATUS_H 20
+#define UI_SLOT_MAX 6
+
+typedef enum {
+    UI_LAYOUT_CLASSIC,
+    UI_LAYOUT_WEATHER,
+    UI_LAYOUT_GRID,
+    UI_LAYOUT_FOCUS,
+    UI_LAYOUT_COUNT,
+} ui_layout_id_t;
+
+typedef enum {
+    UI_SIZE_S,
+    UI_SIZE_M,
+    UI_SIZE_L,
+    UI_SIZE_XL,
+} ui_size_t;
+
+typedef struct {
+    const char *name; /* as in presets.json: "main", "s1" */
+    gfx_rect_t rect;
+    ui_size_t size;
+    uint32_t kinds; /* UI_KIND() bits of the field kinds the slot accepts */
+} ui_slot_t;
+
+typedef struct {
+    const char *id; /* "classic" */
+    const ui_slot_t *slots;
+    int slot_count;
+} ui_layout_t;
+
+const ui_layout_t *ui_layout(ui_layout_id_t id); /* NULL if out of range */
+int ui_layout_by_name(const char *id);           /* -1 if unknown */
+int ui_slot_by_name(const ui_layout_t *layout, const char *name);

@@ -49,3 +49,7 @@ battery_state_t battery_gauge_state(const battery_gauge_t *g, uint32_t now_s);
 /* Days of battery left, in 0.1 days: the level divided by the discharge rate over up to the
  * last 24 h (spec §5.1 `bat.days`). -1 unless discharging with at least 6 h of history. */
 int battery_gauge_days_left10(const battery_gauge_t *g, uint32_t now_s);
+/* Moves every stored timestamp by delta_s. Call it when the clock is set, so the history keeps
+ * its spacing on the new clock; a board without the RTC cell starts in 2000 (spec §7). A clock
+ * that moves back without it restarts the history instead. */
+void battery_gauge_shift_time(battery_gauge_t *g, int64_t delta_s);

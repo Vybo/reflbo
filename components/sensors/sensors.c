@@ -168,6 +168,17 @@ int sensors_battery_days_left10(time_t now)
     return battery_gauge_days_left10(&s_state.gauge, (uint32_t)now);
 }
 
+void sensors_shift_time(int64_t delta_s)
+{
+    battery_gauge_shift_time(&s_state.gauge, delta_s);
+    if (s_state.env.time != 0) {
+        s_state.env.time += (time_t)delta_s;
+    }
+    if (s_state.battery_time != 0) {
+        s_state.battery_time += (time_t)delta_s;
+    }
+}
+
 sensors_env_t sensors_env(void)
 {
     return s_state.env;

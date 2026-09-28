@@ -209,6 +209,7 @@ static void handle_event(const app_event_t *ev)
         xSemaphoreGive(ev->call.done);
         int64_t moved = now_ms() - before;
         if (timekeeping_valid() != was_valid || moved < 0 || moved > 2000) {
+            sensors_shift_time(moved / 1000); /* the battery history keeps its spacing on the new clock */
             on_tick(true); /* `rtc set` and friends: show the new time now, not at the next slot */
         }
         power_hold_awake_ms(GRACE_MS);

@@ -10,6 +10,7 @@
 #define STEADY_MV         10
 #define LEVEL_SPACING_S   3600  /* one days-left point per hour */
 #define DAYS_MIN_SPAN_S   21600 /* 6 h of discharge before estimating */
+#define DAYS_MAX_SPAN_S   90000 /* levels older than a day (plus one spacing) belong to another clock */
 
 /* Right after a point is added, the oldest one must already be a full window old, at any sample
  * interval, or the state falls back to UNKNOWN until the next point arrives. */
@@ -100,6 +101,14 @@ void battery_gauge_add(battery_gauge_t *g, uint32_t now_s, int mv)
     if (mv < 1) {
         mv = 1; /* ema_mv16 == 0 means "no sample yet" */
     }
+    const battery_level_point_t *last_level =
+        g->level_count ? &g->levels[(g->level_head + BATTERY_LEVEL_HISTORY - 1) % BATTERY_LEVEL_HISTORY] : NULL;
+    if ((g->count && now_s < newest(g)->time_s) || (last_level != NULL && now_s < last_level->time_s)) {
+        g->count = 0; /* the clock moved back unshifted: the spacing and windows can't use that history */
+        g->head = 0;
+        g->level_count = 0;
+        g->level_head = 0;
+    }
     bool first = g->ema_mv16 == 0;
     if (first) {
         g->ema_mv16 = (uint32_t)mv * 16u;
@@ -142,8 +151,16 @@ int battery_gauge_days_left10(const battery_gauge_t *g, uint32_t now_s)
     if (g->level_count == 0 || battery_gauge_state(g, now_s) != BATTERY_DISCHARGING) {
         return -1;
     }
-    const battery_level_point_t *oldest =
-        &g->levels[(g->level_head + BATTERY_LEVEL_HISTORY - g->level_count) % BATTERY_LEVEL_HISTORY];
+    const battery_level_point_t *oldest = NULL; /* the oldest level from the last day */
+    for (unsigned k = g->level_count; k > 0 && oldest == NULL; k--) {
+        const battery_level_point_t *p = &g->levels[(g->level_head + BATTERY_LEVEL_HISTORY - k) % BATTERY_LEVEL_HISTORY];
+        if (p->time_s <= now_s && now_s - p->time_s <= DAYS_MAX_SPAN_S) {
+            oldest = p;
+        }
+    }
+    if (oldest == NULL) {
+        return -1;
+    }
     uint32_t span = now_s - oldest->time_s;
     int now_pct10 = battery_percent10_from_mv(battery_gauge_mv(g));
     int drop = oldest->pct10 - now_pct10;
@@ -152,6 +169,22 @@ int battery_gauge_days_left10(const battery_gauge_t *g, uint32_t now_s)
     }
     int64_t days10 = (int64_t)now_pct10 * span * 10 / ((int64_t)drop * 86400);
     return days10 > 9999 ? 9999 : (int)days10;
+}
+
+static uint32_t shifted(uint32_t t, int64_t delta_s)
+{
+    int64_t v = (int64_t)t + delta_s;
+    return v < 0 ? 0 : v > (int64_t)UINT32_MAX ? UINT32_MAX : (uint32_t)v;
+}
+
+void battery_gauge_shift_time(battery_gauge_t *g, int64_t delta_s)
+{
+    for (unsigned i = 0; i < BATTERY_HISTORY; i++) {
+        g->history[i].time_s = shifted(g->history[i].time_s, delta_s);
+    }
+    for (unsigned i = 0; i < BATTERY_LEVEL_HISTORY; i++) {
+        g->levels[i].time_s = shifted(g->levels[i].time_s, delta_s);
+    }
 }
 
 int battery_gauge_mv(const battery_gauge_t *g)

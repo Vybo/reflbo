@@ -157,6 +157,39 @@ static void test_charging_restarts_the_days_left_history(void)
     TEST_ASSERT_EQUAL_INT(0, s_g.level_count);
 }
 
+/* The clock moves when it is set (a board without the RTC cell starts in 2000, spec §7). */
+#define YEAR_2000 946684800u
+
+static void test_a_shifted_history_keeps_the_estimate_across_a_clock_set(void)
+{
+    uint32_t t = discharge(YEAR_2000, 3790, 2, 8);
+    int64_t delta = 26LL * 365 * 86400;
+    battery_gauge_shift_time(&s_g, delta); /* what the app does when the time is set */
+    uint32_t now = t + (uint32_t)delta + 300;
+    battery_gauge_add(&s_g, now, 3774);
+    TEST_ASSERT_INT_WITHIN(3, 26, battery_gauge_days_left10(&s_g, now));
+    TEST_ASSERT_EQUAL(BATTERY_DISCHARGING, battery_gauge_state(&s_g, now));
+}
+
+static void test_a_clock_moved_forward_gives_no_estimate_rather_than_a_wrong_one(void)
+{
+    uint32_t t = discharge(YEAR_2000, 3790, 2, 8);
+    uint32_t later = t + 26u * 365 * 86400; /* set to the real date, nobody shifted the history */
+    for (int i = 1; i <= 12; i++) {
+        battery_gauge_add(&s_g, later + (uint32_t)i * 300u, 3774);
+    }
+    TEST_ASSERT_EQUAL_INT(-1, battery_gauge_days_left10(&s_g, later + 3600));
+}
+
+static void test_a_clock_moved_back_restarts_the_history(void)
+{
+    uint32_t t = discharge(1000000, 3790, 2, 8);
+    battery_gauge_add(&s_g, t - 3 * 3600, 3774); /* the clock was a few hours ahead */
+    TEST_ASSERT_EQUAL_INT(1, s_g.level_count);
+    TEST_ASSERT_EQUAL_INT(1, s_g.count);
+    TEST_ASSERT_EQUAL_INT(-1, battery_gauge_days_left10(&s_g, t - 3 * 3600));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -174,5 +207,8 @@ int main(void)
     RUN_TEST(test_days_left_after_six_hours_of_discharge);
     RUN_TEST(test_no_days_left_before_six_hours_or_without_a_drop);
     RUN_TEST(test_charging_restarts_the_days_left_history);
+    RUN_TEST(test_a_shifted_history_keeps_the_estimate_across_a_clock_set);
+    RUN_TEST(test_a_clock_moved_forward_gives_no_estimate_rather_than_a_wrong_one);
+    RUN_TEST(test_a_clock_moved_back_restarts_the_history);
     return UNITY_END();
 }

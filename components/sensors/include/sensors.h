@@ -46,5 +46,7 @@ sensors_env_t sensors_env(void);
 sensors_battery_t sensors_battery(time_t now);
 /* 0.1 days of battery left, or -1 (battery_gauge_days_left10). */
 int sensors_battery_days_left10(time_t now);
+/* The clock was set by delta_s: moves the reading times and the battery histories with it. */
+void sensors_shift_time(int64_t delta_s);
 void sensors_export(sensors_state_t *out);
 void sensors_import(const sensors_state_t *in);

@@ -90,6 +90,12 @@ target_include_directories(cjson PUBLIC ${REFLBO_IDF_PATH}/components/json/cJSON
 target_compile_options(cjson PRIVATE -Wno-deprecated-declarations) # its sprintf calls; third-party code
 target_link_libraries(cjson PUBLIC m)
 
+# storage: the settings codec and the config-file logic build on the host; the mount does not.
+add_library(storage_logic STATIC ${REPO_ROOT}/components/storage/settings.c)
+target_include_directories(storage_logic PUBLIC ${REPO_ROOT}/components/storage/include)
+target_compile_options(storage_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(storage_logic PRIVATE cjson m)
+
 # ui: pure C on top of gfx, locale and the datastore.
 file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)
 add_library(ui STATIC ${UI_SOURCES})
@@ -126,6 +132,7 @@ reflbo_host_test(test_lang locale)
 reflbo_host_test(test_datastore datastore)
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
+reflbo_host_test(test_settings storage_logic)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

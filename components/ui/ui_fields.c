@@ -77,7 +77,9 @@ static void resolve_temperature(const ui_context_t *ctx, ds_field_t f, ui_value_
     if (!from_store(ctx, f, out, &e)) {
         return;
     }
-    lang_format_decimal(ctx->lang, temp_tenths(ctx, e.value), 1, out->text, sizeof(out->text));
+    long tenths = temp_tenths(ctx, e.value);
+    lang_format_decimal(ctx->lang, tenths, 1, out->text, sizeof(out->text));
+    lang_format_decimal(ctx->lang, (tenths + (tenths >= 0 ? 5 : -5)) / 10, 0, out->short_text, sizeof(out->short_text));
     snprintf(out->unit, sizeof(out->unit), "%s", ctx->fahrenheit ? "°F" : "°C");
     out->trend = trend_sign(e.trend, TEMP_TREND_C100);
 }
@@ -116,6 +118,7 @@ static void resolve_store(const ui_context_t *ctx, ui_field_id_t field, ui_value
                 snprintf(out->text, sizeof(out->text), "%ld", (long)(e.value + 5) / 10);
             } else {
                 lang_format_decimal(ctx->lang, e.value, 1, out->text, sizeof(out->text));
+                lang_format_decimal(ctx->lang, (e.value + 5) / 10, 0, out->short_text, sizeof(out->short_text));
             }
             snprintf(out->unit, sizeof(out->unit), "%s", lang_str(ctx->lang, LS_DAYS_UNIT));
         }

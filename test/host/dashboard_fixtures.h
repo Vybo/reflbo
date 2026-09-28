@@ -8,6 +8,15 @@
 /* The dashboard fixtures for the golden renders (test_ui_dashboard_golden.c, render_dashboard.c):
  * a context and a preset each, on top of context_fixtures.h. */
 
+/* One reading only, so today's low and high equal it; the battery as in fixture_fill. */
+static inline void fixture_single(ds_t *ds, int temp_c100, int hum_pct100)
+{
+    ds_init(ds);
+    ds_set_env(ds, temp_c100, hum_pct100, FIX_NOW, FIX_DAY);
+    ds_set_battery(ds, 87, 3921, DS_BAT_DISCHARGING, FIX_NOW);
+    ds_set(ds, DS_BAT_DAYS, 85, FIX_NOW);
+}
+
 static inline ui_preset_t fixture_preset(const char *id)
 {
     ui_presets_t all;
@@ -51,6 +60,21 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
     } else if (strcmp(name, "home_inverted") == 0) {
         *preset = fixture_preset("home");
         preset->invert = true;
+    } else if (strcmp(name, "indoor_hot_f") == 0) { /* 38.2 °C in °F: three digits */
+        *preset = fixture_preset("indoor");
+        fixture_single(&s_fix_ds, 3820, 3000);
+        ctx->fahrenheit = true;
+    } else if (strcmp(name, "indoor_frost") == 0) { /* -12.5 °C; the dew point is -18.7 °C */
+        *preset = fixture_preset("indoor");
+        fixture_single(&s_fix_ds, -1250, 6000);
+    } else if (strcmp(name, "home_frost") == 0) {
+        *preset = fixture_preset("home");
+        fixture_single(&s_fix_ds, -1250, 6000);
+    } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
+        *preset = fixture_preset("indoor");
+        preset->slots[0] = UI_FIELD_TIME_CLOCK;
+        ctx->clock_24h = false;
+        ctx->local = fixture_local(12, 58, 0);
     } else {
         return false;
     }
@@ -59,4 +83,5 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
 
 static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather", "focus", "home_invalid",
                                                     "home_stale", "home_12h_charging", "indoor_cold",
-                                                    "focus_seconds", "home_battery_details", "home_inverted" };
+                                                    "focus_seconds", "home_battery_details", "home_inverted",
+                                                    "indoor_hot_f", "indoor_frost", "home_frost", "grid_clock_12h" };

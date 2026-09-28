@@ -294,7 +294,7 @@ Every layout has a status bar (top 20 px):
 
 ### 5.3 Widgets
 
-- There is one renderer per field kind and size class (XL/L/M/S). For example, a number widget in M shows label, value and unit; in S it shows an icon, the value and a short label. XL steps its font down (130, 110, 72, 48 px) until the value fits. Text that still doesn't fit ends in an ellipsis, and a widget never draws outside its slot.
+- There is one renderer per field kind and size class (XL/L/M/S). For example, a number widget in M shows label, value and unit; in S it shows an icon and the value with its unit. A number that doesn't fit its slot first drops its decimals ("101 °F" for 100.8 °F), then steps down to smaller fonts; only if it still doesn't fit is it cut with an ellipsis. Text that doesn't fit ends in an ellipsis, and a widget never draws outside its slot.
 - Each slot sets a policy for missing or stale data (a preset option):
   - `hide`: leave the slot empty.
   - `placeholder`: show `—`.

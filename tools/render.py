@@ -13,7 +13,8 @@ import pbm_png  # noqa: E402
 
 # name -> renderer executable in the build directory and its arguments (the output path comes last)
 DASHBOARDS = ["home", "indoor", "weather", "focus", "home_invalid", "home_stale", "home_12h_charging", "indoor_cold",
-              "focus_seconds", "home_battery_details", "home_inverted"]  # test/host/dashboard_fixtures.h
+              "focus_seconds", "home_battery_details", "home_inverted", "indoor_hot_f", "indoor_frost", "home_frost",
+              "grid_clock_12h"]  # test/host/dashboard_fixtures.h
 RENDERERS = {
     "test_pattern": ["render_test_pattern"],
     **{f"dash_{name}": ["render_dashboard", name] for name in DASHBOARDS},

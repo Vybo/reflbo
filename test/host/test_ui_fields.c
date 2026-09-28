@@ -112,6 +112,22 @@ static void test_old_readings_are_stale_with_their_age(void)
     TEST_ASSERT_EQUAL_STRING("23.4", v.text);
 }
 
+static void test_numbers_with_decimals_carry_a_whole_number_form(void)
+{
+    TEST_ASSERT_EQUAL_STRING("23", resolve(UI_FIELD_ENV_TEMP).short_text); /* 23.4 */
+    ds_set(&s_fix_ds, DS_ENV_TEMP, -1250, FIX_NOW);
+    ui_value_t v = resolve(UI_FIELD_ENV_TEMP);
+    TEST_ASSERT_EQUAL_STRING("-12.5", v.text);
+    TEST_ASSERT_EQUAL_STRING("-13", v.short_text); /* half away from zero */
+    s_ctx.fahrenheit = true;
+    ds_set(&s_fix_ds, DS_ENV_TEMP, 3820, FIX_NOW);
+    v = resolve(UI_FIELD_ENV_TEMP);
+    TEST_ASSERT_EQUAL_STRING("100.8", v.text);
+    TEST_ASSERT_EQUAL_STRING("101", v.short_text);
+    TEST_ASSERT_EQUAL_STRING("9", resolve(UI_FIELD_BAT_DAYS).short_text); /* 8.5 */
+    TEST_ASSERT_EQUAL_STRING("", resolve(UI_FIELD_ENV_HUM).short_text);   /* no decimals to drop */
+}
+
 static void test_none_resolves_to_missing(void)
 {
     ui_value_t v = resolve(UI_FIELD_NONE);
@@ -131,5 +147,6 @@ int main(void)
     RUN_TEST(test_english_has_no_name_days_or_holidays_and_weather_waits_for_m5);
     RUN_TEST(test_old_readings_are_stale_with_their_age);
     RUN_TEST(test_none_resolves_to_missing);
+    RUN_TEST(test_numbers_with_decimals_carry_a_whole_number_form);
     return UNITY_END();
 }

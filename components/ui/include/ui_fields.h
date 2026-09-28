@@ -94,7 +94,7 @@ typedef struct {
     char text[48];     /* the value: "23.4", "20:48", "Friday 25 September", a name */
     char unit[8];      /* "°C", "%", "d", or the AM/PM suffix of a time */
     char extra[24];    /* secondary text: the seconds, the medium date, the illumination, the voltage */
-    char short_text[16]; /* a shorter form for small slots: the short phase name */
+    char short_text[16]; /* a shorter form: the short phase name, or a number without its decimals */
     int trend;         /* -1 falling, 0 steady or unknown, 1 rising */
     int percent;       /* battery level or moon illumination */
     ds_bat_state_t battery;

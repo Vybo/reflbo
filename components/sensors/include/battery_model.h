@@ -7,7 +7,7 @@
  * state. Pure C, host-buildable; the ADC reading happens in battery.c.
  */
 
-#define BATTERY_HISTORY 8 /* samples kept for charging inference, at least 4 min apart */
+#define BATTERY_HISTORY 8 /* samples kept for charging inference, at least 4.5 min apart */
 
 typedef enum {
     BATTERY_UNKNOWN,     /* less than 30 min of history */

@@ -91,6 +91,25 @@ static void test_extra_samples_do_not_crowd_the_history(void)
     TEST_ASSERT_EQUAL_UINT8(1, s_g.count);
 }
 
+/* The review found that a 240 s history spacing with 8 slots spans only 28 min, so charging was
+ * never seen at 4-minute samples and flickered at 1 and 2 minutes. */
+static void test_charging_is_seen_at_every_sample_interval(void)
+{
+    const uint32_t intervals[] = { 60, 120, 180, 240, 300, 600 };
+    for (unsigned i = 0; i < sizeof(intervals) / sizeof(intervals[0]); i++) {
+        battery_gauge_init(&s_g);
+        int missed = 0;
+        for (uint32_t elapsed = 0; elapsed <= 3 * 3600; elapsed += intervals[i]) {
+            uint32_t now = 1000 + elapsed;
+            battery_gauge_add(&s_g, now, 3700 + (int)(elapsed * 2 / 60)); /* +2 mV per minute */
+            if (elapsed >= 40 * 60 && battery_gauge_state(&s_g, now) != BATTERY_CHARGING) {
+                missed++;
+            }
+        }
+        TEST_ASSERT_EQUAL_INT_MESSAGE(0, missed, "a sample interval hid the charging trend");
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -103,5 +122,6 @@ int main(void)
     RUN_TEST(test_rising_voltage_over_30_min_is_charging_and_raises_the_level);
     RUN_TEST(test_high_steady_voltage_is_full);
     RUN_TEST(test_extra_samples_do_not_crowd_the_history);
+    RUN_TEST(test_charging_is_seen_at_every_sample_interval);
     return UNITY_END();
 }

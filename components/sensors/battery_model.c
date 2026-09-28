@@ -3,11 +3,15 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define HISTORY_SPACING_S 240  /* keep one history point per ~5 min sample, skip extra samples */
+#define HISTORY_SPACING_S 270  /* at most one history point per 4.5 min; extra samples are skipped */
 #define TREND_WINDOW_S    1800 /* 30 min */
 #define CHARGE_RISE_MV    30
 #define FULL_MV           4150
 #define STEADY_MV         10
+
+/* Right after a point is added, the oldest one must already be a full window old, at any sample
+ * interval, or the state falls back to UNKNOWN until the next point arrives. */
+_Static_assert((BATTERY_HISTORY - 1) * HISTORY_SPACING_S >= TREND_WINDOW_S, "history too short for the trend window");
 
 /* Li-ion open-circuit voltage vs state of charge, NCR18650B-like (approximate; tune with data). */
 static const struct {

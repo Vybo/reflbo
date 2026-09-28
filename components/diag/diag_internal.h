@@ -1,5 +1,6 @@
 #pragma once
 
+#include "diag.h"
 #include "esp_err.h"
 
 /* tools/devlog.py waits for exactly this prompt. Keep the two in sync. */
@@ -11,5 +12,3 @@ esp_err_t diag_register_button_commands(void);  /* btn */
 esp_err_t diag_register_sensor_commands(void);  /* sensors, battery, rtc */
 esp_err_t diag_register_power_commands(void);   /* power, sleep */
 
-/* Runs a command body on the hardware owner's task (see diag_set_executor) and returns its result. */
-int diag_on_owner(int (*body)(int argc, char **argv), int argc, char **argv);

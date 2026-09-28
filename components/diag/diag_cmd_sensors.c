@@ -33,7 +33,8 @@ static int sensors_body(int argc, char **argv)
         return 1;
     }
     sensors_env_t env = sensors_env();
-    printf("sensors: %d.%02d C, %d.%02d %%RH\n", env.temp_c100 / 100, abs(env.temp_c100 % 100), env.hum_pct100 / 100,
+    int t = abs(env.temp_c100);
+    printf("sensors: %s%d.%02d C, %d.%02d %%RH\n", env.temp_c100 < 0 ? "-" : "", t / 100, t % 100, env.hum_pct100 / 100,
            env.hum_pct100 % 100);
     return 0;
 }
@@ -90,7 +91,9 @@ static int rtc_body(int argc, char **argv)
     }
     if (argc == 3 && strcmp(argv[1], "set") == 0) {
         time_t utc;
-        if (!timekeeping_parse_iso8601(argv[2], &utc)) {
+        struct tm year_check;
+        if (!timekeeping_parse_iso8601(argv[2], &utc) || gmtime_r(&utc, &year_check) == NULL ||
+            year_check.tm_year < 100 || year_check.tm_year > 199) { /* the RTC holds 2000-2099 */
             return usage(k_usage);
         }
         esp_err_t err = timekeeping_set_utc(utc);

@@ -13,3 +13,6 @@ typedef esp_err_t (*diag_executor_t)(void (*fn)(void *arg), void *arg);
 /* Commands that touch the display, I²C devices or sleep state run through this; set it before
  * diag_start(). Without one they run on the console task. */
 void diag_set_executor(diag_executor_t executor);
+/* Runs a command body on the executor's task and returns its result: for commands registered
+ * outside this component (main registers `field` and `preset`) after diag_start(). */
+int diag_on_owner(int (*body)(int argc, char **argv), int argc, char **argv);

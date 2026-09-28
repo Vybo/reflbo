@@ -29,8 +29,7 @@ static int power_body(int argc, char **argv)
         }
         esp_err_t err = power_set_idle_strategy(idle);
         if (err != ESP_OK) {
-            printf("power: %s\n", esp_err_to_name(err));
-            return 1;
+            printf("power: set for this session, not saved: %s\n", esp_err_to_name(err));
         }
     }
     printf("power: idle %s%s\n", power_idle_strategy() == POWER_IDLE_DEEP ? "deep" : "light",

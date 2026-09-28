@@ -4,7 +4,13 @@ menu "reflbo"
         string "Time zone (POSIX TZ string)"
         default "CET-1CEST,M3.5.0,M10.5.0/3"
         help
-            Default time zone, Europe/Prague (spec §7). Settings override it from M3.
+            Default time zone, Europe/Prague (spec §7). settings.json overrides it.
+
+    config REFLBO_TZ_NAME
+        string "Time zone name (IANA)"
+        default "Europe/Prague"
+        help
+            The name shown for REFLBO_TZ; settings.json keeps both (spec §7).
 
     config REFLBO_TEMP_OFFSET_C10
         int "SHTC3 temperature offset (0.1 °C)"

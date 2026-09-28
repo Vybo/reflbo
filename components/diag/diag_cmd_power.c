@@ -71,7 +71,7 @@ static int sleep_body(int argc, char **argv)
             return usage(k_usage);
         }
         int cycles = atoi(argv[3]);
-        if (cycles < 1 || cycles > 60) {
+        if (cycles < 1 || cycles > 1440) { /* up to a day of one-minute cycles */
             return usage(k_usage);
         }
         power_start_test(mode, cycles);

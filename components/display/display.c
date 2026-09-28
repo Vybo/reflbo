@@ -46,6 +46,11 @@ esp_err_t display_prepare_deep_sleep(void)
     return st7305_prepare_deep_sleep();
 }
 
+void display_cancel_deep_sleep(void)
+{
+    st7305_cancel_deep_sleep();
+}
+
 esp_err_t display_init(st7305_variant_t variant)
 {
     ESP_RETURN_ON_ERROR(alloc_fb(), TAG, "framebuffer");

@@ -51,6 +51,8 @@ esp_err_t st7305_push(const uint8_t *canonical);
 esp_err_t st7305_set_mode(st7305_mode_t mode);
 /* Sets the LPM refresh rate. Before st7305_init it is only stored; every init applies it. */
 esp_err_t st7305_set_lpm_rate(st7305_lpm_rate_t rate);
+/* Undoes st7305_prepare_deep_sleep() after it failed part-way, so the panel can be used again. */
+void st7305_cancel_deep_sleep(void);
 st7305_variant_t st7305_variant(void);
 st7305_mode_t st7305_mode(void);
 st7305_lpm_rate_t st7305_lpm_rate(void);

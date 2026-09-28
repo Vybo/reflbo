@@ -242,6 +242,13 @@ esp_err_t st7305_prepare_deep_sleep(void)
     return ESP_OK;
 }
 
+void st7305_cancel_deep_sleep(void)
+{
+    gpio_deep_sleep_hold_dis();
+    gpio_hold_dis(PIN_CS);
+    gpio_hold_dis(PIN_RST);
+}
+
 esp_err_t st7305_reinit(st7305_variant_t variant)
 {
     ESP_RETURN_ON_FALSE(s_bus_ready, ESP_ERR_INVALID_STATE, TAG, "call st7305_init first");
@@ -311,11 +318,16 @@ esp_err_t st7305_set_mode(st7305_mode_t mode)
 esp_err_t st7305_set_lpm_rate(st7305_lpm_rate_t rate)
 {
     ESP_RETURN_ON_FALSE((unsigned)rate <= ST7305_LPM_8HZ, ESP_ERR_INVALID_ARG, TAG, "LPM rate");
-    s_lpm_rate = rate;
+    st7305_lpm_rate_t previous = s_lpm_rate;
+    s_lpm_rate = rate; /* write_frame_rate() sends s_lpm_rate */
     if (s_io == NULL) {
         return ESP_OK; /* st7305_init applies it */
     }
-    return write_frame_rate(); /* applies at once, also in LPM (measured with panel fps) */
+    esp_err_t err = write_frame_rate(); /* applies at once, also in LPM (measured with panel fps) */
+    if (err != ESP_OK) {
+        s_lpm_rate = previous; /* the panel still runs at the old rate */
+    }
+    return err;
 }
 
 st7305_variant_t st7305_variant(void)
@@ -348,9 +360,7 @@ esp_err_t st7305_count_frames(uint32_t window_ms, uint32_t *frames)
         .intr_type = GPIO_INTR_POSEDGE,
     };
     ESP_RETURN_ON_ERROR(gpio_config(&te), TAG, "TE pin");
-    esp_err_t err = gpio_install_isr_service(0);
-    ESP_RETURN_ON_FALSE(err == ESP_OK || err == ESP_ERR_INVALID_STATE, err, TAG, "GPIO ISR service");
-    s_te_pulses = 0;
+    s_te_pulses = 0; /* the board component installed the GPIO ISR service (AGENTS.md §5.3) */
     ESP_RETURN_ON_ERROR(gpio_isr_handler_add(PIN_TE, on_te, NULL), TAG, "TE handler");
     vTaskDelay(pdMS_TO_TICKS(window_ms));
     gpio_isr_handler_remove(PIN_TE);

@@ -26,6 +26,7 @@ esp_err_t display_init_warm(const display_state_t *state);
 void display_export(display_state_t *out);
 /* Holds the panel pins for deep sleep. The last display call before sleeping. */
 esp_err_t display_prepare_deep_sleep(void);
+void display_cancel_deep_sleep(void); /* after display_prepare_deep_sleep() failed */
 gfx_fb_t *display_fb(void); /* NULL until display_init has allocated the framebuffer */
 /* Pushes the framebuffer if it changed since the last push (CRC32), or always when force is set. */
 esp_err_t display_commit(bool force);

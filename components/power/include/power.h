@@ -62,7 +62,8 @@ void power_sleep_deep(time_t until_utc);
 /* Never returns: deep sleep for `seconds` or until KEY or BOOT, then boot from scratch. */
 void power_sleep_retry(uint32_t seconds);
 power_idle_t power_idle_strategy(void);
-esp_err_t power_set_idle_strategy(power_idle_t idle); /* persisted in NVS */
+/* Applies at once; an error means only that NVS didn't keep it for the next boot. */
+esp_err_t power_set_idle_strategy(power_idle_t idle);
 /* `sleep test`: the next `cycles` sleeps use `mode` even when tethered. Resets the stats. */
 void power_start_test(power_idle_t mode, int cycles);
 int power_test_cycles_left(void);

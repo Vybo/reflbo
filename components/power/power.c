@@ -1,6 +1,7 @@
 #include "power.h"
 
 #include <stdio.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "board_pins.h"
@@ -175,7 +176,15 @@ power_plan_t power_plan(bool work_pending)
     return power_policy(&in);
 }
 
+/* The awake phase ended at `at_us` (esp_timer). */
+static void count_sleep_at(bool deep, int64_t at_us);
+
 static void count_sleep(bool deep)
+{
+    count_sleep_at(deep, esp_timer_get_time());
+}
+
+static void count_sleep_at(bool deep, int64_t at_us)
 {
     power_stats_t *st = &s_rtc.stats;
     if (deep) {
@@ -184,7 +193,7 @@ static void count_sleep(bool deep)
         st->light_sleeps++;
     }
     if (s_awake_since_us >= 0) {
-        uint32_t awake_ms = (uint32_t)((esp_timer_get_time() - s_awake_since_us) / 1000);
+        uint32_t awake_ms = (uint32_t)((at_us - s_awake_since_us) / 1000);
         st->awake_count++;
         st->awake_ms_total += awake_ms;
         st->awake_ms_last = awake_ms;
@@ -226,11 +235,13 @@ static void count_wake(power_wake_t wake, int64_t slept_ms)
     seal();
 }
 
+/* To the microsecond, so a wake set for a whole second (the seconds display) lands on it. */
 static uint64_t sleep_us_until(time_t until_utc)
 {
-    time_t now = time(NULL);
-    time_t left = until_utc > now ? until_utc - now : 1;
-    return (uint64_t)left * 1000000u;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    int64_t left = (int64_t)until_utc * 1000000 - ((int64_t)tv.tv_sec * 1000000 + tv.tv_usec);
+    return left > 1000 ? (uint64_t)left : 1000u;
 }
 
 power_wake_t power_sleep_light(time_t until_utc)
@@ -242,7 +253,6 @@ power_wake_t power_sleep_light(time_t until_utc)
             ESP_LOGW(TAG, "CPU stays powered in light sleep: %s", esp_err_to_name(err));
         }
     }
-    count_sleep(false);
     for (size_t i = 0; i < sizeof(k_wake_pins) / sizeof(k_wake_pins[0]); i++) {
         gpio_intr_disable(k_wake_pins[i]);
         gpio_wakeup_enable(k_wake_pins[i], GPIO_INTR_LOW_LEVEL);
@@ -258,7 +268,10 @@ power_wake_t power_sleep_light(time_t until_utc)
         gpio_intr_enable(k_wake_pins[i]);
     }
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
-    s_awake_since_us = woke_us;
+    if (err == ESP_OK) {
+        count_sleep_at(false, slept_from_us);
+        s_awake_since_us = woke_us;
+    }
 
     power_wake_t wake = POWER_WAKE_OTHER;
     if (gpio_get_level(BOARD_PIN_KEY) == 0) {
@@ -269,6 +282,9 @@ power_wake_t power_sleep_light(time_t until_utc)
         wake = POWER_WAKE_RTC;
     } else if (err == ESP_OK && (esp_sleep_get_wakeup_causes() & BIT(ESP_SLEEP_WAKEUP_TIMER))) {
         wake = POWER_WAKE_TIMER;
+    }
+    if (err != ESP_OK) {
+        return wake; /* rejected (a wake source was already active): not a sleep, no test cycle used */
     }
     count_wake(wake, (woke_us - slept_from_us) / 1000);
     finish_test();
@@ -315,6 +331,8 @@ power_idle_t power_idle_strategy(void)
 
 esp_err_t power_set_idle_strategy(power_idle_t idle)
 {
+    s_strategy = idle; /* applies for this session even if NVS can't keep it */
+    cache_strategy();
     nvs_handle_t nvs;
     ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs), TAG, "NVS open");
     esp_err_t err = nvs_set_u8(nvs, NVS_KEY_IDLE, (uint8_t)idle);
@@ -323,8 +341,6 @@ esp_err_t power_set_idle_strategy(power_idle_t idle)
     }
     nvs_close(nvs);
     ESP_RETURN_ON_ERROR(err, TAG, "NVS write");
-    s_strategy = idle;
-    cache_strategy();
     return ESP_OK;
 }
 

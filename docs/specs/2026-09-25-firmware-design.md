@@ -39,7 +39,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 |---|---|---|
 | D1 | Our own immediate-mode 1-bpp renderer | LVGL is not used |
 | D2 | ESP-IDF v5.5.x (v5.5.5 at the time of writing) | Revisit v6.x after M5 |
-| D3 | Choose the idle strategy (deep or light sleep) from USB power-meter measurements at M2 | Both are supported until then (§3.4) |
+| D3 | Light sleep is the default idle strategy (M2 measurement, 2026-09-28) | Both drew 11.5 mA at 5.24 V; the 3V3 converter's forced PWM dominates (§9.4). Deep sleep stays selectable |
 | D4 | English by default, structured as language packs | No other pack in v1 |
 | D5 | Home Assistant over MQTT with HA MQTT discovery | |
 | D6 | Power is best effort; an average below 2 mA is the stretch goal | |
@@ -176,6 +176,7 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 
 - **Tethered mode.** While a USB host is connected (`usb_serial_jtag_is_connected()`, checked before every sleep), the board stays awake, because either sleep interrupts the console and flashing. After a cold boot or a button wake it stays awake 2 s so a PC can find it. `sleep test <deep|light> <n>` forces sleep cycles while tethered, for testing.
 - **Decision rule at M2.** Choose deep sleep if the measured average current is clearly lower (guideline: at least 20 % lower at the one-minute cadence). Otherwise choose light sleep.
+- **Result (2026-09-28): light sleep.** Deep and light sleep both drew 11.5 mA at 5.24 V (60.35 and 60.29 mW over 58 min and 1 h 55 min), because the 3V3 converter runs in forced PWM (§9.4). Deep sleep stays selectable with `power idle deep`. Measure again if the board gets the PS/SYNC rework.
 
 ## 4. Display and rendering
 
@@ -522,7 +523,9 @@ On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync
   - M7: radio.
 - Record results in `docs/power.md` with the date, commit, settings and meter model. Many USB meters are inaccurate below 1 mA, so long accumulation windows matter.
 
-**Rough budget for the stretch goal** (to be replaced by measurements):
+**Measured at M2:** a floor of about 60 mW at 5.24 V (11.5 mA) in either sleep, with the chip awake 0.1 % of the time. 0.87 mA of it is the USB side (charger and power latch, read with the board switched off). Most of the rest is the TPS63020 3V3 converter: its PS/SYNC pin is tied high, which forces PWM, and TI gives about 10 % efficiency at 1 mA in that mode. The converter loss stays on battery too, so the stretch goal (D6) needs a board rework: PS/SYNC to GND enables power-save mode (25–50 µA quiescent).
+
+**Rough budget for the stretch goal** (assumes the converter in power-save mode; to be replaced by measurements):
 
 | Consumer | Estimate | Basis |
 |---|---|---|
@@ -889,7 +892,8 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 |---|---|
 | The panel keeping its image through deep sleep is unverified | Test at M1/M2; fall back to light sleep |
 | Waking through BOOT (GPIO0, a strapping pin) might enter download mode | Verify at M2. If it does, wake only on KEY and the RTC |
-| Real currents are unknown (panel LPM, board quiescent, PSRAM in light sleep) | Measure at M2 before building on either strategy |
+| Real currents are unknown (panel LPM, board quiescent, PSRAM in light sleep) | Measured at M2: the forced-PWM 3V3 converter dominates at about 60 mW. The panel and other 3V3 loads can only be split out after the PS/SYNC rework (M5) |
+| The stretch goal (D6) is out of reach on the board as built | Owner decision on the PS/SYNC rework (a VSON package with pins underneath); until then about 15 mA from the battery is expected (estimate) |
 | USB meters are inaccurate below 1 mA | Long mAh windows; note the limits in `docs/power.md` |
 | SHTC3 self-heating | Offset calibration; sample right after wake |
 | `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M7; pick another decoder if needed |
@@ -907,3 +911,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r4 | 2026-09-25 | M1 panel check: factory init sequence with a separate LPM rate, default 1 Hz, configurable at runtime (D12, §4.2); a 120 ms wait after a panel reset (datasheet §12.1.4); HPM/LPM switching delays from datasheet §7.11; `panel rate` and `panel fps` (§15); landscape only (D13); `display` and `util` components (§3.1) |
 | r5 | 2026-09-28 | M2: a tethered board stays awake and light sleep is entered explicitly (D14, §3.4), with measured wake costs; board, rtc and power rows updated (§3.1); NVS `sys/idle` (§14.2); `sleep test` (§15) |
 | r6 | 2026-09-28 | M2 review: routine wakes skip the console, NVS and info logs (§3.3), which cuts a deep wake from 168 to 63 ms of app time (§3.4); a failed boot keeps the console up while tethered, otherwise it sleeps 5 min and boots again (§3.3); `sleep stats` reports per-cycle slept times (§15); a boot that comes alive reports a stored core dump (§16) |
+| r7 | 2026-09-28 | M2 measurement: D3 is light sleep (§1.2, §3.4); the forced-PWM 3V3 converter sets a ~60 mW floor and puts the stretch goal out of reach without a board rework (§9.4, §20) |

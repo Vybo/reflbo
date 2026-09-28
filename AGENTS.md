@@ -29,7 +29,7 @@ Guiding principles:
 
 ## 2. Status and roadmap
 
-- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is implemented and reviewed: board services, the clock screen and both idle strategies. It waits for the owner's current measurements, which decide D3.
+- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). Next is M3, whose plan gets written before it starts.
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
 - **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-25-m2-board-clock-and-sleep.md`](docs/plans/2026-09-25-m2-board-clock-and-sleep.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
@@ -228,7 +228,7 @@ docs/            specs, plans, power measurements
 - **Web assets are embedded in the app image,** so OTA updates them. User data lives in the `storage` LittleFS partition, which `idf.py flash` never writes.
 - **Shared resources have one owner.** `board` owns the I²C bus (GPIO 13/14) and the GPIO ISR service. `st7305` owns SPI3_HOST and GPIO 5, 6, 11, 12, 40 and 41. `display`, `st7305`, the I²C device drivers and sleep are not thread-safe; they belong to the app task (`main/app.c`, spec §3.2). Console commands that touch them run on it through `diag_set_executor(app_execute)`.
 - **The device sleeps most of the time.** Every feature must work with that. For MQTT this means retained state, `expire_after`, and QoS 1 commands on a persistent session (spec §12).
-- **The idle strategy (deep or light sleep) stays switchable** until the M2 measurement (spec §3.4). Tethered mode, with a USB host connected, stays awake (gotcha 11).
+- **Light sleep is the default idle strategy** (D3). Deep sleep stays available through `power idle deep`, so a board with the PS/SYNC rework can be compared again (gotcha 23). Tethered mode, with a USB host connected, stays awake (gotcha 11).
 - For details, see spec §5.6 (controls), §9 (power and scheduling) and §5 (UI).
 
 ## 6. Environment and commands
@@ -333,7 +333,7 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 |---|---|
 | D1 | Our own immediate-mode renderer; no LVGL |
 | D2 | ESP-IDF v5.5.x |
-| D3 | The idle strategy (deep or light sleep) is chosen from USB power-meter measurements at M2 |
+| D3 | Light sleep is the default idle strategy. At M2 both strategies drew 11.5 mA at 5.24 V, because the 3V3 converter's forced PWM dominates (gotcha 23); deep sleep stays available (`power idle deep`) |
 | D4 | English UI, structured as language packs |
 | D5 | Home Assistant over MQTT |
 | D6 | Power is best effort; an average below 2 mA is the stretch goal |

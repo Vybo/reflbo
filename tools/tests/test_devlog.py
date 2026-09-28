@@ -1,4 +1,6 @@
 import io
+import pathlib
+import re
 import unittest
 from types import SimpleNamespace
 
@@ -122,6 +124,14 @@ class OpenPortTest(unittest.TestCase):
         ser = devlog.open_port("/dev/cu.usbmodemTEST", serial_factory=LineModelSerial)
         self.assertNotIn((False, True), ser.states)
         self.assertEqual(ser.states[-1], (False, False))
+
+
+class PromptTest(unittest.TestCase):
+    def test_prompt_matches_the_firmware(self):
+        header = pathlib.Path(__file__).resolve().parents[2] / "components/diag/diag_internal.h"
+        match = re.search(r'#define DIAG_PROMPT "([^"]*)"', header.read_text())
+        self.assertIsNotNone(match, "DIAG_PROMPT not found")
+        self.assertEqual(devlog.PROMPT, match.group(1))
 
 
 class StripAnsiTest(unittest.TestCase):

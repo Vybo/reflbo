@@ -12,6 +12,13 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(REPO_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 set(REFLBO_WARNINGS -Wall -Wextra -Werror)
 
+# cmake -DREFLBO_SANITIZE=ON: everything with AddressSanitizer and UndefinedBehaviorSanitizer.
+option(REFLBO_SANITIZE "Build the host tests with ASan and UBSan" OFF)
+if(REFLBO_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
 enable_testing()
 
 add_library(unity STATIC third_party/unity/unity.c)
@@ -159,7 +166,8 @@ target_compile_options(render_dashboard PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(render_dashboard PRIVATE ui)
 
 # Python tool tests (stdlib unittest; pyserial is not needed).
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 add_test(NAME tools_unittests
          COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -t . -v
          WORKING_DIRECTORY ${REPO_ROOT}/tools)
+set_tests_properties(tools_unittests PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1") # no tools/__pycache__

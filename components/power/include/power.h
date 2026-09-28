@@ -34,6 +34,9 @@ typedef struct {
 
 /* Call once at boot, after nvs_flash_init(): decodes and counts the wake cause. */
 esp_err_t power_init(void);
+/* The app could not start: the policy keeps the board awake for the console while a PC is
+ * attached, and returns POWER_PLAN_RETRY otherwise. */
+void power_boot_failed(void);
 power_wake_t power_boot_wake(void); /* why this boot happened */
 const char *power_wake_name(power_wake_t wake);
 bool power_tethered(void);
@@ -44,6 +47,8 @@ power_plan_t power_plan(bool work_pending);
 power_wake_t power_sleep_light(time_t until_utc);
 /* Never returns: the chip reboots on wake. Seal RTC-RAM state and hold the panel pins first. */
 void power_sleep_deep(time_t until_utc);
+/* Never returns: deep sleep for `seconds` or until KEY or BOOT, then boot from scratch. */
+void power_sleep_retry(uint32_t seconds);
 power_idle_t power_idle_strategy(void);
 esp_err_t power_set_idle_strategy(power_idle_t idle); /* persisted in NVS */
 /* `sleep test`: the next `cycles` sleeps use `mode` even when tethered. Resets the stats. */

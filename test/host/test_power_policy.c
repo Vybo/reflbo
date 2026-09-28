@@ -36,6 +36,25 @@ static void test_sleep_test_cycles_sleep_even_when_tethered(void)
     TEST_ASSERT_EQUAL(POWER_PLAN_LIGHT, plan(POWER_IDLE_DEEP, true, false, 1, POWER_IDLE_LIGHT));
 }
 
+/* The review found that a failed boot crashed or spun at full current instead. */
+static void test_failed_boot_serves_the_console_or_retries(void)
+{
+    power_policy_input_t in = { .strategy = POWER_IDLE_LIGHT, .tethered = true, .boot_failed = true };
+    TEST_ASSERT_EQUAL(POWER_PLAN_AWAKE, power_policy(&in));
+    in.tethered = false;
+    TEST_ASSERT_EQUAL(POWER_PLAN_RETRY, power_policy(&in));
+    in.strategy = POWER_IDLE_DEEP;
+    TEST_ASSERT_EQUAL(POWER_PLAN_RETRY, power_policy(&in));
+    in.test_cycles = 3; /* a sleep test needs the schedule too */
+    in.test_mode = POWER_IDLE_LIGHT;
+    TEST_ASSERT_EQUAL(POWER_PLAN_RETRY, power_policy(&in));
+    in.tethered = true;
+    TEST_ASSERT_EQUAL(POWER_PLAN_AWAKE, power_policy(&in));
+    in.tethered = false;
+    in.hold_awake = true; /* the grace period still lets a PC find the board */
+    TEST_ASSERT_EQUAL(POWER_PLAN_AWAKE, power_policy(&in));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -43,5 +62,6 @@ int main(void)
     RUN_TEST(test_tethered_board_stays_awake);
     RUN_TEST(test_holding_awake_wins_even_during_a_sleep_test);
     RUN_TEST(test_sleep_test_cycles_sleep_even_when_tethered);
+    RUN_TEST(test_failed_boot_serves_the_console_or_retries);
     return UNITY_END();
 }

@@ -156,6 +156,7 @@ Initial task plan (finalised in the implementation plan): app (core 1), sync (co
   3. Re-attach SPI without resetting the panel.
   4. Re-read the RTC.
   5. Post the event (`MINUTE_TICK`, `BUTTON` or `ALARM_DUE`), handle it normally, then go idle.
+- **Boot failure** (a driver fails to start): while a PC is attached, stay awake with the console up. Otherwise deep-sleep for 5 min, or until KEY or BOOT, then boot from scratch with a reset, so every driver and the panel start over. The RTC alarm is not a wake source then, because whatever broke the boot may hold INT low.
 - **Button presses after a deep-sleep wake.** The press that woke the chip may be over by the time the app runs, roughly 100–300 ms later.
   - If the pin is already high, treat it as a short press. When the current context binds a double press, wait out the double-press window first.
   - If the pin is still low, keep timing it for a long press.

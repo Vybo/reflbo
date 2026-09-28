@@ -121,6 +121,9 @@ static void buttons_task(void *arg)
 
 static void post(msg_t msg)
 {
+    if (s_queue == NULL) {
+        return; /* not started: the boot failed before the buttons came up */
+    }
     s_busy = true;
     xQueueSend(s_queue, &msg, pdMS_TO_TICKS(100));
 }
@@ -163,7 +166,7 @@ void board_buttons_resync(void)
 
 bool board_buttons_busy(void)
 {
-    return s_busy || uxQueueMessagesWaiting(s_queue) > 0;
+    return s_busy || (s_queue != NULL && uxQueueMessagesWaiting(s_queue) > 0);
 }
 
 const char *board_button_name(board_button_t button)

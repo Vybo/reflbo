@@ -10,6 +10,9 @@ power_plan_t power_policy(const power_policy_input_t *in)
     if (in->hold_awake) {
         return POWER_PLAN_AWAKE;
     }
+    if (in->boot_failed) {
+        return in->tethered ? POWER_PLAN_AWAKE : POWER_PLAN_RETRY; /* the console is the only use left */
+    }
     if (in->test_cycles > 0) {
         return plan_for(in->test_mode);
     }

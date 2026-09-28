@@ -13,6 +13,7 @@ typedef enum {
     POWER_PLAN_AWAKE, /* keep running; wait for events */
     POWER_PLAN_LIGHT,
     POWER_PLAN_DEEP,
+    POWER_PLAN_RETRY, /* boot failed and no PC is attached: sleep a while, then boot from scratch */
 } power_plan_t;
 
 typedef struct {
@@ -21,6 +22,7 @@ typedef struct {
     bool hold_awake;        /* grace period after boot or a button, pending work, a gesture in progress */
     int test_cycles;        /* > 0: `sleep test` cycles left; they sleep even when tethered */
     power_idle_t test_mode;
+    bool boot_failed;       /* the app could not start: there is no schedule to sleep on */
 } power_policy_input_t;
 
 power_plan_t power_policy(const power_policy_input_t *in);

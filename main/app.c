@@ -31,6 +31,7 @@
 #define BACKUP_S          5    /* wake anyway this long after a missed RTC alarm (spec §9.2) */
 #define GRACE_MS          2000 /* stay awake after boot or a button so a PC can find the board */
 #define TETHER_RECHECK_MS 1000
+#define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
 #define SNAP_VERSION      1
 
@@ -324,21 +325,34 @@ static void app_task(void *arg)
     (void)arg;
     esp_err_t err = boot();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "boot failed: %s; staying awake for the console", esp_err_to_name(err));
+        ESP_LOGE(TAG, "boot failed: %s; the console stays up while a PC is attached, otherwise the "
+                 "board sleeps and boots again in %d s", esp_err_to_name(err), RETRY_S);
+        power_boot_failed();
+        power_hold_awake_ms(GRACE_MS);
     }
     for (;;) {
-        check_clock_jump();
+        if (err == ESP_OK) {
+            check_clock_jump();
+        }
         bool pending = uxQueueMessagesWaiting(s_queue) > 0 || board_buttons_busy();
-        power_plan_t plan = err == ESP_OK ? power_plan(pending) : POWER_PLAN_AWAKE;
-        if (plan == POWER_PLAN_LIGHT) {
+        switch (power_plan(pending)) {
+        case POWER_PLAN_LIGHT:
             handle_wake(power_sleep_light(s_next_wake + BACKUP_S));
             continue;
-        }
-        if (plan == POWER_PLAN_DEEP) {
+        case POWER_PLAN_DEEP:
             enter_deep_sleep();
+            break;
+        case POWER_PLAN_RETRY:
+            power_sleep_retry(RETRY_S);
+            break;
+        case POWER_PLAN_AWAKE:
+            break;
         }
-        int64_t backup_ms = ((int64_t)(s_next_wake + BACKUP_S) - time(NULL)) * 1000;
-        int64_t wait_ms = backup_ms < TETHER_RECHECK_MS ? backup_ms : TETHER_RECHECK_MS;
+        int64_t wait_ms = TETHER_RECHECK_MS; /* a failed boot has no schedule to wait for */
+        if (err == ESP_OK) {
+            int64_t backup_ms = ((int64_t)(s_next_wake + BACKUP_S) - time(NULL)) * 1000;
+            wait_ms = backup_ms < wait_ms ? backup_ms : wait_ms;
+        }
         TickType_t wait = wait_ms <= 0 ? 0 : util_ticks_at_least((uint32_t)wait_ms, portTICK_PERIOD_MS);
         app_event_t ev;
         if (xQueueReceive(s_queue, &ev, wait) == pdTRUE) {

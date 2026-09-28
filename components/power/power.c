@@ -18,7 +18,7 @@
 #include "util_snapshot.h"
 
 #define STATE_MAGIC   0x72666c70u /* "rflp" */
-#define STATE_VERSION 1
+#define STATE_VERSION 2
 #define NVS_NAMESPACE "sys"
 #define NVS_KEY_IDLE  "idle"
 #define TEST_END_HOLD_MS 3000
@@ -31,11 +31,13 @@ typedef struct {
     int32_t test_cycles;
     uint8_t test_mode;
     uint8_t test_ended; /* the last test cycle just ran: stay awake so the PC finds the board */
+    uint8_t retry;      /* boot failed: boot from scratch at the next wake */
 } power_state_t;
 
 static RTC_DATA_ATTR power_state_t s_rtc; /* survives deep sleep only */
 static power_idle_t s_strategy;
 static power_wake_t s_boot_wake;
+static bool s_boot_failed;
 static int64_t s_hold_until_us;
 static int64_t s_awake_since_us;
 
@@ -57,6 +59,11 @@ esp_err_t power_init(void)
         s_rtc = (power_state_t){ 0 };
         seal();
     }
+    if (s_boot_wake != POWER_WAKE_COLD && s_rtc.retry) {
+        s_rtc.retry = 0;
+        seal();
+        esp_restart(); /* a reset starts RTC RAM over, and every driver with it, the panel's included */
+    }
     if (s_boot_wake != POWER_WAKE_COLD) {
         count_wake(s_boot_wake);
         finish_test();
@@ -77,6 +84,11 @@ esp_err_t power_init(void)
     s_awake_since_us = 0; /* esp_timer starts at 0 on every boot */
     ESP_RETURN_ON_ERROR(esp_sleep_cpu_pd_low_init(), TAG, "CPU power-down in light sleep");
     return ESP_OK;
+}
+
+void power_boot_failed(void)
+{
+    s_boot_failed = true;
 }
 
 static power_wake_t decode_boot_wake(void)
@@ -132,6 +144,7 @@ power_plan_t power_plan(bool work_pending)
         .hold_awake = work_pending || esp_timer_get_time() < s_hold_until_us,
         .test_cycles = s_rtc.test_cycles,
         .test_mode = (power_idle_t)s_rtc.test_mode,
+        .boot_failed = s_boot_failed,
     };
     return power_policy(&in);
 }
@@ -213,6 +226,14 @@ power_wake_t power_sleep_light(time_t until_utc)
     return wake;
 }
 
+static void start_deep_sleep(void)
+{
+    fflush(stdout);
+    fsync(fileno(stdout));
+    esp_deep_sleep_disable_rom_logging();
+    esp_deep_sleep_start();
+}
+
 void power_sleep_deep(time_t until_utc)
 {
     count_sleep(true);
@@ -222,10 +243,18 @@ void power_sleep_deep(time_t until_utc)
     esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_RTC_INT) | BIT64(BOARD_PIN_KEY) | BIT64(BOARD_PIN_BOOT),
                                     ESP_EXT1_WAKEUP_ANY_LOW);
     esp_sleep_enable_timer_wakeup(sleep_us_until(until_utc));
-    fflush(stdout);
-    fsync(fileno(stdout));
-    esp_deep_sleep_disable_rom_logging();
-    esp_deep_sleep_start();
+    start_deep_sleep();
+}
+
+void power_sleep_retry(uint32_t seconds)
+{
+    s_rtc.retry = 1;
+    seal();
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    /* Not RTC_INT: whatever broke the boot may leave it low, which would wake the chip at once. */
+    esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_KEY) | BIT64(BOARD_PIN_BOOT), ESP_EXT1_WAKEUP_ANY_LOW);
+    esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000u);
+    start_deep_sleep();
 }
 
 

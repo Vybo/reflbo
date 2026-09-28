@@ -69,6 +69,11 @@ add_library(power_logic STATIC ${REPO_ROOT}/components/power/power_policy.c)
 target_include_directories(power_logic PUBLIC ${REPO_ROOT}/components/power/include)
 target_compile_options(power_logic PRIVATE ${REFLBO_WARNINGS})
 
+# locale: pure C language packs.
+add_library(locale STATIC ${REPO_ROOT}/components/locale/lang.c ${REPO_ROOT}/components/locale/lang_en.c)
+target_include_directories(locale PUBLIC ${REPO_ROOT}/components/locale/include)
+target_compile_options(locale PRIVATE ${REFLBO_WARNINGS})
+
 # ui: pure C on top of gfx.
 add_library(ui STATIC ${REPO_ROOT}/components/ui/ui_clock.c)
 target_include_directories(ui PUBLIC ${REPO_ROOT}/components/ui/include)
@@ -100,6 +105,7 @@ reflbo_host_test(test_battery_model sensors_logic)
 reflbo_host_test(test_pcf85063_regs rtc_logic)
 reflbo_host_test(test_timekeeping_iso timekeeping_logic)
 reflbo_host_test(test_power_policy power_logic)
+reflbo_host_test(test_lang locale)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

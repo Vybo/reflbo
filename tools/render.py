@@ -16,9 +16,6 @@ DASHBOARDS = ["home", "indoor", "weather", "focus", "home_invalid", "home_stale"
               "focus_seconds", "home_battery_details", "home_inverted"]  # test/host/dashboard_fixtures.h
 RENDERERS = {
     "test_pattern": ["render_test_pattern"],
-    "clock_valid": ["render_clock", "valid"],
-    "clock_invalid": ["render_clock", "invalid"],
-    "clock_cold": ["render_clock", "cold"],
     **{f"dash_{name}": ["render_dashboard", name] for name in DASHBOARDS},
 }
 

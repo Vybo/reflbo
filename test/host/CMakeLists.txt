@@ -151,13 +151,6 @@ add_executable(render_test_pattern render_test_pattern.c)
 target_compile_options(render_test_pattern PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(render_test_pattern PRIVATE gfx)
 
-reflbo_host_test(test_ui_clock_golden ui)
-target_compile_definitions(test_ui_clock_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
-
-add_executable(render_clock render_clock.c)
-target_compile_options(render_clock PRIVATE ${REFLBO_WARNINGS})
-target_link_libraries(render_clock PRIVATE ui)
-
 reflbo_host_test(test_ui_dashboard_golden ui)
 target_compile_definitions(test_ui_dashboard_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
 

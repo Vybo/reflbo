@@ -12,7 +12,7 @@
 
 #define PBM_CHUNK 57 /* bytes per line: 76 base64 characters */
 
-static int cmd_screenshot(int argc, char **argv)
+static int screenshot_body(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
@@ -86,7 +86,7 @@ static bool parse_seconds(const char *text, int *seconds)
     return true;
 }
 
-static int cmd_panel(int argc, char **argv)
+static int panel_body(int argc, char **argv)
 {
     st7305_lpm_rate_t rate;
     int seconds = 4;
@@ -126,6 +126,16 @@ static int cmd_panel(int argc, char **argv)
         return 1;
     }
     return print_status();
+}
+
+static int cmd_screenshot(int argc, char **argv)
+{
+    return diag_on_owner(screenshot_body, argc, argv);
+}
+
+static int cmd_panel(int argc, char **argv)
+{
+    return diag_on_owner(panel_body, argc, argv);
 }
 
 esp_err_t diag_register_display_commands(void)

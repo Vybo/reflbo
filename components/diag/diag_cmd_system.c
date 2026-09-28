@@ -55,6 +55,16 @@ static int cmd_heap(int argc, char **argv)
     return 0;
 }
 
+static int cmd_tasks(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    static char buf[1024];
+    vTaskList(buf);
+    printf("Name          State Prio Stack  Num Core\n%s", buf);
+    return 0;
+}
+
 static int cmd_reboot(int argc, char **argv)
 {
     (void)argc;
@@ -72,6 +82,7 @@ esp_err_t diag_register_system_commands(void)
         { .command = "version", .help = "Show firmware, ESP-IDF and chip information", .func = &cmd_version },
         { .command = "heap", .help = "Show free heap per memory type", .func = &cmd_heap },
         { .command = "reboot", .help = "Restart the chip", .func = &cmd_reboot },
+        { .command = "tasks", .help = "List FreeRTOS tasks", .func = &cmd_tasks },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_err_t err = esp_console_cmd_register(&cmds[i]);

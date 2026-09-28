@@ -1,3 +1,4 @@
-idf_component_register(SRCS "main.c"
+idf_component_register(SRCS "main.c" "app.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES board diag display esp_app_format gfx rtc sensors timekeeping)
+                       PRIV_REQUIRES board diag display esp_app_format esp_driver_gpio gfx rtc scheduler sensors
+                                     timekeeping ui util)

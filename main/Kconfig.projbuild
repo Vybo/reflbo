@@ -26,4 +26,28 @@ menu "reflbo"
         help
             Per-device correction for the ADC and the 200k/100k divider (spec §8).
 
+    choice REFLBO_PANEL_INIT
+        prompt "Panel init sequence"
+        default REFLBO_PANEL_INIT_FACTORY
+        help
+            ST7305 vendor init sequence (decision D12). XiaoZhi's stays available for diagnostics.
+        config REFLBO_PANEL_INIT_FACTORY
+            bool "Factory firmware (better contrast)"
+        config REFLBO_PANEL_INIT_XIAOZHI
+            bool "XiaoZhi firmware"
+    endchoice
+
+    config REFLBO_DISPLAY_UPDATE_MIN
+        int "Display update interval (minutes)"
+        range 1 15
+        default 1
+        help
+            Compile-time default for display.update_min (spec §9.2). Updates run at local wall-clock
+            slots: every N minutes counted from midnight.
+
+    config REFLBO_SENSOR_INTERVAL_MIN
+        int "Sensor sample interval (minutes)"
+        range 1 30
+        default 5
+
 endmenu

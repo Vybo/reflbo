@@ -27,6 +27,27 @@ class PackRowsTest(unittest.TestCase):
         self.assertEqual(fontgen.pack_rows([[1] * 9]), bytes([0xFF, 0x80]))
 
 
+class TrimGlyphTest(unittest.TestCase):
+    def test_blank_rows_and_columns_go_and_the_offsets_follow(self):
+        glyph = dict(cp=0x41, width=4, height=4, x=1, y=-4, advance=5,
+                     rows=[[0, 0, 0, 0], [0, 1, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0]])
+        trimmed = fontgen.trim_glyph(glyph)
+        self.assertEqual((trimmed["width"], trimmed["height"], trimmed["x"], trimmed["y"]), (2, 2, 2, -3))
+        self.assertEqual(trimmed["rows"], [[1, 1], [1, 0]])
+        self.assertEqual(trimmed["advance"], 5)
+
+    def test_a_glyph_without_ink_keeps_only_its_advance(self):
+        glyph = dict(cp=0x20, width=3, height=2, x=0, y=-2, advance=4, rows=[[0, 0, 0], [0, 0, 0]])
+        self.assertEqual(fontgen.trim_glyph(glyph), dict(cp=0x20, width=0, height=0, x=0, y=0, advance=4, rows=[]))
+
+
+class LineMetricsTest(unittest.TestCase):
+    def test_grows_to_fit_ink_above_the_ascent_and_below_the_descent(self):
+        glyphs = [dict(width=2, height=13, y=-13), dict(width=2, height=4, y=1), dict(width=0, height=0, y=0)]
+        self.assertEqual(fontgen.line_metrics(glyphs, 12, 3), (13, 18))
+        self.assertEqual(fontgen.line_metrics([], 12, 3), (12, 15))
+
+
 class EmitCTest(unittest.TestCase):
     def test_emits_glyph_table_with_offsets(self):
         glyphs = [

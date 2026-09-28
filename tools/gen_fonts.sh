@@ -13,4 +13,8 @@ fontgen --ttf assets/fonts/DejaVuSans.ttf --size 16 --charset text --name sans_1
 fontgen --ttf assets/fonts/DejaVuSans.ttf --size 20 --charset text --name sans_20 --licence assets/fonts/LICENSE-DejaVu.txt
 fontgen --ttf assets/fonts/DejaVuSans-Bold.ttf --size 20 --charset text --name sans_bold_20 --licence assets/fonts/LICENSE-DejaVu.txt
 fontgen --ttf assets/fonts/DejaVuSans-Bold.ttf --size 28 --charset text --name sans_bold_28 --licence assets/fonts/LICENSE-DejaVu.txt
+fontgen --ttf assets/fonts/DejaVuSans-Bold.ttf --size 16 --charset text --name sans_bold_16 --licence assets/fonts/LICENSE-DejaVu.txt
+fontgen --ttf assets/fonts/DejaVuSansCondensed-Bold.ttf --size 48 --charset digits --name num_cb_48 --licence assets/fonts/LICENSE-DejaVu.txt
+fontgen --ttf assets/fonts/DejaVuSansCondensed-Bold.ttf --size 72 --charset digits --name num_cb_72 --licence assets/fonts/LICENSE-DejaVu.txt
+fontgen --ttf assets/fonts/DejaVuSansCondensed-Bold.ttf --size 110 --charset digits --name num_cb_110 --licence assets/fonts/LICENSE-DejaVu.txt
 fontgen --ttf assets/fonts/DejaVuSansCondensed-Bold.ttf --size 130 --charset digits --name num_cb_130 --licence assets/fonts/LICENSE-DejaVu.txt

@@ -65,7 +65,28 @@ def render_glyph(font, cp):
     draw.text((-left, -top), ch, font=font, fill=1, anchor="ls")
     px = img.load()
     rows = [[1 if px[x, y] else 0 for x in range(width)] for y in range(height)]
-    return dict(cp=cp, width=width, height=height, x=left, y=top, advance=advance, rows=rows)
+    return trim_glyph(dict(cp=cp, width=width, height=height, x=left, y=top, advance=advance, rows=rows))
+
+
+def trim_glyph(glyph):
+    """Drops blank rows and columns around the ink; the offsets move so nothing shifts on screen."""
+    rows = glyph["rows"]
+    ink_rows = [i for i, row in enumerate(rows) if any(row)]
+    if not ink_rows:
+        return dict(glyph, width=0, height=0, x=0, y=0, rows=[])
+    ink_cols = [c for c in range(glyph["width"]) if any(row[c] for row in rows)]
+    top, bottom, left, right = ink_rows[0], ink_rows[-1], ink_cols[0], ink_cols[-1]
+    return dict(glyph, width=right - left + 1, height=bottom - top + 1, x=glyph["x"] + left, y=glyph["y"] + top,
+                rows=[row[left:right + 1] for row in rows[top:bottom + 1]])
+
+
+def line_metrics(glyphs, ascent, descent):
+    """The font's ascent and line height, grown so that every glyph's ink fits the line box."""
+    for glyph in glyphs:
+        if glyph["height"]:
+            ascent = max(ascent, -glyph["y"])
+            descent = max(descent, glyph["y"] + glyph["height"])
+    return ascent, ascent + descent
 
 
 def _check(glyph):
@@ -120,16 +141,16 @@ def main(argv=None):
     from PIL import ImageFont
 
     cmap = TTFont(args.ttf).getBestCmap()
-    font = ImageFont.truetype(args.ttf, args.size)
-    ascent, descent = font.getmetrics()
+    font = ImageFont.truetype(args.ttf, args.size, layout_engine=ImageFont.Layout.BASIC)  # same with or without raqm
     wanted = parse_charset(args.charset)
     glyphs = [render_glyph(font, cp) for cp in wanted if cp in cmap]
     missing = [f"U+{cp:04X}" for cp in wanted if cp not in cmap]
+    ascent, line_height = line_metrics(glyphs, *font.getmetrics())
     out = pathlib.Path(args.out or f"components/gfx/fonts/gfx_font_{args.name}.c")
-    out.write_text(emit_c(args.name, pathlib.Path(args.ttf).name, args.size, glyphs, ascent, ascent + descent,
+    out.write_text(emit_c(args.name, pathlib.Path(args.ttf).name, args.size, glyphs, ascent, line_height,
                           args.licence),
                    encoding="utf-8")
-    print(f"{out}: {len(glyphs)} glyphs, ascent {ascent}, line {ascent + descent}"
+    print(f"{out}: {len(glyphs)} glyphs, ascent {ascent}, line {line_height}"
           + (f", not in font: {' '.join(missing)}" if missing else ""))
     return 0
 

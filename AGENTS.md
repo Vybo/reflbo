@@ -31,7 +31,7 @@ Guiding principles:
 
 - **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 is in progress as two plans: M3a (storage, datastore, locale, layouts, widgets, presets) and then M3b (menu, screens, settings, schedule and night sleep, Czech pack).
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
-- **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-25-m2-board-clock-and-sleep.md`](docs/plans/2026-09-25-m2-board-clock-and-sleep.md).
+- **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-29-m3a-dashboards.md`](docs/plans/2026-09-29-m3a-dashboards.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
 - **Repository:** the owner is in Brno, CZ. Remote `origin` is `git@github.com:Vybo/reflbo.git`.
 

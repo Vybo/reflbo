@@ -48,15 +48,17 @@ static int sleep_body(int argc, char **argv)
             return usage(k_usage);
         }
         power_stats_t st = power_stats();
-        uint32_t sleeps = st.light_sleeps + st.deep_sleeps;
         printf("sleep: %lu light, %lu deep; wakes: rtc %lu, key %lu, boot %lu, timer %lu, other %lu\n",
                (unsigned long)st.light_sleeps, (unsigned long)st.deep_sleeps,
                (unsigned long)st.wakes[POWER_WAKE_RTC], (unsigned long)st.wakes[POWER_WAKE_KEY],
                (unsigned long)st.wakes[POWER_WAKE_BOOT], (unsigned long)st.wakes[POWER_WAKE_TIMER],
                (unsigned long)st.wakes[POWER_WAKE_OTHER]);
-        printf("sleep: awake per cycle: last %lu ms, max %lu ms, mean %lu ms; test cycles left %d\n",
+        printf("sleep: awake %lu times: last %lu ms, max %lu ms, mean %lu ms\n", (unsigned long)st.awake_count,
                (unsigned long)st.awake_ms_last, (unsigned long)st.awake_ms_max,
-               (unsigned long)(sleeps ? st.awake_ms_total / sleeps : 0), power_test_cycles_left());
+               (unsigned long)(st.awake_count ? st.awake_ms_total / st.awake_count : 0));
+        printf("sleep: slept %lu times: last %lu ms, min %lu ms, mean %lu ms; test cycles left %d\n",
+               (unsigned long)st.slept_count, (unsigned long)st.slept_ms_last, (unsigned long)st.slept_ms_min,
+               (unsigned long)(st.slept_count ? st.slept_ms_total / st.slept_count : 0), power_test_cycles_left());
         return 0;
     }
     if (argc == 4 && strcmp(argv[1], "test") == 0) {

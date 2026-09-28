@@ -27,9 +27,17 @@ typedef struct {
     uint32_t light_sleeps;
     uint32_t deep_sleeps;
     uint32_t wakes[POWER_WAKE_COUNT];
-    uint64_t awake_ms_total; /* app time between sleeps; ROM and bootloader time are not included */
+    /* Awake phases, from a wake to the next sleep; ROM and bootloader time are not included. The
+     * phase in which the stats were reset is not counted. */
+    uint32_t awake_count;
+    uint64_t awake_ms_total;
     uint32_t awake_ms_last;
     uint32_t awake_ms_max;
+    /* Sleeps, from entry to wake; a deep sleep also includes the ROM and bootloader start-up. */
+    uint32_t slept_count;
+    uint64_t slept_ms_total;
+    uint32_t slept_ms_last;
+    uint32_t slept_ms_min;
 } power_stats_t;
 
 /* Call once at boot, after nvs_flash_init(): decodes and counts the wake cause. */

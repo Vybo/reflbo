@@ -10,6 +10,7 @@
 #include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_rtc_time.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -18,7 +19,7 @@
 #include "util_snapshot.h"
 
 #define STATE_MAGIC   0x72666c70u /* "rflp" */
-#define STATE_VERSION 2
+#define STATE_VERSION 3
 #define NVS_NAMESPACE "sys"
 #define NVS_KEY_IDLE  "idle"
 #define TEST_END_HOLD_MS 3000
@@ -28,6 +29,7 @@ static const char *TAG = "power";
 typedef struct {
     util_snapshot_hdr_t hdr;
     power_stats_t stats;
+    uint64_t sleep_rtc_us; /* RTC counter at deep-sleep entry, for the slept time */
     int32_t test_cycles;
     uint8_t test_mode;
     uint8_t test_ended; /* the last test cycle just ran: stay awake so the PC finds the board */
@@ -39,7 +41,7 @@ static power_idle_t s_strategy;
 static power_wake_t s_boot_wake;
 static bool s_boot_failed;
 static int64_t s_hold_until_us;
-static int64_t s_awake_since_us;
+static int64_t s_awake_since_us; /* esp_timer time this awake phase began; -1 after a stats reset */
 
 static const gpio_num_t k_wake_pins[] = { BOARD_PIN_RTC_INT, BOARD_PIN_KEY, BOARD_PIN_BOOT };
 
@@ -48,14 +50,15 @@ static void seal(void)
     util_snapshot_seal(&s_rtc, sizeof(s_rtc), STATE_MAGIC, STATE_VERSION);
 }
 
-static void count_wake(power_wake_t wake);
+static void count_wake(power_wake_t wake, int64_t slept_ms);
 static power_wake_t decode_boot_wake(void);
 static void finish_test(void);
 
 esp_err_t power_init(void)
 {
     s_boot_wake = decode_boot_wake();
-    if (!util_snapshot_valid(&s_rtc, sizeof(s_rtc), STATE_MAGIC, STATE_VERSION)) {
+    bool valid = util_snapshot_valid(&s_rtc, sizeof(s_rtc), STATE_MAGIC, STATE_VERSION);
+    if (!valid) {
         s_rtc = (power_state_t){ 0 };
         seal();
     }
@@ -64,8 +67,10 @@ esp_err_t power_init(void)
         seal();
         esp_restart(); /* a reset starts RTC RAM over, and every driver with it, the panel's included */
     }
+    s_awake_since_us = 0; /* esp_timer starts at 0 on every boot */
     if (s_boot_wake != POWER_WAKE_COLD) {
-        count_wake(s_boot_wake);
+        int64_t slept_ms = valid ? (int64_t)((esp_rtc_get_time_us() - s_rtc.sleep_rtc_us) / 1000) : -1;
+        count_wake(s_boot_wake, slept_ms);
         finish_test();
     }
 #if CONFIG_REFLBO_IDLE_DEFAULT_DEEP
@@ -81,7 +86,6 @@ esp_err_t power_init(void)
         }
         nvs_close(nvs);
     }
-    s_awake_since_us = 0; /* esp_timer starts at 0 on every boot */
     ESP_RETURN_ON_ERROR(esp_sleep_cpu_pd_low_init(), TAG, "CPU power-down in light sleep");
     return ESP_OK;
 }
@@ -151,17 +155,20 @@ power_plan_t power_plan(bool work_pending)
 
 static void count_sleep(bool deep)
 {
-    uint32_t awake_ms = (uint32_t)((esp_timer_get_time() - s_awake_since_us) / 1000);
     power_stats_t *st = &s_rtc.stats;
     if (deep) {
         st->deep_sleeps++;
     } else {
         st->light_sleeps++;
     }
-    st->awake_ms_total += awake_ms;
-    st->awake_ms_last = awake_ms;
-    if (awake_ms > st->awake_ms_max) {
-        st->awake_ms_max = awake_ms;
+    if (s_awake_since_us >= 0) {
+        uint32_t awake_ms = (uint32_t)((esp_timer_get_time() - s_awake_since_us) / 1000);
+        st->awake_count++;
+        st->awake_ms_total += awake_ms;
+        st->awake_ms_last = awake_ms;
+        if (awake_ms > st->awake_ms_max) {
+            st->awake_ms_max = awake_ms;
+        }
     }
     if (s_rtc.test_cycles > 0 && --s_rtc.test_cycles == 0) {
         s_rtc.test_ended = 1;
@@ -180,9 +187,20 @@ static void finish_test(void)
     }
 }
 
-static void count_wake(power_wake_t wake)
+/* `slept_ms` < 0: unknown, because RTC RAM did not survive. */
+static void count_wake(power_wake_t wake, int64_t slept_ms)
 {
-    s_rtc.stats.wakes[wake]++;
+    power_stats_t *st = &s_rtc.stats;
+    st->wakes[wake]++;
+    if (slept_ms >= 0) {
+        uint32_t ms = slept_ms > UINT32_MAX ? UINT32_MAX : (uint32_t)slept_ms;
+        if (st->slept_count == 0 || ms < st->slept_ms_min) {
+            st->slept_ms_min = ms;
+        }
+        st->slept_count++;
+        st->slept_ms_total += ms;
+        st->slept_ms_last = ms;
+    }
     seal();
 }
 
@@ -202,14 +220,16 @@ power_wake_t power_sleep_light(time_t until_utc)
     }
     esp_sleep_enable_gpio_wakeup();
     esp_sleep_enable_timer_wakeup(sleep_us_until(until_utc));
+    int64_t slept_from_us = esp_timer_get_time();
     esp_err_t err = esp_light_sleep_start();
+    int64_t woke_us = esp_timer_get_time(); /* esp_timer counts light sleep too */
     for (size_t i = 0; i < sizeof(k_wake_pins) / sizeof(k_wake_pins[0]); i++) {
         gpio_wakeup_disable(k_wake_pins[i]);
         gpio_set_intr_type(k_wake_pins[i], k_wake_pins[i] == BOARD_PIN_RTC_INT ? GPIO_INTR_NEGEDGE : GPIO_INTR_ANYEDGE);
         gpio_intr_enable(k_wake_pins[i]);
     }
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
-    s_awake_since_us = esp_timer_get_time();
+    s_awake_since_us = woke_us;
 
     power_wake_t wake = POWER_WAKE_OTHER;
     if (gpio_get_level(BOARD_PIN_KEY) == 0) {
@@ -221,7 +241,7 @@ power_wake_t power_sleep_light(time_t until_utc)
     } else if (err == ESP_OK && (esp_sleep_get_wakeup_causes() & BIT(ESP_SLEEP_WAKEUP_TIMER))) {
         wake = POWER_WAKE_TIMER;
     }
-    count_wake(wake);
+    count_wake(wake, (woke_us - slept_from_us) / 1000);
     finish_test();
     return wake;
 }
@@ -231,6 +251,8 @@ static void start_deep_sleep(void)
     fflush(stdout);
     fsync(fileno(stdout));
     esp_deep_sleep_disable_rom_logging();
+    s_rtc.sleep_rtc_us = esp_rtc_get_time_us();
+    seal();
     esp_deep_sleep_start();
 }
 
@@ -249,7 +271,6 @@ void power_sleep_deep(time_t until_utc)
 void power_sleep_retry(uint32_t seconds)
 {
     s_rtc.retry = 1;
-    seal();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
     /* Not RTC_INT: whatever broke the boot may leave it low, which would wake the chip at once. */
     esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_KEY) | BIT64(BOARD_PIN_BOOT), ESP_EXT1_WAKEUP_ANY_LOW);
@@ -280,6 +301,7 @@ esp_err_t power_set_idle_strategy(power_idle_t idle)
 void power_start_test(power_idle_t mode, int cycles)
 {
     s_rtc.stats = (power_stats_t){ 0 }; /* the test's numbers only */
+    s_awake_since_us = -1;
     s_rtc.test_cycles = cycles;
     s_rtc.test_mode = (uint8_t)mode;
     seal();
@@ -298,5 +320,6 @@ power_stats_t power_stats(void)
 void power_reset_stats(void)
 {
     s_rtc.stats = (power_stats_t){ 0 };
+    s_awake_since_us = -1;
     seal();
 }

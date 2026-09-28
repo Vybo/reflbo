@@ -794,7 +794,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 | `preset list` · `preset set <id>` | Presets |
 | `wifi status` · `wifi scan` | Wi-Fi |
 | `sync now` | Run a sync |
-| `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging; `sleep test` forces sleep cycles while tethered |
+| `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging: sleeps, wake causes, and per-cycle awake and slept times; `sleep test` forces sleep cycles while tethered |
 | `audio tone <Hz> <ms>` | Audio check (M7) |
 
 Screenshot framing:

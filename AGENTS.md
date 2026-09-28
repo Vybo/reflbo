@@ -29,9 +29,9 @@ Guiding principles:
 
 ## 2. Status and roadmap
 
-- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. Next is M2, whose plan gets written before it starts.
+- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is implemented and reviewed: board services, the clock screen and both idle strategies. It waits for the owner's current measurements, which decide D3.
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
-- **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-25-m1-display-and-gfx.md`](docs/plans/2026-09-25-m1-display-and-gfx.md).
+- **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-25-m2-board-clock-and-sleep.md`](docs/plans/2026-09-25-m2-board-clock-and-sleep.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
 - **Repository:** the owner is in Brno, CZ. Remote `origin` is `git@github.com:Vybo/reflbo.git`.
 
@@ -133,6 +133,7 @@ Numbering follows the schematic. Check the silkscreen before wiring.
 19. **Light sleep floats every pin** unless told otherwise (`ESP_SLEEP_GPIO_RESET_WORKAROUND`): panel CS and RESET call `gpio_sleep_sel_dis()` so they keep driving; the three wake pins keep theirs through `gpio_wakeup_enable()`, which also switches them to level interrupts until `power_sleep_light()` restores their edge type.
 20. `usb_serial_jtag_is_connected()` watches for SOF frames on every tick while awake. It starts true and turns false after one 10 ms tick without an SOF. A PC needs roughly 0.1–1 s to enumerate the board again after a boot or wake. Log lines printed right after a light-sleep wake can be lost the same way. While it reads false, console reads and writes return -1 at once, so the REPL retries every 10 ms. Before the first tick, a write to a full USB FIFO with no host reading waits up to 50 ms (`TX_FLUSH_TIMEOUT_US`).
 21. **GPIO15 (RTC INT) needs the RTC-domain pull-up in deep sleep** (`rtc_gpio_pullup_en`); `gpio_pullup_en` does not apply there. Clear the alarm flag before sleeping, or ext1 wakes at once.
+22. **Download mode sticks until a power-on or watchdog reset.** Powering on with BOOT held latches download mode in the strapping register (`boot:0x21`). Resets over USB don't sample the pins again: esptool's hard reset after `flash`, and `devlog --reset`, land in "waiting for download" every time, so a freshly flashed app never runs. Leave with a watchdog reset, which samples them again: `tools/idf.sh exec python -m esptool --chip esp32s3 -p <port> --after watchdog_reset read_mac`. Seen at M2, 2026-09-28.
 
 Datasheets: [ST7305](https://files.waveshare.com/wiki/common/ST_7305_V0_2.pdf) · [ES8311](https://files.waveshare.com/wiki/common/ES8311.DS.pdf) · [PCF85063](https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf) · [SHTC3](https://files.waveshare.com/wiki/common/SHTC3_Datasheet.pdf) · [ESP32-S3](https://documentation.espressif.com/esp32-s3_datasheet_en.pdf)
 
@@ -276,7 +277,7 @@ python3 tools/render.py                     # host renderings to captures/render
 - Do not run `idf.py erase-flash` or erase NVS without asking. Either wipes the owner's Wi-Fi credentials and presets.
 - If the port is missing, the board is probably in deep sleep. Press KEY. If it is still missing, ask the owner to enter download mode (hold BOOT while powering on).
 - **One process per port.** A capture or console left open while `flash` runs makes esptool fail ("multiple access on port"), and its DTR/RTS changes can leave the chip in download mode. Close every other reader first.
-- **A mute board after flashing** (seen once at M2, 2026-09-25, not reproduced): USB stays attached, but nothing comes out, commands get no answer, and esptool cannot connect. A power cycle (hold PWR 3 s, then press it) recovers it. For download mode, hold BOOT while switching on.
+- **A mute board after flashing:** USB stays attached, but nothing comes out, commands get no answer, and esptool cannot connect. Seen twice at M2. On 2026-09-25 the cause is unknown. On 2026-09-28 the build crashed at boot on purpose (a failure test), and the core dump showed the crash. A power cycle (hold PWR 3 s, then press it) recovers the board. For download mode, hold BOOT while switching on, flash, then leave download mode as gotcha 22 says. A power cycle can set the RTC's oscillator-stop flag (gotcha 7), so check `rtc get` afterwards.
 - Power measurements follow the USB power-meter method in spec §9.4. Record them in `docs/power.md`.
 
 ## 7. Verification
@@ -298,7 +299,7 @@ Use the cheapest level that proves the change. Any UI change needs at least leve
 
 **Code**
 
-- ESP-IDF style: 4-space indent and `snake_case`. Public APIs carry a component prefix (`st7305_…`, `ds_…`) and live in `include/`.
+- ESP-IDF style: 4-space indent and `snake_case`. Public APIs carry a component or module prefix (`st7305_…`, `ds_…`, `battery_…` in `sensors`) and live in `include/`.
 - Return `esp_err_t` and use `ESP_RETURN_ON_ERROR` / `ESP_GOTO_ON_ERROR`. No `ESP_ERROR_CHECK` on recoverable paths such as network, SD or sensors.
 - Large buffers go in PSRAM (`MALLOC_CAP_SPIRAM`); DMA buffers go in internal RAM. No allocation inside render or audio hot loops.
 - One `TAG` per module. `ESP_LOGI` for state changes, `ESP_LOGD` for detail. Never log secrets.

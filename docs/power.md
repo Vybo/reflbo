@@ -13,11 +13,13 @@ Baseline to beat: the vendor factory firmware draws about 90 mA at 5.3 V (AGENTS
 
 ## Firmware facts that shape the numbers
 
-Firmware at M2, measured with `sleep stats` on 2026-09-28:
-- 168 ms of app time per deep-sleep wake, plus ROM and bootloader time.
-- 88 ms per light-sleep wake.
+Firmware at M2 (4704a19), measured with `sleep test` and `sleep stats` on 2026-09-28. These are tethered samples, from two awake phases per test, on wakes that push a new minute but sample no sensors:
+- **Deep sleep:** 63 ms of app time per routine wake, plus ROM and bootloader time, which esp_timer doesn't see. Before the review fixes it was 168 ms: every wake started the USB console, initialised NVS and printed about 45 start-up log lines. Routine wakes (the RTC alarm or its backup timer) now skip all three.
+- **Light sleep:** 57–58 ms per wake. The console runs from the cold boot; while no PC is attached its REPL polls every 10 ms during awake phases, which costs little.
+- About 38 ms of either figure is the full-frame push (M1: per-pixel conversion from PSRAM plus SPI at 10 MHz). Every fifth wake also samples the SHTC3 and the battery, which adds about 40 ms (103 ms for such a deep wake).
 - One wake per minute: the display updates every minute, and the sensors are sampled on every fifth.
 - The panel stays in LPM at 1 Hz throughout.
+- Full cycles slept 60.0 s, so nothing woke the board early.
 
 ## Results
 

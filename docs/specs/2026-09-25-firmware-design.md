@@ -169,7 +169,7 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 | | Deep sleep | Light sleep (`power_sleep_light()`) |
 |---|---|---|
 | RAM state | Lost; RTC-RAM snapshot of at most 4 KB | Kept |
-| Wake latency | Full boot; 168 ms of app time per wake (M2), plus ROM and bootloader | Under 1 ms; 88 ms of app time per wake (M2) |
+| Wake latency | Full boot; 63 ms of app time per routine wake with a frame push (M2), plus ROM and bootloader | Under 1 ms; 57 ms of app time per wake with a frame push (M2) |
 | ESP32-S3 floor current | µA range | Hundreds of µA (measure, PSRAM included) |
 | USB console | Disconnects: the USB PHY is off | Unusable while asleep: the pad is disabled; the Mac keeps the port |
 | Extra complexity | Snapshot, pin holds, a panel attach without reset | GPIO wake with level interrupts, restored to edges after wake |
@@ -906,3 +906,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r3 | 2026-09-25 | Approved by the owner; licence confirmed (D8); Python toolchain risk recorded (§20) |
 | r4 | 2026-09-25 | M1 panel check: factory init sequence with a separate LPM rate, default 1 Hz, configurable at runtime (D12, §4.2); a 120 ms wait after a panel reset (datasheet §12.1.4); HPM/LPM switching delays from datasheet §7.11; `panel rate` and `panel fps` (§15); landscape only (D13); `display` and `util` components (§3.1) |
 | r5 | 2026-09-28 | M2: a tethered board stays awake and light sleep is entered explicitly (D14, §3.4), with measured wake costs; board, rtc and power rows updated (§3.1); NVS `sys/idle` (§14.2); `sleep test` (§15) |
+| r6 | 2026-09-28 | M2 review: routine wakes skip the console, NVS and info logs (§3.3), which cuts a deep wake from 168 to 63 ms of app time (§3.4); a failed boot keeps the console up while tethered, otherwise it sleeps 5 min and boots again (§3.3); `sleep stats` reports per-cycle slept times (§15); a boot that comes alive reports a stored core dump (§16) |

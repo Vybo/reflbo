@@ -40,7 +40,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D1 | Our own immediate-mode 1-bpp renderer | LVGL is not used |
 | D2 | ESP-IDF v5.5.x (v5.5.5 at the time of writing) | Revisit v6.x after M5 |
 | D3 | Light sleep is the default idle strategy (M2 measurement, 2026-09-28) | Both drew 11.5 mA at 5.24 V; the 3V3 converter's forced PWM dominates (§9.4). Deep sleep stays selectable |
-| D4 | English by default, structured as language packs | No other pack in v1 |
+| D4 | English by default, structured as language packs | A Czech pack joins in M3 (D15) |
 | D5 | Home Assistant over MQTT with HA MQTT discovery | |
 | D6 | Power is best effort; an average below 2 mA is the stretch goal | |
 | D7 | Other local devices publish to MQTT, and the device maps topics to fields | Same mechanism as HA values (§12.5) |
@@ -51,6 +51,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D12 | Panel: the factory init sequence, with the LPM refresh rate set separately (default 1 Hz; `panel rate` changes it from 0.25 to 8 Hz) (§4.2) | Owner check at M1: factory contrast is visibly better than XiaoZhi's, and it looks the same at 1 Hz as at 8 Hz |
 | D13 | Landscape only | Portrait orientation declined at M1 |
 | D14 | Light sleep is entered explicitly by the app (`power_sleep_light()`); esp_pm automatic light sleep is not used. A tethered board stays awake (§3.4) | M2: the USB console drops in any light sleep, and automatic light sleep would need level-type interrupts on the button and RTC pins all the time |
+| D15 | Accepted M3 proposals (owner, 2026-09-28): the LPM refresh rate as a display setting (§4.2); a preset schedule whose entries can also start a timed night sleep (§5.4, §9.1); extra local fields (§5.1); a Czech language pack with name days and public holidays (§5.8) | The Night layout stays deferred (§19). The owner asked to measure what night sleep saves |
 
 ### 1.3 Out of scope for v1
 
@@ -198,7 +199,7 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 - **`st7305_set_mode(HPM | LPM)`.** Sends `38h`/`39h` using the switching sequence in datasheet §7.11, including its delays: about 120 ms into LPM and 320 ms into HPM. The sequence's per-mode voltage step reselects voltage set 1 (`C9h`), because both vendor sequences load the same values into all four sets.
   - Idle uses LPM.
   - Menu and config mode use HPM, so new frames appear without lag. Entering HPM takes about 320 ms, which the M3 menu design must absorb, for example by switching before rendering or asynchronously.
-- **LPM frame rate.** The LFRA field of `B2h` (0.25–8 Hz), written after the vendor sequence, so it is independent of that sequence. Default 1 Hz. A new rate applies at once, even in LPM. `panel rate` changes it at runtime; offering it as a user setting is an M3 proposal (§19). Its power cost is measured at M2/M5.
+- **LPM frame rate.** The LFRA field of `B2h` (0.25–8 Hz), written after the vendor sequence, so it is independent of that sequence. Default 1 Hz. A new rate applies at once, even in LPM. `panel rate` changes it at runtime, and the setting `display.lpm_hz` (menu Display ▸ Refresh rate) keeps it (D15). Its power cost is measured at M5.
 - **Frame-rate check.** The TE output (GPIO6, enabled by `35h`) pulses once per panel frame. `panel fps` counts the pulses, which gives the real frame rate. M1 measured 1.00 Hz in LPM and about 16–17 Hz in HPM with the factory sequence.
 - **RAM writes in LPM.** The panel RAM can be written in any power mode. The datasheet (§7.3) guarantees no visible artefacts when the interface writes while the panel reads. New content appears at the next panel frame, so at 1 Hz LPM a minute update shows within 1 s. Idle updates therefore stay in LPM and need no mode switch.
 - **Partial updates (verified in datasheet §7.2.3, §7.4, §8.1.14–16).**
@@ -259,7 +260,16 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 | `wx.hourly` | series: next 12 h (temperature, code) | forecast | Same |
 | `wx.daily` | series: 3 days | forecast | Same |
 | `sun.times` | pair (sunrise, sunset) | `astro`, computed locally | Always, given a valid date and location |
+| `env.dew` | number, °C | Dew point from `env.temp` and `env.hum` (Magnus formula) | Same as `env.temp` |
+| `env.temp_min`, `env.temp_max` | number, °C | Lowest and highest `env.temp` since local midnight | From the first reading of the day; reset at midnight |
+| `date.week` | number | ISO 8601 week of the local date | Valid whenever the time is valid |
+| `moon.phase` | moon (phase index 0–7, illumination %) | Computed from the date | Always, given a valid date |
+| `bat.days` | number, days | Level ÷ the discharge rate over up to the last 24 h | Missing unless discharging, with at least 6 h of history |
+| `date.nameday` | text | The language pack's name-day calendar | Valid whenever the time is valid; empty for packs without one |
+| `date.holiday` | text | The language pack's public holidays | Same; empty on ordinary days |
 | `mqtt.<key>` | number or text, with unit and label | MQTT mapping (§12.5) | Configured TTL; default twice the expected sync interval (§9.3) |
+
+`env.temp` and `env.hum` carry a trend: the change over the last hour. Widgets show ↑ or ↓ when it exceeds 0.5 °C or 3 %. The extra fields (from `env.dew` to `date.holiday`) are the accepted M3 proposals (D15).
 
 `wx.now` uses the `current` block while it is at most 60 minutes old. After that it uses the hourly forecast entry for the current local hour. This keeps "now" meaningful between syncs, even with a once-a-day schedule.
 
@@ -320,6 +330,9 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - The HA `select` entity (§12.3).
   - The web UI or the menu.
 - **Seconds.** `seconds: true` needs a wake-up every second. It is allowed, and the web UI shows the power cost.
+- **Schedule** (D15). `presets.json` holds `"schedule": { "enabled": true, "entries": [...] }` with up to 8 entries: `{ "at": "22:30", "days": 127, "action": "preset", "preset": "focus" }` or `{ "at": "23:00", "days": 127, "action": "night", "until": "06:00" }`. `days` is a Mon–Sun bitmask (bit 0 = Monday, default all). An entry runs at its local minute, with the same DST rules as user alarms (§9.2).
+  - `preset` makes that preset active. Manual switching and auto-cycling carry on from there.
+  - `night` starts night sleep (§9.1) until `until`, which may be on the next day.
 
 ### 5.5 Screens
 
@@ -359,19 +372,21 @@ The `diag` console command `btn` injects the same gestures. Holding BOOT at powe
 ### 5.7 Menu (v1)
 
 ```
-Presets    ▸ Active preset · Auto-cycle on/off · Interval (10 s … 1 h)
+Presets    ▸ Active preset · Auto-cycle on/off · Interval (10 s … 1 h) · Schedule on/off
 Alarms     ▸ Alarm 1–8: on/off · Time · Days · Sound · Volume        (M7)
 Radio      ▸ Play/stop · Station · Volume                            (M7)
 Wi-Fi      ▸ Config mode · Forget networks
 Sync       ▸ Sync now · Schedule (times / interval / always / manual) · Times or interval
 Time       ▸ Set date and time · 24-hour clock · Time zone (short list)
-Display    ▸ Contrast · Update interval (1–15 min)
+Display    ▸ Contrast · Update interval (1–15 min) · Refresh rate (0.25–8 Hz)
 Sensors    ▸ Temperature offset · Humidity offset · Units (°C/°F)
 Info       ▸ Battery V/% · Firmware · IP/MAC · Last sync result · Uptime · Free heap
-System     ▸ Reboot · Factory reset (with confirmation)
+System     ▸ Language (English, Čeština) · Reboot · Factory reset (with confirmation)
 ```
 
 - The menu closes after 60 s without input.
+- Items for features that don't exist yet (Wi-Fi before M4, Sync before M5, Alarms and Radio before M7) are hidden, not shown disabled.
+- Schedule entries are edited in the web UI (M4); until then `presets.json` or the console sets them.
 - The full time zone picker is in the web UI.
 
 ### 5.8 Language packs
@@ -383,7 +398,8 @@ System     ▸ Reboot · Factory reset (with confirmation)
   - Decimal separator.
   - First day of the week.
   - The character set the pack needs, so `fontgen` can check coverage.
-- **v1.** Ships only `en`. `settings.language` selects the pack.
+- **v1.** Ships `en` and `cs` (D15). `settings.language` selects the pack.
+- **Czech extras.** The `cs` pack also holds the Czech name-day calendar (one entry per day of a leap year) and the public holidays: 1 January, Good Friday, Easter Monday, 1 and 8 May, 5 and 6 July, 28 September, 28 October, 17 November and 24–26 December. Easter is computed. `en` has neither table, so `date.nameday` and `date.holiday` stay empty with it.
 - **Web UI.** English only in v1.
 
 ## 6. Datastore
@@ -456,6 +472,14 @@ System     ▸ Reboot · Factory reset (with confirmation)
 | IDLE | Dashboard | LPM | Any event |
 | SYNC | Sync running | LPM, with a sync indicator | Sync done |
 | CRITICAL | Battery at or below 3.3 V | Final screen | KEY press, if the voltage has recovered |
+| NIGHT | A `night` schedule entry (§5.4), or `night <minutes>` on the console for measuring | Sleep-in: the image is blanked (datasheet §7.10: via HPM, then `SLPIN`) | The entry's end time, or KEY/BOOT |
+
+**Night sleep** (D15):
+
+- The chip deep-sleeps whatever the idle strategy, woken only by KEY, BOOT or the end time (the RTC alarm, with the usual backup timer). Nothing is sampled or drawn.
+- A button press wakes the panel (`SLPOUT`, then the datasheet's wait) and shows the dashboard. After 60 s without input, night sleep resumes. KEY long still opens the menu.
+- At the end time the device renders the dashboard and carries on as usual.
+- The owner measures its current against the idle strategy, to see whether it saves enough to keep (M3 acceptance).
 
 ### 9.2 Wake scheduler
 
@@ -464,6 +488,7 @@ System     ▸ Reboot · Factory reset (with confirmation)
   - The next sensor sample.
   - The next user alarm, including snoozes.
   - The next sync.
+  - The next schedule entry (§5.4).
   - Any running timeout.
 - It is a pure function. Host tests cover DST transitions.
 - **Minute-aligned wakes use the PCF85063 alarm.** When the alarm fires, the chip latches the AF flag and holds INT low until firmware clears it, which triggers the ext1 wake reliably. The alarm is programmed before each idle. Other wakes use the ESP timer. A backup ESP timer set about 5 s after the RTC alarm covers a missed INT.
@@ -766,7 +791,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
   "units": { "temp": "C" },
   "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60 },
   "sensors": { "interval_min": 5, "temp_offset_c": 0.0, "hum_offset_pct": 0.0 },
-  "display": { "contrast": "default", "update_min": 1 },
+  "display": { "contrast": "default", "update_min": 1, "lpm_hz": 1 },
   "mqtt": { "enabled": false, "host": "", "port": 1883, "user": "",
             "discovery_prefix": "homeassistant", "discovery": true }
 }
@@ -865,7 +890,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M0 | ESP-IDF v5.5.5 installed; project skeleton (CMake, `main`, `sdkconfig.defaults`, partition table); console (`version`, `heap`, `reboot`); `tools/idf.sh`, `tools/devlog.py`; host test skeleton with Unity; `LICENSE`, `NOTICE`, `THIRD_PARTY.md` | Clean build (1); host tests pass (2); boot log captured and the console answers (3) |
 | M1 | `st7305` (cold init, push, LPM/HPM), frame conversion, `gfx` core, `fontgen` and the first fonts, screenshot command and tool, host render tool, test pattern | Host tests (2); the test-pattern screenshot matches the host render (3); owner confirms orientation, contrast and the init sequence (4) |
 | M2 | `st7305` warm init for deep-sleep wakes (moved from M1), `board` (I²C, buttons, gestures), `rtc`, `sensors` (SHTC3, battery), `timekeeping` (RTC → system time; manual set through the console), Classic clock screen, `power` with both idle strategies, `scheduler` minute wakes | Screen values match the console (3); owner measures deep vs light sleep with the USB meter; the idle strategy is chosen and recorded (4) |
-| M3 | `datastore`, `locale` (en), 4 layouts, widgets, presets JSON and defaults, cycling, status bar, menu v1, special screens | Owner reviews golden renders (2); presets switch with KEY/`btn` and survive a reboot (3) |
+| M3 | Two plans. **M3a:** `storage` (LittleFS config files), `datastore` with the extra fields, `locale` (en), fonts and icons, 4 layouts, widgets, status bar, presets JSON and defaults, cycling. **M3b:** menu v1, special screens, settings, schedule and night sleep, the LPM rate setting, the `cs` pack | Owner reviews golden renders (2); presets switch with KEY/`btn` and survive a reboot (3); owner measures night sleep (4); owner reviews the Czech renders (2) |
 | M4 | `netmgr` (STA/AP, captive portal, mDNS), config screen with QR, `webui` and REST API, preset editor with preview, set time from phone, OTA with rollback | Owner sets up Wi-Fi from a phone in AP mode (4); the preview matches a device screenshot (3); OTA upload and rollback work (3) |
 | M5 | SNTP → RTC, `weather`, `astro`, `sync` with the configurable schedule and backoff, weather widgets, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); sync energy and the daily average are measured and `docs/power.md` is updated (4) |
 | M6 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings, `always` sync mode | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
@@ -878,7 +903,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 |---|---|
 | M0 | GitHub Actions CI (firmware build and host tests) |
 | M1 | ~~Portrait orientation~~ (declined 2026-09-25, D13) |
-| M3 | The LPM refresh rate as a display setting (the driver supports 0.25–8 Hz, D12); preset time-of-day schedule; Night layout; extra fields (dew point, today's min/max, trends, week number, change in day length, moon phase, estimated battery days left); Czech language pack with name days and CZ public holidays |
+| M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays. Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
 | M4 | Web UI admin PIN; web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
 | M6 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
@@ -898,6 +923,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | SHTC3 self-heating | Offset calibration; sample right after wake |
 | `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M7; pick another decoder if needed |
 | Open-Meteo's free tier is for non-commercial use | Low request rate (daily sync); the provider can be swapped |
+| The Czech name-day calendar needs a source whose licence allows redistribution in this repository | Check at M3b; the data are facts, but pick a source with a clear licence and credit it in `THIRD_PARTY.md` |
 | No RTC backup cell (D9): the time is lost at every PWR-off | Sync at boot when Wi-Fi is configured, otherwise a "Set time" prompt; the owner may fit an ML1220 (§7) |
 | Homebrew Python 3.14 on this Mac (3.14.6 and 3.14.7 checked) can't load `pyexpat` (it expects a newer libexpat than macOS 26.2 has), which breaks pip and the ESP-IDF installer | ESP-IDF uses uv's Python 3.13 through `~/esp/python-shim` (`AGENTS.md` §6) |
 
@@ -912,3 +938,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r5 | 2026-09-28 | M2: a tethered board stays awake and light sleep is entered explicitly (D14, §3.4), with measured wake costs; board, rtc and power rows updated (§3.1); NVS `sys/idle` (§14.2); `sleep test` (§15) |
 | r6 | 2026-09-28 | M2 review: routine wakes skip the console, NVS and info logs (§3.3), which cuts a deep wake from 168 to 63 ms of app time (§3.4); a failed boot keeps the console up while tethered, otherwise it sleeps 5 min and boots again (§3.3); `sleep stats` reports per-cycle slept times (§15); a boot that comes alive reports a stored core dump (§16) |
 | r7 | 2026-09-28 | M2 measurement: D3 is light sleep (§1.2, §3.4); the forced-PWM 3V3 converter sets a ~60 mW floor and puts the stretch goal out of reach without a board rework (§9.4, §20) |
+| r8 | 2026-09-28 | M3 scope: accepted proposals (D15): the LPM rate setting (§4.2), extra local fields and trends (§5.1), the schedule (§5.4), night sleep (§9.1, §9.2), the `cs` pack (§5.8); hidden menu items for later features (§5.7); M3 split into M3a and M3b (§18) |

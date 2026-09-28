@@ -29,7 +29,7 @@ Guiding principles:
 
 ## 2. Status and roadmap
 
-- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). Next is M3, whose plan gets written before it starts.
+- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 is in progress as two plans: M3a (storage, datastore, locale, layouts, widgets, presets) and then M3b (menu, screens, settings, schedule and night sleep, Czech pack).
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
 - **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-25-m2-board-clock-and-sleep.md`](docs/plans/2026-09-25-m2-board-clock-and-sleep.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
@@ -334,7 +334,7 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 | D1 | Our own immediate-mode renderer; no LVGL |
 | D2 | ESP-IDF v5.5.x |
 | D3 | Light sleep is the default idle strategy. At M2 both strategies drew 11.5 mA at 5.24 V, because the 3V3 converter's forced PWM dominates (gotcha 23); deep sleep stays available (`power idle deep`) |
-| D4 | English UI, structured as language packs |
+| D4 | English UI, structured as language packs; a Czech pack joins in M3 (D15) |
 | D5 | Home Assistant over MQTT |
 | D6 | Power is best effort; an average below 2 mA is the stretch goal |
 | D7 | Data from other local devices arrives over MQTT |
@@ -345,3 +345,4 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 | D12 | Panel: the factory init sequence (better contrast), with the LPM refresh rate set separately: 1 Hz by default, changeable at runtime with `panel rate` from 0.25 to 8 Hz (owner check at M1) |
 | D13 | Landscape only; portrait orientation was declined at M1 |
 | D14 | Light sleep is entered explicitly by the app (`power_sleep_light()`), not by esp_pm automatic light sleep; a tethered board stays awake |
+| D15 | Accepted M3 proposals (owner, 2026-09-28): the LPM refresh rate setting, a preset schedule that can also start a timed night sleep (screen off, woken only by buttons or the end time, its saving measured), extra local fields, and a Czech pack with name days and holidays. The Night layout stays deferred |

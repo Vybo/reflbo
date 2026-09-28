@@ -74,6 +74,12 @@ add_library(locale STATIC ${REPO_ROOT}/components/locale/lang.c ${REPO_ROOT}/com
 target_include_directories(locale PUBLIC ${REPO_ROOT}/components/locale/include)
 target_compile_options(locale PRIVATE ${REFLBO_WARNINGS})
 
+# datastore: pure C field store.
+add_library(datastore STATIC ${REPO_ROOT}/components/datastore/datastore.c)
+target_include_directories(datastore PUBLIC ${REPO_ROOT}/components/datastore/include)
+target_compile_options(datastore PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(datastore PUBLIC m)
+
 # ui: pure C on top of gfx.
 add_library(ui STATIC ${REPO_ROOT}/components/ui/ui_clock.c)
 target_include_directories(ui PUBLIC ${REPO_ROOT}/components/ui/include)
@@ -106,6 +112,7 @@ reflbo_host_test(test_pcf85063_regs rtc_logic)
 reflbo_host_test(test_timekeeping_iso timekeeping_logic)
 reflbo_host_test(test_power_policy power_logic)
 reflbo_host_test(test_lang locale)
+reflbo_host_test(test_datastore datastore)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

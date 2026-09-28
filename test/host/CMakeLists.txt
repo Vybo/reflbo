@@ -80,11 +80,12 @@ target_include_directories(datastore PUBLIC ${REPO_ROOT}/components/datastore/in
 target_compile_options(datastore PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(datastore PUBLIC m)
 
-# ui: pure C on top of gfx.
-add_library(ui STATIC ${REPO_ROOT}/components/ui/ui_clock.c)
+# ui: pure C on top of gfx, locale and the datastore.
+file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)
+add_library(ui STATIC ${UI_SOURCES})
 target_include_directories(ui PUBLIC ${REPO_ROOT}/components/ui/include)
 target_compile_options(ui PRIVATE ${REFLBO_WARNINGS})
-target_link_libraries(ui PUBLIC gfx)
+target_link_libraries(ui PUBLIC gfx locale datastore util)
 
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
@@ -113,6 +114,7 @@ reflbo_host_test(test_timekeeping_iso timekeeping_logic)
 reflbo_host_test(test_power_policy power_logic)
 reflbo_host_test(test_lang locale)
 reflbo_host_test(test_datastore datastore)
+reflbo_host_test(test_ui_fields ui)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

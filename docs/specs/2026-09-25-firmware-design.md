@@ -52,6 +52,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D13 | Landscape only | Portrait orientation declined at M1 |
 | D14 | Light sleep is entered explicitly by the app (`power_sleep_light()`); esp_pm automatic light sleep is not used. A tethered board stays awake (§3.4) | M2: the USB console drops in any light sleep, and automatic light sleep would need level-type interrupts on the button and RTC pins all the time |
 | D15 | Accepted M3 proposals (owner, 2026-09-28): the LPM refresh rate as a display setting (§4.2); a preset schedule whose entries can also start a timed night sleep (§5.4, §9.1); extra local fields (§5.1); a Czech language pack with name days and public holidays (§5.8) | The Night layout stays deferred (§19). The owner asked to measure what night sleep saves |
+| D16 | Owner, 2026-09-29: the `cs` pack ships the public holidays but no name-day calendar until a source with a clean licence turns up (§5.8, §20). A button still held when the board goes to sleep is left out of that sleep's wake sources (§9.2) | The best name-day list found (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA). A stuck KEY or BOOT would otherwise wake the board again and again |
 
 ### 1.3 Out of scope for v1
 
@@ -421,7 +422,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - First day of the week.
   - The character set the pack needs, so `fontgen` can check coverage.
 - **v1.** Ships `en` and `cs` (D15). `settings.language` selects the pack.
-- **Czech extras.** The `cs` pack also holds the Czech name-day calendar (one entry per day of a leap year) and the public holidays: 1 January, Good Friday, Easter Monday, 1 and 8 May, 5 and 6 July, 28 September, 28 October, 17 November and 24–26 December. Easter is computed. `en` has neither table, so `date.nameday` and `date.holiday` stay empty with it.
+- **Czech extras.** The `cs` pack also holds the public holidays: 1 January, Good Friday, Easter Monday, 1 and 8 May, 5 and 6 July, 28 September, 28 October, 17 November and 24–26 December (zákon č. 245/2000 Sb.). Easter is computed. The Czech name-day calendar (one entry per day of a leap year) waits for a source whose licence allows redistribution (D16, §20), so `date.nameday` stays empty with `cs` for now. `en` has neither table, so `date.nameday` and `date.holiday` stay empty with it.
 - **Web UI.** English only in v1.
 
 ## 6. Datastore
@@ -514,6 +515,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - Any running timeout.
 - It is a pure function. Host tests cover DST transitions.
 - **Minute-aligned wakes use the PCF85063 alarm.** When the alarm fires, the chip latches the AF flag and holds INT low until firmware clears it, which triggers the ext1 wake reliably. The alarm is programmed before each idle. Other wakes use the ESP timer. A backup ESP timer set about 5 s after the RTC alarm covers a missed INT.
+- **Held buttons** (D16). If KEY or BOOT is still low when the board goes to sleep, that sleep leaves it out of the wake sources and relies on the RTC alarm and its backup timer. The button becomes a wake source again at the first sleep after it is released, so a stuck button, or the board lying on one, can't keep it awake.
 - **User alarms** are checked at minute ticks in local time.
   - On spring-forward, a time that doesn't exist fires at the first valid minute after it.
   - On fall-back, a repeated time fires once.
@@ -930,7 +932,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 |---|---|
 | M0 | GitHub Actions CI (firmware build and host tests) |
 | M1 | ~~Portrait orientation~~ (declined 2026-09-25, D13) |
-| M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays. Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
+| M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
 | M4 | Web UI admin PIN; web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
 | M6 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
@@ -950,7 +952,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | SHTC3 self-heating | Offset calibration; sample right after wake |
 | `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M7; pick another decoder if needed |
 | Open-Meteo's free tier is for non-commercial use | Low request rate (daily sync); the provider can be swapped |
-| The Czech name-day calendar needs a source whose licence allows redistribution in this repository | Check at M3b; the data are facts, but pick a source with a clear licence and credit it in `THIRD_PARTY.md` |
+| The Czech name-day calendar needs a source whose licence allows redistribution in this repository | Checked 2026-09-29: the best list (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA); others were incomplete, broken or unlicensed. Deferred (D16): `cs` ships the holidays only until a clean source turns up |
 | No RTC backup cell (D9): the time is lost at every PWR-off | Sync at boot when Wi-Fi is configured, otherwise a "Set time" prompt; the owner may fit an ML1220 (§7) |
 | Homebrew Python 3.14 on this Mac (3.14.6 and 3.14.7 checked) can't load `pyexpat` (it expects a newer libexpat than macOS 26.2 has), which breaks pip and the ESP-IDF installer | ESP-IDF uses uv's Python 3.13 through `~/esp/python-shim` (`AGENTS.md` §6) |
 
@@ -967,3 +969,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r7 | 2026-09-28 | M2 measurement: D3 is light sleep (§1.2, §3.4); the forced-PWM 3V3 converter sets a ~60 mW floor and puts the stretch goal out of reach without a board rework (§9.4, §20) |
 | r8 | 2026-09-28 | M3 scope: accepted proposals (D15): the LPM rate setting (§4.2), extra local fields and trends (§5.1), the schedule (§5.4), night sleep (§9.1, §9.2), the `cs` pack (§5.8); hidden menu items for later features (§5.7); M3 split into M3a and M3b (§18) |
 | r9 | 2026-09-29 | M3a as built: the status bar's `status_clock` and `status_battery` options and the built-in Indoor preset, from the owner's render review (§5.2, §5.4); preset validation (§5.4); widget sizing and ellipsis (§5.3); the datastore's scope, ownership and snapshot (§6); fonts and Material icons (§4.4, §4.5); the `lang_` prefix and storage's host-tested parts (§3.1); `power_plan()` in the runtime model (§3.2); the settings keys read and the `/fs` mount (§14.3); `field clear` (§15); golden updates and the sanitizer build (§17) |
+| r10 | 2026-09-29 | Owner decisions (D16): the `cs` pack ships the public holidays only for now (§5.8, §20); a held button is left out of the wake sources (§9.2) |

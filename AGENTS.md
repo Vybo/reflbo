@@ -353,3 +353,4 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 | D13 | Landscape only; portrait orientation was declined at M1 |
 | D14 | Light sleep is entered explicitly by the app (`power_sleep_light()`), not by esp_pm automatic light sleep; a tethered board stays awake |
 | D15 | Accepted M3 proposals (owner, 2026-09-28): the LPM refresh rate setting, a preset schedule that can also start a timed night sleep (screen off, woken only by buttons or the end time, its saving measured), extra local fields, and a Czech pack with name days and holidays. The Night layout stays deferred |
+| D16 | Owner, 2026-09-29: the Czech pack ships the public holidays but no name days until a source with a clean licence turns up (the best one found traces to CC BY-SA Wikipedia). A button still held at sleep time is left out of that sleep's wake sources |

@@ -59,8 +59,17 @@ power_plan_t power_plan(bool work_pending);
 power_wake_t power_sleep_light(time_t until_utc);
 /* Never returns: the chip reboots on wake. Seal RTC-RAM state and hold the panel pins first. */
 void power_sleep_deep(time_t until_utc);
+/* Never returns: the critical-battery sleep (spec §8), woken by KEY only. If KEY is held, a timer
+ * wakes the chip after `recheck_s` instead, so it can't sleep for good. */
+void power_sleep_critical(uint32_t recheck_s);
 /* Never returns: deep sleep for `seconds` or until KEY or BOOT, then boot from scratch. */
 void power_sleep_retry(uint32_t seconds);
+/* A button held when the chip goes to sleep is left out of that sleep's wake sources (D16), so a
+ * stuck KEY or BOOT can't keep the board awake. These bits say which were, for the sleep that just
+ * ended: the app ignores such a button until it is released. */
+#define POWER_BUTTON_KEY  (1u << 0)
+#define POWER_BUTTON_BOOT (1u << 1)
+unsigned power_masked_buttons(void);
 power_idle_t power_idle_strategy(void);
 /* Applies at once; an error means only that NVS didn't keep it for the next boot. */
 esp_err_t power_set_idle_strategy(power_idle_t idle);

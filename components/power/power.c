@@ -20,7 +20,7 @@
 #include "util_snapshot.h"
 
 #define STATE_MAGIC   0x72666c70u /* "rflp" */
-#define STATE_VERSION 4
+#define STATE_VERSION 5
 #define NVS_NAMESPACE "sys"
 #define NVS_KEY_IDLE  "idle"
 #define TEST_END_HOLD_MS 3000
@@ -37,6 +37,7 @@ typedef struct {
     uint8_t idle_valid; /* `idle` mirrors NVS, so routine wakes need not open it */
     uint8_t idle;
     uint8_t retry;      /* boot failed: boot from scratch at the next wake */
+    uint8_t masked;     /* POWER_BUTTON_* left out of the deep sleep's wake sources (D16) */
 } power_state_t;
 
 static RTC_DATA_ATTR power_state_t s_rtc; /* survives deep sleep only */
@@ -46,6 +47,7 @@ static bool s_boot_failed;
 static bool s_cpu_pd_ready;
 static int64_t s_hold_until_us;
 static int64_t s_awake_since_us; /* esp_timer time this awake phase began; -1 after a stats reset */
+static unsigned s_masked;        /* POWER_BUTTON_* the sleep that just ended left out */
 
 static const gpio_num_t k_wake_pins[] = { BOARD_PIN_RTC_INT, BOARD_PIN_KEY, BOARD_PIN_BOOT };
 
@@ -55,6 +57,7 @@ static void seal(void)
 }
 
 static void count_wake(power_wake_t wake, int64_t slept_ms);
+static unsigned held_buttons(void);
 static power_wake_t decode_boot_wake(void);
 static void finish_test(void);
 
@@ -66,6 +69,7 @@ esp_err_t power_init(void)
         s_rtc = (power_state_t){ 0 };
         seal();
     }
+    s_masked = s_boot_wake != POWER_WAKE_COLD ? s_rtc.masked : 0;
     if (s_boot_wake != POWER_WAKE_COLD && s_rtc.retry) {
         s_rtc.retry = 0;
         seal();
@@ -253,9 +257,14 @@ power_wake_t power_sleep_light(time_t until_utc)
             ESP_LOGW(TAG, "CPU stays powered in light sleep: %s", esp_err_to_name(err));
         }
     }
+    unsigned held = held_buttons();
     for (size_t i = 0; i < sizeof(k_wake_pins) / sizeof(k_wake_pins[0]); i++) {
         gpio_intr_disable(k_wake_pins[i]);
-        gpio_wakeup_enable(k_wake_pins[i], GPIO_INTR_LOW_LEVEL);
+        bool masked = (k_wake_pins[i] == BOARD_PIN_KEY && (held & POWER_BUTTON_KEY)) ||
+                      (k_wake_pins[i] == BOARD_PIN_BOOT && (held & POWER_BUTTON_BOOT));
+        if (!masked) {
+            gpio_wakeup_enable(k_wake_pins[i], GPIO_INTR_LOW_LEVEL);
+        }
     }
     esp_sleep_enable_gpio_wakeup();
     esp_sleep_enable_timer_wakeup(sleep_us_until(until_utc));
@@ -273,10 +282,11 @@ power_wake_t power_sleep_light(time_t until_utc)
         s_awake_since_us = woke_us;
     }
 
-    power_wake_t wake = POWER_WAKE_OTHER;
-    if (gpio_get_level(BOARD_PIN_KEY) == 0) {
+    s_masked = held;
+    power_wake_t wake = POWER_WAKE_OTHER; /* a button held since before the sleep didn't wake it */
+    if (!(held & POWER_BUTTON_KEY) && gpio_get_level(BOARD_PIN_KEY) == 0) {
         wake = POWER_WAKE_KEY;
-    } else if (gpio_get_level(BOARD_PIN_BOOT) == 0) {
+    } else if (!(held & POWER_BUTTON_BOOT) && gpio_get_level(BOARD_PIN_BOOT) == 0) {
         wake = POWER_WAKE_BOOT;
     } else if (gpio_get_level(BOARD_PIN_RTC_INT) == 0) {
         wake = POWER_WAKE_RTC;
@@ -301,14 +311,34 @@ static void start_deep_sleep(void)
     esp_deep_sleep_start();
 }
 
+/* POWER_BUTTON_* for the buttons held right now. */
+static unsigned held_buttons(void)
+{
+    return (gpio_get_level(BOARD_PIN_KEY) == 0 ? POWER_BUTTON_KEY : 0) |
+           (gpio_get_level(BOARD_PIN_BOOT) == 0 ? POWER_BUTTON_BOOT : 0);
+}
+
+/* ext1 bits for the buttons that are not held (D16). */
+static uint64_t button_wake_bits(unsigned held)
+{
+    return (held & POWER_BUTTON_KEY ? 0 : BIT64(BOARD_PIN_KEY)) |
+           (held & POWER_BUTTON_BOOT ? 0 : BIT64(BOARD_PIN_BOOT));
+}
+
+unsigned power_masked_buttons(void)
+{
+    return s_masked;
+}
+
 void power_sleep_deep(time_t until_utc)
 {
     count_sleep(true);
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
     rtc_gpio_pullup_en(BOARD_PIN_RTC_INT); /* INT has no external pull-up */
     rtc_gpio_pulldown_dis(BOARD_PIN_RTC_INT);
-    esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_RTC_INT) | BIT64(BOARD_PIN_KEY) | BIT64(BOARD_PIN_BOOT),
-                                    ESP_EXT1_WAKEUP_ANY_LOW);
+    unsigned held = held_buttons();
+    s_rtc.masked = (uint8_t)held;
+    esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_RTC_INT) | button_wake_bits(held), ESP_EXT1_WAKEUP_ANY_LOW);
     esp_sleep_enable_timer_wakeup(sleep_us_until(until_utc));
     start_deep_sleep();
 }
@@ -318,8 +348,27 @@ void power_sleep_retry(uint32_t seconds)
     s_rtc.retry = 1;
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
     /* Not RTC_INT: whatever broke the boot may leave it low, which would wake the chip at once. */
-    esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_KEY) | BIT64(BOARD_PIN_BOOT), ESP_EXT1_WAKEUP_ANY_LOW);
+    unsigned held = held_buttons();
+    s_rtc.masked = (uint8_t)held;
+    uint64_t bits = button_wake_bits(held);
+    if (bits != 0) {
+        esp_sleep_enable_ext1_wakeup_io(bits, ESP_EXT1_WAKEUP_ANY_LOW);
+    }
     esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000u);
+    start_deep_sleep();
+}
+
+void power_sleep_critical(uint32_t recheck_s)
+{
+    count_sleep(true);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    unsigned held = held_buttons() & POWER_BUTTON_KEY;
+    s_rtc.masked = (uint8_t)held;
+    if (held) {
+        esp_sleep_enable_timer_wakeup((uint64_t)recheck_s * 1000000u);
+    } else {
+        esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_KEY), ESP_EXT1_WAKEUP_ANY_LOW);
+    }
     start_deep_sleep();
 }
 

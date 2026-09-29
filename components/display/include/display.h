@@ -18,6 +18,7 @@ typedef struct {
     st7305_lpm_rate_t lpm_rate;
     uint32_t last_crc; /* CRC of the frame the panel shows */
     bool pushed;
+    bool asleep; /* sleep-in: night sleep (spec §9.1) */
 } display_state_t;
 
 esp_err_t display_init(st7305_variant_t variant); /* cold start: white frame, then LPM */
@@ -28,6 +29,11 @@ void display_export(display_state_t *out);
 esp_err_t display_prepare_deep_sleep(void);
 void display_cancel_deep_sleep(void); /* after display_prepare_deep_sleep() failed */
 gfx_fb_t *display_fb(void); /* NULL until display_init has allocated the framebuffer */
+/* Night sleep (spec §9.1): the panel stops scanning and its image fades; waking pushes the frame
+ * again and returns the panel to LPM. */
+esp_err_t display_sleep(void);
+esp_err_t display_wake(void);
+bool display_asleep(void);
 /* Pushes the framebuffer if it changed since the last push (CRC32), or always when force is set. */
 esp_err_t display_commit(bool force);
 /* Re-initialises the panel with another init sequence and pushes the current frame. */

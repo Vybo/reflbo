@@ -40,7 +40,7 @@ typedef enum {
 esp_err_t st7305_init(st7305_variant_t variant);
 /* After a deep-sleep wake: attaches the SPI bus without resetting the panel, which kept its
  * image, mode and rate (AGENTS.md gotcha 4). Releases the pin holds set before sleeping. */
-esp_err_t st7305_init_warm(st7305_variant_t variant, st7305_mode_t mode, st7305_lpm_rate_t rate);
+esp_err_t st7305_init_warm(st7305_variant_t variant, st7305_mode_t mode, st7305_lpm_rate_t rate, bool asleep);
 /* Holds CS and RESET through deep sleep. Call last, just before sleeping. */
 esp_err_t st7305_prepare_deep_sleep(void);
 /* Resets the panel and runs another init sequence (the SPI clock follows the variant). */
@@ -53,6 +53,14 @@ esp_err_t st7305_set_mode(st7305_mode_t mode);
 esp_err_t st7305_set_lpm_rate(st7305_lpm_rate_t rate);
 /* Undoes st7305_prepare_deep_sleep() after it failed part-way, so the panel can be used again. */
 void st7305_cancel_deep_sleep(void);
+/* Sleep-in (datasheet §7.10): from LPM through HPM (300 ms), then SLPIN and 100 ms. The panel stops
+ * scanning, so its image fades; RAM and settings are kept. Night sleep (spec §9.1). */
+esp_err_t st7305_sleep_in(void);
+/* Wakes the panel from sleep-in with a reset and the init sequence, as a plain SLPOUT would reload
+ * the NVM defaults (NRDSLP is set). The panel is then in HPM with the RAM cleared: push a frame and
+ * set LPM. */
+esp_err_t st7305_sleep_out(void);
+bool st7305_asleep(void);
 st7305_variant_t st7305_variant(void);
 st7305_mode_t st7305_mode(void);
 st7305_lpm_rate_t st7305_lpm_rate(void);

@@ -106,6 +106,7 @@ static uint8_t *s_panel; /* DMA-capable internal RAM */
 static bool s_bus_ready;
 static st7305_variant_t s_variant;
 static st7305_mode_t s_mode;
+static bool s_asleep;
 static st7305_lpm_rate_t s_lpm_rate = ST7305_LPM_1HZ;
 static volatile uint32_t s_te_pulses;
 
@@ -210,7 +211,7 @@ esp_err_t st7305_init(st7305_variant_t variant)
     return st7305_reinit(variant);
 }
 
-esp_err_t st7305_init_warm(st7305_variant_t variant, st7305_mode_t mode, st7305_lpm_rate_t rate)
+esp_err_t st7305_init_warm(st7305_variant_t variant, st7305_mode_t mode, st7305_lpm_rate_t rate, bool asleep)
 {
     ESP_RETURN_ON_FALSE(!s_bus_ready, ESP_ERR_INVALID_STATE, TAG, "already initialised");
     ESP_RETURN_ON_ERROR(bus_init(), TAG, "SPI bus");
@@ -225,8 +226,9 @@ esp_err_t st7305_init_warm(st7305_variant_t variant, st7305_mode_t mode, st7305_
     s_variant = variant;
     s_mode = mode;
     s_lpm_rate = rate;
-    ESP_LOGI(TAG, "attached without reset (%s, %s, LPM %s Hz)", xiaozhi ? "XiaoZhi" : "factory",
-             mode == ST7305_MODE_LPM ? "LPM" : "HPM", st7305_lpm_rate_name(rate));
+    s_asleep = asleep;
+    ESP_LOGI(TAG, "attached without reset (%s, %s, LPM %s Hz%s)", xiaozhi ? "XiaoZhi" : "factory",
+             mode == ST7305_MODE_LPM ? "LPM" : "HPM", st7305_lpm_rate_name(rate), asleep ? ", asleep" : "");
     return ESP_OK;
 }
 
@@ -256,6 +258,7 @@ esp_err_t st7305_reinit(st7305_variant_t variant)
     ESP_RETURN_ON_ERROR(create_io(xiaozhi ? 40 * 1000 * 1000 : 10 * 1000 * 1000), TAG, "panel IO");
     hardware_reset();
     s_mode = ST7305_MODE_HPM; /* the panel is in HPM after a reset, even if the init below fails */
+    s_asleep = false;
     if (xiaozhi) {
         ESP_RETURN_ON_ERROR(run_init(s_init_xiaozhi, sizeof(s_init_xiaozhi) / sizeof(s_init_xiaozhi[0])), TAG,
                             "XiaoZhi init");
@@ -313,6 +316,40 @@ esp_err_t st7305_set_mode(st7305_mode_t mode)
     }
     s_mode = mode;
     return ESP_OK;
+}
+
+esp_err_t st7305_sleep_in(void)
+{
+    ESP_RETURN_ON_FALSE(s_io != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    if (s_asleep) {
+        return ESP_OK;
+    }
+    if (s_mode == ST7305_MODE_LPM) { /* datasheet §7.10: sleep-in from LPM goes through HPM */
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, 0x38, NULL, 0), TAG, "HPM");
+        s_mode = ST7305_MODE_HPM;
+        delay_at_least_ms(300);
+    }
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, 0x10, NULL, 0), TAG, "SLPIN");
+    delay_at_least_ms(100);
+    s_asleep = true;
+    return ESP_OK;
+}
+
+esp_err_t st7305_sleep_out(void)
+{
+    ESP_RETURN_ON_FALSE(s_io != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    if (!s_asleep) {
+        return ESP_OK;
+    }
+    /* Both init sequences set NRDSLP (D6h 2nd parameter 0x02): a plain SLPOUT reloads the NVM
+     * defaults, and the panel came back at 2 Hz (M3b). Start over as at a cold boot instead; the
+     * sequence has its own SLPOUT and wait. */
+    return st7305_reinit(s_variant);
+}
+
+bool st7305_asleep(void)
+{
+    return s_asleep;
 }
 
 esp_err_t st7305_set_lpm_rate(st7305_lpm_rate_t rate)

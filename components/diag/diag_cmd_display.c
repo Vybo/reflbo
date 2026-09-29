@@ -42,8 +42,9 @@ static int screenshot_body(int argc, char **argv)
 
 static int print_status(void)
 {
-    printf("panel %s, mode %s, lpm rate %s Hz\n", st7305_variant() == ST7305_VARIANT_XIAOZHI ? "xiaozhi" : "factory",
-           st7305_mode() == ST7305_MODE_LPM ? "lpm" : "hpm", st7305_lpm_rate_name(st7305_lpm_rate()));
+    printf("panel %s, mode %s, lpm rate %s Hz%s\n", st7305_variant() == ST7305_VARIANT_XIAOZHI ? "xiaozhi" : "factory",
+           st7305_mode() == ST7305_MODE_LPM ? "lpm" : "hpm", st7305_lpm_rate_name(st7305_lpm_rate()),
+           st7305_asleep() ? ", asleep" : "");
     return 0;
 }
 
@@ -113,12 +114,17 @@ static int panel_body(int argc, char **argv)
         err = st7305_set_mode(ST7305_MODE_LPM);
     } else if (argc == 3 && strcmp(argv[1], "rate") == 0 && parse_lpm_rate(argv[2], &rate)) {
         err = st7305_set_lpm_rate(rate);
+    } else if (argc == 2 && strcmp(argv[1], "sleep") == 0) {
+        err = display_sleep();
+    } else if (argc == 2 && strcmp(argv[1], "wake") == 0) {
+        err = display_wake();
     } else if (argc == 3 && strcmp(argv[1], "init") == 0 && strcmp(argv[2], "factory") == 0) {
         err = display_set_variant(ST7305_VARIANT_FACTORY);
     } else if (argc == 3 && strcmp(argv[1], "init") == 0 && strcmp(argv[2], "xiaozhi") == 0) {
         err = display_set_variant(ST7305_VARIANT_XIAOZHI);
     } else {
-        printf("usage: panel status | test | clear | mode <hpm|lpm> | rate <0.25|0.5|1|2|4|8> | fps [s] | init <factory|xiaozhi>\n");
+        printf("usage: panel status | test | clear | mode <hpm|lpm> | rate <0.25|0.5|1|2|4|8> | fps [s] | sleep |"
+               " wake | init <factory|xiaozhi>\n");
         return 1;
     }
     if (err != ESP_OK) {

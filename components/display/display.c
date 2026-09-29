@@ -24,7 +24,8 @@ static esp_err_t alloc_fb(void)
 esp_err_t display_init_warm(const display_state_t *state)
 {
     ESP_RETURN_ON_ERROR(alloc_fb(), TAG, "framebuffer");
-    ESP_RETURN_ON_ERROR(st7305_init_warm(state->variant, state->mode, state->lpm_rate), TAG, "panel attach");
+    ESP_RETURN_ON_ERROR(st7305_init_warm(state->variant, state->mode, state->lpm_rate, state->asleep), TAG,
+                        "panel attach");
     s_last_crc = state->last_crc;
     s_pushed = state->pushed;
     return ESP_OK;
@@ -38,7 +39,28 @@ void display_export(display_state_t *out)
         .lpm_rate = st7305_lpm_rate(),
         .last_crc = s_last_crc,
         .pushed = s_pushed,
+        .asleep = st7305_asleep(),
     };
+}
+
+esp_err_t display_sleep(void)
+{
+    return st7305_sleep_in();
+}
+
+esp_err_t display_wake(void)
+{
+    if (!st7305_asleep()) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(st7305_sleep_out(), TAG, "sleep out");
+    ESP_RETURN_ON_ERROR(st7305_set_mode(ST7305_MODE_LPM), TAG, "LPM");
+    return display_commit(true); /* the image faded while the panel slept */
+}
+
+bool display_asleep(void)
+{
+    return st7305_asleep();
 }
 
 esp_err_t display_prepare_deep_sleep(void)

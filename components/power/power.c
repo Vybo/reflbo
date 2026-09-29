@@ -362,12 +362,13 @@ void power_sleep_critical(uint32_t recheck_s)
 {
     count_sleep(true);
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-    unsigned held = held_buttons() & POWER_BUTTON_KEY;
-    s_rtc.masked = (uint8_t)held;
+    bool held = held_buttons() & POWER_BUTTON_KEY;
+    s_rtc.masked = 0; /* KEY stays the wake source either way */
+    /* A KEY still held, usually the press that asked for this check, wakes the chip when it is
+     * released, so the next press counts; a timer looks again now and then in case it is stuck. */
+    esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_KEY), held ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ANY_LOW);
     if (held) {
         esp_sleep_enable_timer_wakeup((uint64_t)recheck_s * 1000000u);
-    } else {
-        esp_sleep_enable_ext1_wakeup_io(BIT64(BOARD_PIN_KEY), ESP_EXT1_WAKEUP_ANY_LOW);
     }
     start_deep_sleep();
 }

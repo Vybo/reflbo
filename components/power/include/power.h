@@ -59,8 +59,8 @@ power_plan_t power_plan(bool work_pending);
 power_wake_t power_sleep_light(time_t until_utc);
 /* Never returns: the chip reboots on wake. Seal RTC-RAM state and hold the panel pins first. */
 void power_sleep_deep(time_t until_utc);
-/* Never returns: the critical-battery sleep (spec §8), woken by KEY only. If KEY is held, a timer
- * wakes the chip after `recheck_s` instead, so it can't sleep for good. */
+/* Never returns: the critical-battery sleep (spec §8), woken by KEY only. If KEY is held, its
+ * release wakes the chip instead, and a timer after `recheck_s` in case it is stuck. */
 void power_sleep_critical(uint32_t recheck_s);
 /* Never returns: deep sleep for `seconds` or until KEY or BOOT, then boot from scratch. */
 void power_sleep_retry(uint32_t seconds);

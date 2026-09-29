@@ -364,7 +364,8 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - `preset` makes that preset active. Manual switching and auto-cycling carry on from there.
   - `night` starts night sleep (§9.1) until `until`, which may be on the next day.
   - Entries of the same minute run in list order, presets before a night, because nothing runs once a night has started.
-  - Entries run only while the time is valid. They don't run late: not those a night covers or a clock change skips, and not those missed while the board was off.
+  - Entries run only while the time is valid, and not on the critical-battery screen. They don't run late: not those a night covers or a clock change skips, not those missed while the board was off, and not after a gap longer than the display interval plus 5 minutes, such as the critical sleep.
+  - A night covers the minutes from its start up to its end, so an entry at the end minute runs: night 23:00–06:00 with a preset at 06:00 switches the preset in the morning.
   - A preset entry's switch is not saved, like an auto-cycle switch.
   - Until the web UI (M4), the `schedule` console command edits the entries (§15).
 
@@ -429,6 +430,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - The time zone list holds 14 zones. A zone set elsewhere stays selectable.
   - Info shows the device id `reflbo-XXXX`, the firmware version with the first bytes of its ELF hash, and the uptime since the first valid clock after a cold boot.
   - Reboot doesn't ask. Factory reset asks, and only KEY held confirms it.
+  - The date-time editor starts from 2026 when the clock reads an earlier year, as after a power-off without the backup cell (D9).
   - The panel is in HPM while the menu is open.
 - The full time zone picker is in the web UI.
 
@@ -503,7 +505,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   `usb_serial_jtag_is_connected()` additionally marks external power when a PC is attached.
 - **Thresholds.**
   - Low, 15 %: a "!" beside the status bar's battery; sync retries are skipped.
-  - Critical, 3.3 V or below while not charging: the critical screen. Only KEY wakes the device; if KEY is held, a timer checks again every 10 min instead (D16). The screen stays until the battery reads 3.4 V, or until charging is seen, so it doesn't flicker at the threshold.
+  - Critical, 3.3 V or below while not charging: the critical screen. Only KEY wakes the device. If KEY is still held, usually the press that asked for the check, its release wakes the chip, with a 10-minute timer in case it is stuck. While a PC is attached the board stays awake on the critical screen, as a tethered board does (D14). The screen stays until the battery reads 3.4 V, or until charging is seen, so it doesn't flicker at the threshold.
 
 ## 9. Power management and scheduling
 
@@ -539,7 +541,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - Any running timeout.
 - It is a pure function. Host tests cover DST transitions.
 - **Minute-aligned wakes use the PCF85063 alarm.** When the alarm fires, the chip latches the AF flag and holds INT low until firmware clears it, which triggers the ext1 wake reliably. The alarm is programmed before each idle. Other wakes use the ESP timer. A backup ESP timer set about 5 s after the RTC alarm covers a missed INT.
-- **Held buttons** (D16). If KEY or BOOT is still low when the board goes to sleep, that sleep leaves it out of the wake sources and relies on the RTC alarm and its backup timer. The button becomes a wake source again at the first sleep after it is released, so a stuck button, or the board lying on one, can't keep it awake.
+- **Held buttons** (D16). If KEY or BOOT is still low when the board goes to sleep, that sleep leaves it out of the wake sources and relies on the RTC alarm and its backup timer. The button becomes a wake source again at the first sleep after it is released, so a stuck button, or the board lying on one, can't keep it awake. A button still held after its gesture has fired doesn't keep the board awake either, and its release gives nothing.
 - **User alarms** are checked at minute ticks in local time.
   - On spring-forward, a time that doesn't exist fires at the first valid minute after it.
   - On fall-back, a repeated time fires once.
@@ -1000,3 +1002,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r9 | 2026-09-29 | M3a as built: the status bar's `status_clock` and `status_battery` options and the built-in Indoor preset, from the owner's render review (§5.2, §5.4); preset validation (§5.4); widget sizing and ellipsis (§5.3); the datastore's scope, ownership and snapshot (§6); fonts and Material icons (§4.4, §4.5); the `lang_` prefix and storage's host-tested parts (§3.1); `power_plan()` in the runtime model (§3.2); the settings keys read and the `/fs` mount (§14.3); `field clear` (§15); golden updates and the sanitizer build (§17) |
 | r10 | 2026-09-29 | Owner decisions (D16): the `cs` pack ships the public holidays only for now (§5.8, §20); a held button is left out of the wake sources (§9.2) |
 | r11 | 2026-09-29 | M3b as built. The menu without Contrast and with the offset steps (D17, §5.7), and the menu's gesture timings (§5.6). Toasts and the critical screen (§5.5), the critical hysteresis and the humidity clamp (§8). The schedule's order and validation (§5.4), and night sleep (§9.1). Panel sleep and wake with NRDSLP (§4.2). The fallback toast, the kept backup and the nesting limit (§14.3, §5.4), and factory reset (§14.4). The `night`, `schedule` and `panel sleep\|wake` commands, and `--list` for the renderers (§15, §17). The sensor TTL (§5.1) and a critical-battery risk (§20) |
+| r12 | 2026-09-29 | M3b review: a held button no longer keeps the board awake, and an ignored press's release is debounced (§9.2); the critical sleep wakes on a held KEY's release and stays awake while a PC is attached (§8); schedule entries at a night's end run, and none run after a long gap or on the critical screen (§5.4); the date-time editor starts in 2026 (§5.7) |

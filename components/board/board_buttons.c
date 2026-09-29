@@ -22,6 +22,8 @@ typedef enum {
     MSG_INJECT,
     MSG_WOKE,
     MSG_RESYNC,
+    MSG_IGNORE,
+    MSG_CONFIG,
 } msg_kind_t;
 
 typedef struct {
@@ -35,6 +37,8 @@ static QueueHandle_t s_queue;
 static board_button_cb_t s_cb;
 static gesture_recogniser_t s_rec[BOARD_BUTTON_COUNT];
 static volatile bool s_busy;
+static bool s_ignore[BOARD_BUTTON_COUNT];          /* held since before the sleep: wait for release */
+static const gesture_config_t *volatile s_config; /* the next gesture timings, for MSG_CONFIG */
 
 static void IRAM_ATTR on_edge(void *arg)
 {
@@ -105,13 +109,33 @@ static void buttons_task(void *arg)
                 break;
             case MSG_RESYNC:
                 for (int i = 0; i < BOARD_BUTTON_COUNT; i++) {
-                    report((board_button_t)i, gesture_update(&s_rec[i], board_buttons_pressed(i), now_ms()));
+                    if (!s_ignore[i]) {
+                        report((board_button_t)i, gesture_update(&s_rec[i], board_buttons_pressed(i), now_ms()));
+                    }
+                }
+                break;
+            case MSG_IGNORE:
+                if (board_buttons_pressed(b)) {
+                    s_ignore[b] = true;
+                    gesture_init(&s_rec[b], s_rec[b].config); /* forget any press being timed */
+                }
+                break;
+            case MSG_CONFIG:
+                for (int i = 0; s_config != NULL && i < BOARD_BUTTON_COUNT; i++) {
+                    gesture_set_config(&s_rec[i], s_config[i]);
                 }
                 break;
             }
         }
         bool busy = false;
         for (int b = 0; b < BOARD_BUTTON_COUNT; b++) {
+            if (s_ignore[b]) {
+                if (board_buttons_pressed(b)) {
+                    continue; /* still held */
+                }
+                s_ignore[b] = false;
+                ESP_LOGI(TAG, "%s released", board_button_name(b));
+            }
             report((board_button_t)b, gesture_update(&s_rec[b], board_buttons_pressed(b), now_ms()));
             busy |= gesture_busy(&s_rec[b]);
         }
@@ -162,6 +186,17 @@ void board_buttons_woke(board_button_t button)
 void board_buttons_resync(void)
 {
     post((msg_t){ .kind = MSG_RESYNC });
+}
+
+void board_buttons_ignore_until_released(board_button_t button)
+{
+    post((msg_t){ .kind = MSG_IGNORE, .button = (uint8_t)button });
+}
+
+void board_buttons_set_config(const gesture_config_t config[BOARD_BUTTON_COUNT])
+{
+    s_config = config;
+    post((msg_t){ .kind = MSG_CONFIG });
 }
 
 bool board_buttons_busy(void)

@@ -25,6 +25,11 @@ void board_buttons_inject(board_button_t button, gesture_t gesture);
 void board_buttons_woke(board_button_t button);
 /* Re-reads both levels, e.g. after light sleep, when edge interrupts may have been missed. */
 void board_buttons_resync(void);
+/* A button held since before the last sleep (D16): no gestures until it has been released. */
+void board_buttons_ignore_until_released(board_button_t button);
+/* New gesture timings for the context (spec §5.6): the menu has no double press on KEY and a 1 s
+ * BOOT long press. `config` must stay valid; it is applied on the buttons task. */
+void board_buttons_set_config(const gesture_config_t config[BOARD_BUTTON_COUNT]);
 /* True while a gesture is being timed or an edge is queued; sleeping then would lose it. */
 bool board_buttons_busy(void);
 bool board_buttons_pressed(board_button_t button);

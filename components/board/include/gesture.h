@@ -40,7 +40,11 @@ typedef struct {
 void gesture_init(gesture_recogniser_t *g, gesture_config_t config);
 void gesture_set_config(gesture_recogniser_t *g, gesture_config_t config);
 gesture_t gesture_update(gesture_recogniser_t *g, bool pressed, uint32_t now_ms);
+/* A press held since before the chip slept (D16): it gives no gesture, and its release is
+ * debounced like any other edge. */
+void gesture_ignore_press(gesture_recogniser_t *g, uint32_t now_ms);
 /* A press that ended before it could be timed, e.g. the one that woke the chip (spec §3.3). */
 gesture_t gesture_tap(gesture_recogniser_t *g, uint32_t now_ms);
 uint32_t gesture_deadline(const gesture_recogniser_t *g); /* absolute ms, or GESTURE_NO_DEADLINE */
-bool gesture_busy(const gesture_recogniser_t *g);         /* a gesture is still being timed */
+/* A gesture is still being timed. A held press whose gesture has fired, or an ignored one, is not. */
+bool gesture_busy(const gesture_recogniser_t *g);

@@ -102,6 +102,49 @@ static void test_wake_tap_is_a_short_press(void)
     TEST_ASSERT_EQUAL(GESTURE_SHORT, gesture_update(&s_g, false, 5300));
 }
 
+/* D16: a button still held after its long press has nothing left to time, so the board may sleep
+ * (and leave that button out of the wake sources) instead of staying awake until it is released. */
+static void test_a_button_held_after_its_long_press_is_not_busy(void)
+{
+    gesture_update(&s_g, true, 1000);
+    TEST_ASSERT_EQUAL(GESTURE_LONG, gesture_update(&s_g, true, 2000));
+    TEST_ASSERT_FALSE(gesture_busy(&s_g));
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, true, 60000));
+    TEST_ASSERT_FALSE(gesture_busy(&s_g));
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, false, 61000));
+    TEST_ASSERT_FALSE(gesture_busy(&s_g));
+}
+
+/* A press held since before a sleep (D16) gives no gesture, and its release is debounced like any
+ * other edge: a bounce at release is not a new press. */
+static void test_an_ignored_press_gives_nothing_and_its_release_is_debounced(void)
+{
+    gesture_set_config(&s_g, k_double);
+    gesture_ignore_press(&s_g, 1000);
+    TEST_ASSERT_FALSE(gesture_busy(&s_g));
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, true, 1010));  /* an edge while held */
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, true, 5000));  /* no long press */
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, false, 5300)); /* released */
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, true, 5305));  /* a bounce */
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, false, 5308));
+    for (uint32_t t = 5310; t <= 7000; t += 10) {
+        TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, false, t));
+    }
+    TEST_ASSERT_FALSE(gesture_busy(&s_g));
+    gesture_update(&s_g, true, 8000); /* the next press is an ordinary one */
+    gesture_update(&s_g, false, 8100);
+    TEST_ASSERT_EQUAL(GESTURE_SHORT, gesture_update(&s_g, false, 8400));
+}
+
+static void test_ignoring_a_press_being_timed_drops_it(void)
+{
+    gesture_update(&s_g, true, 1000);
+    gesture_ignore_press(&s_g, 1500);
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, true, 3000));
+    TEST_ASSERT_EQUAL(GESTURE_NONE, gesture_update(&s_g, false, 3100));
+    TEST_ASSERT_FALSE(gesture_busy(&s_g));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -115,5 +158,8 @@ int main(void)
     RUN_TEST(test_tap_shorter_than_debounce_is_caught_at_recheck);
     RUN_TEST(test_times_wrap_around);
     RUN_TEST(test_wake_tap_is_a_short_press);
+    RUN_TEST(test_a_button_held_after_its_long_press_is_not_busy);
+    RUN_TEST(test_an_ignored_press_gives_nothing_and_its_release_is_debounced);
+    RUN_TEST(test_ignoring_a_press_being_timed_drops_it);
     return UNITY_END();
 }

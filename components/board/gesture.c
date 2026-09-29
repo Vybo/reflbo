@@ -76,6 +76,15 @@ gesture_t gesture_update(gesture_recogniser_t *g, bool pressed, uint32_t now_ms)
     return GESTURE_NONE;
 }
 
+void gesture_ignore_press(gesture_recogniser_t *g, uint32_t now_ms)
+{
+    g->state = ST_IGNORE; /* as after a gesture that fired while pressed: only a release ends it */
+    g->level = true;
+    g->have_edge = true; /* the release is debounced from here, like any edge */
+    g->edge_ms = now_ms;
+    g->recheck = false;
+}
+
 gesture_t gesture_tap(gesture_recogniser_t *g, uint32_t now_ms)
 {
     g->state = ST_PRESSED;
@@ -111,5 +120,7 @@ uint32_t gesture_deadline(const gesture_recogniser_t *g)
 
 bool gesture_busy(const gesture_recogniser_t *g)
 {
-    return g->state != ST_IDLE || g->recheck;
+    /* A held press whose gesture has fired waits only for its release, which gives nothing: the
+     * board may sleep meanwhile, leaving that button out of the wake sources (D16). */
+    return g->state == ST_PRESSED || g->state == ST_WAIT_SECOND || g->recheck;
 }

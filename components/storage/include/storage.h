@@ -16,6 +16,8 @@
 
 esp_err_t storage_init(void);
 bool storage_ready(void);
+/* Factory reset (spec §14.4): unmounts and formats the partition. The next boot starts empty. */
+esp_err_t storage_erase(void);
 
 /*
  * storage_file_load() on the mounted partition, logging rejected files (spec §14.3). ESP_OK if

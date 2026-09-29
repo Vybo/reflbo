@@ -31,7 +31,8 @@ enum {
  * Reads `path` into buf (NUL-terminated, at most size - 1 bytes) and hands it to `parse`. A file
  * that is missing, unreadable, larger than the buffer or rejected by `parse` falls back to
  * <path>.bak. `*from_backup` says which one parsed; `*rejected` (may be NULL) gets the
- * STORAGE_REJECTED_* bits.
+ * STORAGE_REJECTED_* bits. When the backup parsed because <path> was read whole but rejected,
+ * <path> is removed, so the next save keeps the good backup (a file too big for the buffer stays).
  */
 storage_file_result_t storage_file_load(const char *path, char *buf, size_t size, storage_parse_t parse, void *ctx,
                                         bool *from_backup, unsigned *rejected);

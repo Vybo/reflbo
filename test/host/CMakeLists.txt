@@ -105,7 +105,7 @@ add_library(storage_logic STATIC
             ${REPO_ROOT}/components/storage/settings.c ${REPO_ROOT}/components/storage/storage_file.c)
 target_include_directories(storage_logic PUBLIC ${REPO_ROOT}/components/storage/include)
 target_compile_options(storage_logic PRIVATE ${REFLBO_WARNINGS})
-target_link_libraries(storage_logic PRIVATE cjson m)
+target_link_libraries(storage_logic PRIVATE cjson util m)
 
 # ui: pure C on top of gfx, locale, the datastore and the scheduler's local-time rules.
 file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)

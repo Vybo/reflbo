@@ -6,8 +6,10 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "util_json.h"
 
 #define SCHEMA 1
+#define SETTINGS_JSON_MAX_DEPTH 16 /* the sketch nests 3 levels */
 
 static bool fail(char *err, size_t size, const char *fmt, ...)
 {
@@ -68,6 +70,9 @@ static uint8_t lpm_from_hz(const cJSON *display, uint8_t fallback)
 
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size)
 {
+    if (util_json_depth(json) > SETTINGS_JSON_MAX_DEPTH) {
+        return fail(err, err_size, "nested more than %d levels", SETTINGS_JSON_MAX_DEPTH);
+    }
     cJSON *root = json != NULL ? cJSON_Parse(json) : NULL;
     if (!cJSON_IsObject(root)) {
         cJSON_Delete(root);

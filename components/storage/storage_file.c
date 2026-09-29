@@ -43,6 +43,7 @@ storage_file_result_t storage_file_load(const char *path, char *buf, size_t size
     }
     const char *const candidates[] = { path, bak };
     storage_file_result_t result = STORAGE_FILE_MISSING;
+    bool main_invalid = false; /* read whole and rejected: its content is no use to anyone */
     for (int i = 0; i < 2; i++) {
         read_result_t r = read_file(candidates[i], buf, size);
         if (r == READ_MISSING) {
@@ -53,8 +54,12 @@ storage_file_result_t storage_file_load(const char *path, char *buf, size_t size
             result = STORAGE_FILE_OK;
             break;
         }
+        main_invalid |= i == 0 && r == READ_OK;
         bits |= 1u << i;
         result = STORAGE_FILE_INVALID;
+    }
+    if (result == STORAGE_FILE_OK && *from_backup && main_invalid) {
+        unlink(path); /* else the next save would rename it over the good backup */
     }
     if (rejected != NULL) {
         *rejected = bits;

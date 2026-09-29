@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "settings.h"
@@ -70,6 +71,21 @@ static void test_not_json_or_another_schema_fails(void)
     TEST_ASSERT_EQUAL_STRING("schema must be 1", s_err);
 }
 
+static void test_deep_nesting_is_rejected_before_parsing(void)
+{
+    static char json[256];
+    size_t n = (size_t)snprintf(json, sizeof(json), "{\"schema\": 1, \"x\": ");
+    for (int i = 0; i < 40; i++) {
+        json[n++] = '[';
+    }
+    for (int i = 0; i < 40; i++) {
+        json[n++] = ']';
+    }
+    snprintf(json + n, sizeof(json) - n, "}");
+    TEST_ASSERT_FALSE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_NOT_NULL(strstr(s_err, "nested"));
+}
+
 static void test_saving_keeps_keys_this_firmware_does_not_know(void)
 {
     const char *base = "{\"schema\": 1, \"mqtt\": {\"host\": \"ha.local\"}, \"time\": {\"ntp\": [\"a\"], \"clock_24h\": true}}";
@@ -102,6 +118,7 @@ int main(void)
     RUN_TEST(test_missing_keys_take_the_defaults);
     RUN_TEST(test_bad_values_are_clamped_or_ignored_one_by_one);
     RUN_TEST(test_not_json_or_another_schema_fails);
+    RUN_TEST(test_deep_nesting_is_rejected_before_parsing);
     RUN_TEST(test_saving_keeps_keys_this_firmware_does_not_know);
     RUN_TEST(test_saving_without_a_base_round_trips);
     return UNITY_END();

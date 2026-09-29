@@ -127,6 +127,19 @@ static void test_a_rejected_file_falls_back_to_the_backup(void)
     TEST_ASSERT_EQUAL(STORAGE_REJECTED_MAIN, rejected);
 }
 
+static void test_a_fallback_load_keeps_the_good_backup_for_the_next_save(void)
+{
+    storage_file_write_atomic(PATH, "{\"good\":1}", 10);
+    storage_file_write_atomic(PATH, "garbage", 7);
+    char buf[64];
+    bool from_backup = false;
+    TEST_ASSERT_EQUAL(STORAGE_FILE_OK, load(buf, sizeof(buf), &from_backup, NULL));
+    TEST_ASSERT_TRUE(from_backup);
+    storage_file_write_atomic(PATH, "{\"new\":1}", 9); /* the save after the fallback */
+    TEST_ASSERT_EQUAL_STRING("{\"new\":1}", contents(PATH));
+    TEST_ASSERT_EQUAL_STRING("{\"good\":1}", contents(PATH ".bak")); /* not the rejected file */
+}
+
 static void test_power_lost_between_the_renames_loads_the_previous_file(void)
 {
     /* <path> already became <path>.bak; the new file is still <path>.tmp. */
@@ -198,6 +211,7 @@ int main(void)
     RUN_TEST(test_each_write_keeps_the_previous_file_as_the_backup);
     RUN_TEST(test_a_good_file_is_used_without_reading_the_backup);
     RUN_TEST(test_a_rejected_file_falls_back_to_the_backup);
+    RUN_TEST(test_a_fallback_load_keeps_the_good_backup_for_the_next_save);
     RUN_TEST(test_power_lost_between_the_renames_loads_the_previous_file);
     RUN_TEST(test_a_file_too_big_for_the_buffer_is_rejected_unparsed);
     RUN_TEST(test_both_rejected_is_invalid);

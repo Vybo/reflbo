@@ -41,6 +41,15 @@ bool storage_ready(void)
     return s_ready;
 }
 
+esp_err_t storage_erase(void)
+{
+    if (s_ready) {
+        esp_vfs_littlefs_unregister("storage");
+        s_ready = false;
+    }
+    return esp_littlefs_format("storage");
+}
+
 esp_err_t storage_load(const char *path, char *buf, size_t size, storage_parse_t parse, void *ctx, bool *from_backup)
 {
     ESP_RETURN_ON_FALSE(s_ready, ESP_ERR_INVALID_STATE, TAG, "not mounted");

@@ -4,8 +4,9 @@
 #include <string.h>
 
 extern const lang_t lang_en;
+extern const lang_t lang_cs;
 
-static const lang_t *const k_packs[] = { &lang_en };
+static const lang_t *const k_packs[] = { &lang_en, &lang_cs };
 
 const lang_t *lang_get(const char *code)
 {

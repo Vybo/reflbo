@@ -32,6 +32,50 @@ typedef enum {
     LS_DAYS_UNIT,    /* after a number of days: "d" */
     LS_HOURS_UNIT,   /* "h" */
     LS_MINUTES_UNIT, /* "min" */
+    /* The menu (spec §5.7) */
+    LS_MENU,
+    LS_M_PRESETS,
+    LS_M_ACTIVE_PRESET,
+    LS_M_AUTO_CYCLE,
+    LS_M_CYCLE_INTERVAL,
+    LS_M_SCHEDULE,
+    LS_M_TIME,
+    LS_M_SET_DATETIME,
+    LS_M_CLOCK_24H,
+    LS_M_TIME_ZONE,
+    LS_M_DISPLAY,
+    LS_M_UPDATE_INTERVAL,
+    LS_M_REFRESH_RATE,
+    LS_M_SENSORS,
+    LS_M_TEMP_OFFSET,
+    LS_M_HUM_OFFSET,
+    LS_M_UNITS,
+    LS_M_INFO,
+    LS_M_FIRMWARE,
+    LS_M_DEVICE,
+    LS_M_UPTIME,
+    LS_M_FREE_MEMORY,
+    LS_M_SYSTEM,
+    LS_M_LANGUAGE,
+    LS_M_REBOOT,
+    LS_M_FACTORY_RESET,
+    LS_ON,
+    LS_OFF,
+    LS_HINT_BROWSE,   /* the button hints at the bottom of the menu (spec §5.6) */
+    LS_HINT_EDIT,
+    LS_HINT_DATETIME,
+    LS_HINT_CONFIRM,
+    LS_CONFIRM_FACTORY_RESET,
+    /* Toasts and special screens (spec §5.5) */
+    LS_T_PRESET, /* followed by ": <preset name>" */
+    LS_T_CYCLE_ON,
+    LS_T_CYCLE_OFF,
+    LS_T_DEFAULTS, /* a config file was invalid, so the defaults are in use */
+    LS_T_NIGHT_UNTIL, /* followed by " 06:00" */
+    LS_T_REBOOTING,
+    LS_T_RESETTING,
+    LS_BATTERY_EMPTY,
+    LS_CHARGE_ME,
     LS_COUNT,
 } lang_str_t;
 

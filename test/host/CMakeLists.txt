@@ -77,9 +77,11 @@ target_include_directories(power_logic PUBLIC ${REPO_ROOT}/components/power/incl
 target_compile_options(power_logic PRIVATE ${REFLBO_WARNINGS})
 
 # locale: pure C language packs.
-add_library(locale STATIC ${REPO_ROOT}/components/locale/lang.c ${REPO_ROOT}/components/locale/lang_en.c)
+add_library(locale STATIC ${REPO_ROOT}/components/locale/lang.c ${REPO_ROOT}/components/locale/lang_en.c
+            ${REPO_ROOT}/components/locale/lang_cs.c)
 target_include_directories(locale PUBLIC ${REPO_ROOT}/components/locale/include)
 target_compile_options(locale PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(locale PRIVATE util)
 
 # datastore: pure C field store.
 add_library(datastore STATIC ${REPO_ROOT}/components/datastore/datastore.c)
@@ -138,6 +140,7 @@ reflbo_host_test(test_pcf85063_regs rtc_logic)
 reflbo_host_test(test_timekeeping_iso timekeeping_logic)
 reflbo_host_test(test_power_policy power_logic)
 reflbo_host_test(test_lang locale)
+reflbo_host_test(test_lang_glyphs locale gfx)
 reflbo_host_test(test_datastore datastore)
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)

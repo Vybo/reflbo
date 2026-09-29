@@ -128,7 +128,7 @@ esp_err_t sensors_sample_env(time_t now)
     s_state.env = (sensors_env_t){
         .valid = true,
         .temp_c100 = t + s_temp_offset_c100,
-        .hum_pct100 = h + s_hum_offset_pct100,
+        .hum_pct100 = shtc3_offset_humidity(h, s_hum_offset_pct100),
         .time = now,
     };
     return ESP_OK;

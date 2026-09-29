@@ -23,3 +23,9 @@ bool shtc3_parse(const uint8_t raw[6], int *temp_c100, int *hum_pct100)
     *hum_pct100 = (int)((10000 * rh + 32768) / 65536);        /* RH = 100 * S / 2^16 */
     return true;
 }
+
+int shtc3_offset_humidity(int hum_pct100, int offset_pct100)
+{
+    int h = hum_pct100 + offset_pct100;
+    return h < 0 ? 0 : h > 10000 ? 10000 : h;
+}

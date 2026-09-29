@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -53,3 +54,10 @@ int battery_gauge_days_left10(const battery_gauge_t *g, uint32_t now_s);
  * its spacing on the new clock; a board without the RTC cell starts in 2000 (spec §7). A clock
  * that moves back without it restarts the history instead. */
 void battery_gauge_shift_time(battery_gauge_t *g, int64_t delta_s);
+
+#define BATTERY_CRITICAL_MV 3300 /* spec §8: at or below, the critical screen */
+#define BATTERY_RECOVER_MV  3400 /* the critical screen stays up until then, or until charging */
+/* Whether the battery is critical after a reading of `mv` (smoothed), given whether it was before:
+ * spec §8 with some hysteresis, so the screen doesn't flicker at the threshold. 0 mV means no
+ * reading yet and changes nothing. */
+bool battery_critical(bool was_critical, int mv, battery_state_t state);

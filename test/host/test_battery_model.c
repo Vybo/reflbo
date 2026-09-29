@@ -190,6 +190,21 @@ static void test_a_clock_moved_back_restarts_the_history(void)
     TEST_ASSERT_EQUAL_INT(-1, battery_gauge_days_left10(&s_g, t - 3 * 3600));
 }
 
+/* Spec §8: critical at 3.3 V or below while not charging; leaving takes 3.4 V, or charging. */
+static void test_critical_has_hysteresis_and_ignores_missing_readings(void)
+{
+    TEST_ASSERT_FALSE(battery_critical(false, 3301, BATTERY_DISCHARGING));
+    TEST_ASSERT_TRUE(battery_critical(false, 3300, BATTERY_DISCHARGING));
+    TEST_ASSERT_TRUE(battery_critical(false, 3300, BATTERY_UNKNOWN));
+    TEST_ASSERT_FALSE(battery_critical(false, 3200, BATTERY_CHARGING));
+    TEST_ASSERT_TRUE(battery_critical(true, 3399, BATTERY_DISCHARGING)); /* not recovered yet */
+    TEST_ASSERT_FALSE(battery_critical(true, 3400, BATTERY_DISCHARGING));
+    TEST_ASSERT_FALSE(battery_critical(true, 3350, BATTERY_CHARGING));
+    TEST_ASSERT_FALSE(battery_critical(true, 3350, BATTERY_FULL));
+    TEST_ASSERT_TRUE(battery_critical(true, 0, BATTERY_UNKNOWN)); /* no reading: no change */
+    TEST_ASSERT_FALSE(battery_critical(false, 0, BATTERY_UNKNOWN));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -210,5 +225,6 @@ int main(void)
     RUN_TEST(test_a_shifted_history_keeps_the_estimate_across_a_clock_set);
     RUN_TEST(test_a_clock_moved_forward_gives_no_estimate_rather_than_a_wrong_one);
     RUN_TEST(test_a_clock_moved_back_restarts_the_history);
+    RUN_TEST(test_critical_has_hysteresis_and_ignores_missing_readings);
     return UNITY_END();
 }

@@ -9,3 +9,5 @@
 uint8_t shtc3_crc8(const uint8_t *data, size_t len); /* poly 0x31, init 0xFF */
 /* Parses a T-first measurement: T msb, lsb, crc, RH msb, lsb, crc. False on a CRC mismatch. */
 bool shtc3_parse(const uint8_t raw[6], int *temp_c100, int *hum_pct100);
+/* A humidity with its calibration offset, kept within 0-100 %RH (0.01 % units). */
+int shtc3_offset_humidity(int hum_pct100, int offset_pct100);

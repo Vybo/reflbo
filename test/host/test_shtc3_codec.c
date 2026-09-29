@@ -41,6 +41,13 @@ static void test_converts_the_range_ends(void)
     TEST_ASSERT_EQUAL_INT(10000, rh); /* 99.998 %RH rounds to 100.00 */
 }
 
+static void test_offsets_keep_humidity_within_0_and_100_percent(void)
+{
+    TEST_ASSERT_EQUAL_INT(4750, shtc3_offset_humidity(4500, 250));
+    TEST_ASSERT_EQUAL_INT(10000, shtc3_offset_humidity(9800, 500)); /* a +5 % offset near saturation */
+    TEST_ASSERT_EQUAL_INT(0, shtc3_offset_humidity(300, -500));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -48,5 +55,6 @@ int main(void)
     RUN_TEST(test_parses_the_datasheet_example);
     RUN_TEST(test_rejects_a_bad_crc);
     RUN_TEST(test_converts_the_range_ends);
+    RUN_TEST(test_offsets_keep_humidity_within_0_and_100_percent);
     return UNITY_END();
 }

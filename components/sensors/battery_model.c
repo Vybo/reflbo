@@ -196,3 +196,15 @@ int battery_gauge_level(const battery_gauge_t *g)
 {
     return g->ema_mv16 == 0 ? -1 : g->level;
 }
+
+bool battery_critical(bool was_critical, int mv, battery_state_t state)
+{
+    bool charging = state == BATTERY_CHARGING || state == BATTERY_FULL;
+    if (mv <= 0) {
+        return was_critical;
+    }
+    if (was_critical) {
+        return !charging && mv < BATTERY_RECOVER_MV;
+    }
+    return !charging && mv <= BATTERY_CRITICAL_MV;
+}

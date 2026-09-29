@@ -92,7 +92,8 @@ static void test_is_slot_needs_a_whole_minute(void)
 static void test_seconds_display_wakes_every_second_and_keeps_the_minute_alarm(void)
 {
     time_t now = utc(2026, 9, 25, 18, 48, 20);
-    sched_wake_t w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, 0, true });
+    sched_wake_t w = scheduler_next_wake(
+        &(sched_input_t){ .now = now, .display_every_min = 1, .sensors_every_min = 5, .every_second = true });
     TEST_ASSERT_EQUAL_INT64(now + 1, w.when);
     TEST_ASSERT_EQUAL_HEX(SCHED_SECOND, w.reasons);
     TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 25, 18, 49, 0), w.alarm);
@@ -101,21 +102,74 @@ static void test_seconds_display_wakes_every_second_and_keeps_the_minute_alarm(v
 static void test_cycle_switch_before_the_next_minute_comes_first(void)
 {
     time_t now = utc(2026, 9, 25, 18, 48, 20);
-    sched_wake_t w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, now + 15, false });
+    sched_wake_t w = scheduler_next_wake(
+        &(sched_input_t){ .now = now, .display_every_min = 1, .sensors_every_min = 5, .cycle_at = now + 15 });
     TEST_ASSERT_EQUAL_INT64(now + 15, w.when);
     TEST_ASSERT_EQUAL_HEX(SCHED_CYCLE, w.reasons);
-    w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, utc(2026, 9, 25, 18, 49, 0), false });
+    w = scheduler_next_wake(&(sched_input_t){ .now = now, .display_every_min = 1, .sensors_every_min = 5,
+                                                       .cycle_at = utc(2026, 9, 25, 18, 49, 0) });
     TEST_ASSERT_EQUAL_HEX(SCHED_DISPLAY | SCHED_CYCLE, w.reasons); /* same second: both */
-    w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, now + 3600, false });
+    w = scheduler_next_wake(
+        &(sched_input_t){ .now = now, .display_every_min = 1, .sensors_every_min = 5, .cycle_at = now + 3600 });
     TEST_ASSERT_EQUAL_INT64(w.alarm, w.when);
 }
 
 static void test_an_overdue_cycle_switch_runs_in_the_next_second(void)
 {
     time_t now = utc(2026, 9, 25, 18, 48, 20);
-    sched_wake_t w = scheduler_next_wake(&(sched_input_t){ now, 1, 5, now - 30, false });
+    sched_wake_t w = scheduler_next_wake(
+        &(sched_input_t){ .now = now, .display_every_min = 1, .sensors_every_min = 5, .cycle_at = now - 30 });
     TEST_ASSERT_EQUAL_INT64(now + 1, w.when);
     TEST_ASSERT_EQUAL_HEX(SCHED_CYCLE, w.reasons);
+}
+
+/* Spec §9.2: a local time that doesn't exist fires at the first valid minute after it; a repeated
+ * one fires once, at its first occurrence. Prague springs forward on 29 March 2026 at 02:00 and
+ * falls back on 25 October 2026 at 03:00. */
+static void test_local_times_follow_the_dst_rules(void)
+{
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 25, 20, 30, 0), sched_local_to_utc(2026, 9, 25, 22 * 60 + 30));
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 1, 15, 22, 0, 0), sched_local_to_utc(2026, 1, 15, 23 * 60));
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 3, 29, 1, 0, 0), sched_local_to_utc(2026, 3, 29, 2 * 60 + 30)); /* 03:00 CEST */
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 10, 25, 0, 30, 0), sched_local_to_utc(2026, 10, 25, 2 * 60 + 30)); /* CEST */
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 10, 25, 2, 0, 0), sched_local_to_utc(2026, 10, 25, 3 * 60));
+}
+
+static void test_weekly_entries_find_their_next_day(void)
+{
+    const unsigned weekdays = 0x1F; /* Monday to Friday */
+    time_t friday_2330 = utc(2026, 9, 25, 21, 30, 0);
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 28, 21, 0, 0), sched_next_weekly(friday_2330, 23 * 60, weekdays));
+    time_t friday_2200 = utc(2026, 9, 25, 20, 0, 0);
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 25, 21, 0, 0), sched_next_weekly(friday_2200, 23 * 60, weekdays));
+    time_t friday_2300 = utc(2026, 9, 25, 21, 0, 0); /* strictly after: this one is past */
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 28, 21, 0, 0), sched_next_weekly(friday_2300, 23 * 60, weekdays));
+    /* a night's end */
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 26, 4, 0, 0), sched_next_weekly(friday_2330, 6 * 60, 0x7F));
+    TEST_ASSERT_EQUAL_INT64(0, sched_next_weekly(friday_2330, 23 * 60, 0)); /* no days: never */
+}
+
+static void test_a_weekly_entry_in_the_spring_gap_fires_at_the_first_valid_minute(void)
+{
+    time_t saturday_noon = utc(2026, 3, 28, 11, 0, 0);
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 3, 29, 1, 0, 0), sched_next_weekly(saturday_noon, 2 * 60 + 30, 0x7F));
+    time_t after_it = utc(2026, 3, 29, 1, 0, 0); /* then the next day's 02:30 CEST */
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 3, 30, 0, 30, 0), sched_next_weekly(after_it, 2 * 60 + 30, 0x7F));
+}
+
+static void test_the_next_schedule_entry_sets_the_alarm(void)
+{
+    time_t now = utc(2026, 9, 25, 20, 16, 0); /* 22:16 local, display every 15 min: next slot 22:30 */
+    sched_input_t in = { .now = now, .display_every_min = 15, .sensors_every_min = 30,
+                         .schedule_at = utc(2026, 9, 25, 20, 20, 0) };
+    sched_wake_t w = scheduler_next_wake(&in);
+    TEST_ASSERT_EQUAL_INT64(in.schedule_at, w.alarm);
+    TEST_ASSERT_EQUAL_INT64(in.schedule_at, w.when);
+    TEST_ASSERT_EQUAL_UINT(SCHED_ENTRY, w.reasons);
+    in.schedule_at = utc(2026, 9, 25, 21, 0, 0); /* after the slot: the slot comes first */
+    w = scheduler_next_wake(&in);
+    TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 25, 20, 30, 0), w.alarm);
+    TEST_ASSERT_EQUAL_UINT(SCHED_DISPLAY | SCHED_SENSORS, w.reasons);
 }
 
 int main(void)
@@ -131,5 +185,9 @@ int main(void)
     RUN_TEST(test_seconds_display_wakes_every_second_and_keeps_the_minute_alarm);
     RUN_TEST(test_cycle_switch_before_the_next_minute_comes_first);
     RUN_TEST(test_an_overdue_cycle_switch_runs_in_the_next_second);
+    RUN_TEST(test_local_times_follow_the_dst_rules);
+    RUN_TEST(test_weekly_entries_find_their_next_day);
+    RUN_TEST(test_a_weekly_entry_in_the_spring_gap_fires_at_the_first_valid_minute);
+    RUN_TEST(test_the_next_schedule_entry_sets_the_alarm);
     return UNITY_END();
 }

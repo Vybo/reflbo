@@ -149,6 +149,18 @@ static void test_the_date_time_editor_walks_its_fields_and_keeps_the_day_valid(v
     TEST_ASSERT_EQUAL(UI_MENU_BROWSE, s_m.mode);
 }
 
+/* Without a backup cell (D9) a power-off resets the RTC to 1 January 2000; the editor then starts
+ * in 2026, so setting the time doesn't take 26 presses on the year. */
+static void test_the_date_time_editor_starts_in_2026_after_the_clock_was_lost(void)
+{
+    s_model.local = (struct tm){ .tm_year = 100, .tm_mon = 0, .tm_mday = 1 };
+    open_item(UI_MI_TIME);
+    open_item(UI_MI_SET_DATETIME);
+    TEST_ASSERT_EQUAL_INT(126, s_m.dt.tm_year);
+    TEST_ASSERT_EQUAL_INT(0, s_m.dt.tm_mon);
+    TEST_ASSERT_EQUAL_INT(1, s_m.dt.tm_mday);
+}
+
 static void test_factory_reset_asks_first(void)
 {
     open_item(UI_MI_SYSTEM);
@@ -190,6 +202,7 @@ int main(void)
     RUN_TEST(test_a_choice_is_saved_with_select_or_dropped_with_exit);
     RUN_TEST(test_numbers_step_and_stop_at_their_limits);
     RUN_TEST(test_the_date_time_editor_walks_its_fields_and_keeps_the_day_valid);
+    RUN_TEST(test_the_date_time_editor_starts_in_2026_after_the_clock_was_lost);
     RUN_TEST(test_factory_reset_asks_first);
     RUN_TEST(test_hidden_items_are_skipped_and_info_does_nothing);
     return UNITY_END();

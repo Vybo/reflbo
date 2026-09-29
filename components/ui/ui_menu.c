@@ -168,8 +168,8 @@ static void start_datetime(ui_menu_t *m, const struct tm *local)
 {
     m->dt = (struct tm){ .tm_year = local->tm_year, .tm_mon = local->tm_mon, .tm_mday = local->tm_mday,
                          .tm_hour = local->tm_hour, .tm_min = local->tm_min, .tm_isdst = -1 };
-    if (m->dt.tm_year < 100 || m->dt.tm_year > 199) {
-        m->dt.tm_year = 126; /* an unset clock: start from 2026 */
+    if (m->dt.tm_year < 126 || m->dt.tm_year > 199) {
+        m->dt.tm_year = 126; /* an unset clock, or the RTC's 2000 after a power loss (D9): start from 2026 */
     }
     if (m->dt.tm_mon < 0 || m->dt.tm_mon > 11) {
         m->dt.tm_mon = 0;

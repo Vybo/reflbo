@@ -528,7 +528,7 @@ static void app_task(void *arg)
                 enter_night_sleep(); /* returns only if it had to sleep light instead */
                 continue;
             }
-            if (!busy && app_state()->critical) {
+            if (!busy && app_state()->critical && !power_tethered()) { /* a PC powers it: stay awake (D14) */
                 enter_critical_sleep();
                 continue;
             }

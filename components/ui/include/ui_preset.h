@@ -80,6 +80,14 @@ time_t ui_schedule_next(const ui_schedule_t *schedule, time_t after, int *index)
 /* The entries due in (after, now], in the order they run: by time, and within a minute the presets
  * in list order before a night. Returns how many; `order` gets their indexes. */
 int ui_schedule_due(const ui_schedule_t *schedule, time_t after, time_t now, int order[UI_SCHEDULE_MAX]);
+/* One check (spec §5.4): the entries due since *checked, as ui_schedule_due() gives them, and
+ * *checked becomes now. Nothing runs late: the first check (*checked is 0), a clock that moved
+ * back, and a gap longer than max_gap_s, a sleep no entry could end, only move the mark. */
+int ui_schedule_step(const ui_schedule_t *schedule, time_t *checked, time_t now, time_t max_gap_s,
+                     int order[UI_SCHEDULE_MAX]);
+/* Where the checks resume after a night that ended at `until`: a night covers [start, until), so
+ * the entries inside it don't run, and one at the end minute does. */
+time_t ui_schedule_after_night(time_t until);
 
 typedef struct {
     uint8_t count;

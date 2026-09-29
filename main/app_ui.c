@@ -373,8 +373,8 @@ void app_ui_start_night(time_t until)
 
 void app_ui_end_night(void)
 {
+    s.sched_checked = ui_schedule_after_night(s.night_until); /* the entries inside it don't run */
     s.night_until = 0;
-    s.sched_checked = time(NULL); /* entries that fell inside the night don't run late */
     ESP_LOGI(TAG, "night over");
 }
 
@@ -385,7 +385,8 @@ bool app_ui_night(void)
 
 static bool schedule_runs(void)
 {
-    return s.presets.schedule.enabled && s.presets.schedule.count > 0 && timekeeping_valid() && s.night_until == 0;
+    return s.presets.schedule.enabled && s.presets.schedule.count > 0 && timekeeping_valid() && s.night_until == 0 &&
+           !s.critical; /* the critical screen stays put, and a night would take its place */
 }
 
 /* Runs the entries that came due since the last check, in order; a night entry ends the run, as
@@ -396,12 +397,11 @@ static void run_schedule(time_t now)
         s.sched_checked = now;
         return;
     }
-    if (s.sched_checked == 0 || s.sched_checked > now) {
-        s.sched_checked = now; /* the first run, or the clock moved back: nothing is overdue */
-        return;
-    }
+    /* Checks come at every display slot and at every entry's minute (spec §9.2): a longer gap was a
+     * sleep no entry could end, such as the critical one. */
+    time_t max_gap = (time_t)s.settings.display_every_min * 60 + 300;
     int order[UI_SCHEDULE_MAX];
-    int n = ui_schedule_due(&s.presets.schedule, s.sched_checked, now, order);
+    int n = ui_schedule_step(&s.presets.schedule, &s.sched_checked, now, max_gap, order);
     for (int i = 0; i < n; i++) {
         const ui_schedule_entry_t *e = &s.presets.schedule.entries[order[i]];
         if (e->action == UI_SCHED_NIGHT) {
@@ -416,7 +416,6 @@ static void run_schedule(time_t now)
         ESP_LOGI(TAG, "schedule: preset %s", s.presets.presets[e->preset].id);
         app_ui_select(e->preset, false);
     }
-    s.sched_checked = now;
 }
 
 void app_ui_tick(bool force)

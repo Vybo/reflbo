@@ -15,8 +15,8 @@ time_t ui_schedule_next(const ui_schedule_t *schedule, time_t after, int *index)
     return best;
 }
 
-/* An entry is due at most once: the app checks at every entry's minute, and a clock that jumps
- * restarts the checks (main/app.c), so a span never covers a day. */
+/* An entry is due at most once: ui_schedule_step() never passes a span longer than its gap limit,
+ * and the app checks at every entry's minute. */
 int ui_schedule_due(const ui_schedule_t *schedule, time_t after, time_t now, int order[UI_SCHEDULE_MAX])
 {
     long long key[UI_SCHEDULE_MAX]; /* the time, with a night after the presets of its minute */
@@ -37,4 +37,20 @@ int ui_schedule_due(const ui_schedule_t *schedule, time_t after, time_t now, int
         order[j] = i;
     }
     return n;
+}
+
+int ui_schedule_step(const ui_schedule_t *schedule, time_t *checked, time_t now, time_t max_gap_s,
+                     int order[UI_SCHEDULE_MAX])
+{
+    time_t after = *checked;
+    *checked = now;
+    if (after == 0 || after > now || now - after > max_gap_s) {
+        return 0;
+    }
+    return ui_schedule_due(schedule, after, now, order);
+}
+
+time_t ui_schedule_after_night(time_t until)
+{
+    return until - 1;
 }

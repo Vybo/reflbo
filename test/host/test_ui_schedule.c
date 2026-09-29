@@ -107,6 +107,47 @@ static void test_dst_changes_run_an_entry_once(void)
     TEST_ASSERT_EQUAL_INT(0, ui_schedule_due(&s, first + 5, second + 5, order));
 }
 
+/* A night covers [start, end): an entry at the end minute itself runs as the checks resume. The
+ * natural morning setup, night 23:00-06:00 plus a preset at 06:00, must switch the preset. */
+static void test_an_entry_at_the_nights_end_minute_runs(void)
+{
+    ui_schedule_t s = { .enabled = true, .count = 3 };
+    s.entries[0] = night_at(23, 0, 6, 0);
+    s.entries[1] = preset_at(6, 0, 0x7F, 1);
+    s.entries[2] = preset_at(3, 0, 0x7F, 2); /* inside the night: skipped */
+    time_t end = utc(2026, 9, 26, 4, 0, 0);  /* Saturday 06:00 CEST */
+    time_t checked = ui_schedule_after_night(end);
+    int order[UI_SCHEDULE_MAX];
+    int n = ui_schedule_step(&s, &checked, end + 3, 900, order);
+    TEST_ASSERT_EQUAL_INT(1, n);
+    TEST_ASSERT_EQUAL_INT(1, order[0]);
+    TEST_ASSERT_EQUAL_INT64(end + 3, checked);
+}
+
+/* Nothing runs late (spec §5.4). The first check and a clock that moved back only set the mark;
+ * so does a gap longer than any sleep the entries could wake, such as the critical-battery sleep,
+ * which only KEY ends. */
+static void test_a_step_runs_nothing_late(void)
+{
+    ui_schedule_t s = { .enabled = true, .count = 2 };
+    s.entries[0] = night_at(23, 0, 6, 0);
+    s.entries[1] = preset_at(6, 0, 0x7F, 1);
+    int order[UI_SCHEDULE_MAX];
+    time_t evening = utc(2026, 9, 25, 18, 0, 0), morning = utc(2026, 9, 26, 6, 0, 0); /* 20:00, 08:00 */
+    time_t checked = 0;
+    TEST_ASSERT_EQUAL_INT(0, ui_schedule_step(&s, &checked, evening, 900, order));
+    TEST_ASSERT_EQUAL_INT64(evening, checked);
+    checked = evening;
+    TEST_ASSERT_EQUAL_INT(0, ui_schedule_step(&s, &checked, morning, 900, order)); /* 12 h asleep */
+    TEST_ASSERT_EQUAL_INT64(morning, checked);
+    checked = morning;
+    TEST_ASSERT_EQUAL_INT(0, ui_schedule_step(&s, &checked, evening, 900, order)); /* the clock moved back */
+    TEST_ASSERT_EQUAL_INT64(evening, checked);
+    checked = utc(2026, 9, 25, 20, 55, 0); /* 22:55, then the 23:00 tick: the night is due */
+    TEST_ASSERT_EQUAL_INT(1, ui_schedule_step(&s, &checked, utc(2026, 9, 25, 21, 0, 2), 900, order));
+    TEST_ASSERT_EQUAL_INT(0, order[0]);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -114,5 +155,7 @@ int main(void)
     RUN_TEST(test_due_entries_run_by_time_with_a_night_last);
     RUN_TEST(test_an_entry_that_ran_is_not_due_again);
     RUN_TEST(test_dst_changes_run_an_entry_once);
+    RUN_TEST(test_an_entry_at_the_nights_end_minute_runs);
+    RUN_TEST(test_a_step_runs_nothing_late);
     return UNITY_END();
 }

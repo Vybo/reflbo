@@ -4,15 +4,22 @@
 #include "dashboard_fixtures.h"
 #include "gfx.h"
 
-/* build-host/render_dashboard <fixture> <out.pbm>: one dashboard fixture as PBM (tools/render.py). */
+/* build-host/render_dashboard <fixture> <out.pbm>: one dashboard fixture as PBM (tools/render.py).
+ * `--list` prints the fixture names. */
 int main(int argc, char **argv)
 {
     static uint8_t buf[400 * 300 / 8];
     static uint8_t pbm[16000];
+    if (argc == 2 && strcmp(argv[1], "--list") == 0) {
+        for (size_t i = 0; i < sizeof(k_dashboard_fixtures) / sizeof(k_dashboard_fixtures[0]); i++) {
+            printf("%s\n", k_dashboard_fixtures[i]);
+        }
+        return 0;
+    }
     ui_context_t ctx;
     ui_preset_t preset;
     if (argc != 3 || !fixture_dashboard(argv[1], &ctx, &preset)) {
-        fprintf(stderr, "usage: render_dashboard <fixture> <out.pbm>\n");
+        fprintf(stderr, "usage: render_dashboard <fixture> <out.pbm> | --list\n");
         return 2;
     }
     gfx_fb_t fb;

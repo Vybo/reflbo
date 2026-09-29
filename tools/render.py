@@ -11,14 +11,18 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import pbm_png  # noqa: E402
 
-# name -> renderer executable in the build directory and its arguments (the output path comes last)
-DASHBOARDS = ["home", "indoor", "weather", "focus", "home_invalid", "home_stale", "home_12h_charging", "indoor_cold",
-              "focus_seconds", "home_battery_details", "home_inverted", "indoor_hot_f", "indoor_frost", "home_frost",
-              "grid_clock_12h"]  # test/host/dashboard_fixtures.h
-RENDERERS = {
-    "test_pattern": ["render_test_pattern"],
-    **{f"dash_{name}": ["render_dashboard", name] for name in DASHBOARDS},
-}
+# Renderers that take a fixture name; `--list` prints their fixtures (test/host/*_fixtures.h).
+LISTED = {"dash": "render_dashboard", "screen": "render_screen"}
+
+
+def renderers(build_dir):
+    """name -> the command to run, without the output path that comes last."""
+    commands = {"test_pattern": [str(build_dir / "render_test_pattern")]}
+    for prefix, exe in LISTED.items():
+        path = str(build_dir / exe)
+        names = subprocess.run([path, "--list"], check=True, capture_output=True, text=True).stdout.split()
+        commands.update({f"{prefix}_{name}": [path, name] for name in names})
+    return commands
 
 
 def main(argv=None):
@@ -28,10 +32,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     out_dir = pathlib.Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    for name, command in RENDERERS.items():
+    for name, command in renderers(pathlib.Path(args.build_dir)).items():
         pbm = out_dir / f"{name}.pbm"
-        exe = pathlib.Path(args.build_dir) / command[0]
-        subprocess.run([str(exe), *command[1:], str(pbm)], check=True)
+        subprocess.run([*command, str(pbm)], check=True)
         (out_dir / f"{name}.png").write_bytes(pbm_png.png_from_pbm(pbm.read_bytes()))
         print(f"{name}: {pbm} and {pbm.with_suffix('.png')}")
     return 0

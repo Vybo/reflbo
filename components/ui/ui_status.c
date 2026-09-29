@@ -9,6 +9,10 @@
  * middle, the battery on the right with its level, voltage or days left as the preset asks. */
 void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, bool any_stale)
 {
+    ui_value_t bat, days;
+    ui_resolve(ctx, UI_FIELD_BAT_LEVEL, &bat);
+    ui_resolve(ctx, UI_FIELD_BAT_DAYS, &days);
+    any_stale |= bat.state == UI_VALUE_STALE; /* the battery shown here counts too */
     if (!ctx->time_valid) {
         const gfx_font_t *f = &gfx_font_sans_bold_16;
         const char *text = lang_str(ctx->lang, LS_SET_TIME);
@@ -28,14 +32,14 @@ void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *pr
                          clock, GFX_BLACK);
     }
 
-    ui_value_t bat, days;
-    ui_resolve(ctx, UI_FIELD_BAT_LEVEL, &bat);
-    ui_resolve(ctx, UI_FIELD_BAT_DAYS, &days);
     int x = fb->width - 6 - 26;
     ui_draw_battery(fb, x, 5, 26, 11, bat.state == UI_VALUE_MISSING ? -1 : bat.percent);
     if (bat.battery == DS_BAT_CHARGING) {
         x -= 16;
         gfx_bitmap(fb, x, 2, &gfx_icon_bolt_16, GFX_BLACK);
+    } else if (bat.state != UI_VALUE_MISSING && bat.percent <= UI_BATTERY_LOW_PCT) { /* spec §8: low */
+        x -= 10;
+        gfx_text(fb, &gfx_font_sans_bold_16, x + 2, 16, "!", GFX_BLACK);
     }
     char text[sizeof(bat.text) + sizeof(bat.extra) + sizeof(days.text) + sizeof(days.unit) + 12] = "";
     size_t n = 0;
@@ -53,7 +57,9 @@ void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *pr
             snprintf(text + n, sizeof(text) - n, "%s%s %s", n ? "  " : "", days.text, days.unit);
         }
     }
+    char fit[sizeof(text)];
+    gfx_text_ellipsize(&gfx_font_sans_12, text, 120, fit, sizeof(fit)); /* cut at the end, not the start */
     gfx_text_in_rect(fb, &gfx_font_sans_12, (gfx_rect_t){ (int16_t)(x - 124), 0, 120, UI_STATUS_H }, GFX_ALIGN_RIGHT,
-                     text, GFX_BLACK);
+                     fit, GFX_BLACK);
     gfx_hline(fb, 0, UI_STATUS_H, fb->width, GFX_BLACK);
 }

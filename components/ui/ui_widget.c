@@ -130,6 +130,25 @@ static const gfx_font_t *fit_number(const ui_fonts_t *f, const gfx_font_t *const
     return vf;
 }
 
+void ui_split_two_lines(const gfx_font_t *font, const char *text, int max_w, char *line1, char *line2, size_t size)
+{
+    line2[0] = '\0';
+    if (gfx_text_width(font, text) <= max_w) {
+        gfx_text_ellipsize(font, text, max_w, line1, size);
+        return;
+    }
+    char first[96];
+    snprintf(first, sizeof(first), "%s", text ? text : "");
+    for (char *space = strrchr(first, ' '); space != NULL; space = strrchr(first, ' ')) {
+        *space = '\0';
+        if (gfx_text_width(font, first) <= max_w) {
+            gfx_text_ellipsize(font, text + (space - first) + 1, max_w, line2, size);
+            break;
+        }
+    }
+    gfx_text_ellipsize(font, first, max_w, line1, size); /* no space that helps: one cut line */
+}
+
 static void format_age(const lang_t *lang, uint32_t age_s, char *out, size_t size)
 {
     if (age_s < 3600) {
@@ -141,7 +160,7 @@ static void format_age(const lang_t *lang, uint32_t age_s, char *out, size_t siz
     }
 }
 
-/* "⟲ 2 h" in the rect's top-right corner (spec §5.3). */
+/* "⟲ 2 h" in the rect's bottom-right corner (spec §5.3). */
 static void draw_age(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, const lang_t *lang)
 {
     char age[16];
@@ -243,6 +262,17 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
             return;
         }
         int max_w = r.w - 8;
+        if (!numeric(v) && gfx_text_width(vf, value) > max_w) { /* a name: two lines in the regular face */
+            const gfx_font_t *tf = f->unit;
+            char second[sizeof(fit)];
+            ui_split_two_lines(tf, value, max_w, fit, second, sizeof(fit));
+            int top = r.y + 12 + f->icon + 10;
+            gfx_text_in_rect(fb, tf, (gfx_rect_t){ r.x, (int16_t)top, r.w, tf->line_height }, GFX_ALIGN_CENTER, fit,
+                             GFX_BLACK);
+            gfx_text_in_rect(fb, tf, (gfx_rect_t){ r.x, (int16_t)(top + tf->line_height), r.w, tf->line_height },
+                             GFX_ALIGN_CENTER, second, GFX_BLACK);
+            return;
+        }
         if (!numeric(v)) {
             gfx_text_ellipsize(vf, value, max_w, fit, sizeof(fit));
             value = fit;
@@ -355,6 +385,9 @@ void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t
     }
     if (shown.state == UI_VALUE_MISSING && policy == UI_STALE_HIDE) {
         return;
+    }
+    if (shown.state == UI_VALUE_STALE) {
+        shown.trend = 0; /* an old reading's trend says nothing about now */
     }
     gfx_rect_t saved = fb->clip;
     gfx_set_clip(fb, gfx_rect_intersect(saved, r));

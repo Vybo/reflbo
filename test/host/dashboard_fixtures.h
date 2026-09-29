@@ -70,6 +70,25 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
     } else if (strcmp(name, "home_frost") == 0) {
         *preset = fixture_preset("home");
         fixture_single(&s_fix_ds, -1250, 6000);
+    } else if (strcmp(name, "home_cs") == 0) { /* the Czech pack */
+        *preset = fixture_preset("home");
+        ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "indoor_cs") == 0) {
+        *preset = fixture_preset("indoor");
+        ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "home_holiday_cs") == 0) { /* Monday 28 September 2026: Den české státnosti */
+        *preset = fixture_preset("home");
+        preset->slots[4] = UI_FIELD_DATE_HOLIDAY;
+        ctx->lang = lang_get("cs");
+        ctx->now = FIX_NOW + 3 * 86400;
+        ctx->local.tm_mday = 28;
+        ctx->local.tm_wday = 1;
+        ctx->local.tm_yday = 270;
+        ctx->local_day = FIX_DAY + 3;
+        fixture_fill(&s_fix_ds, ctx->now);
+    } else if (strcmp(name, "home_low_battery") == 0) { /* 12 %: the status bar marks it */
+        *preset = fixture_preset("home");
+        ds_set_battery(&s_fix_ds, 12, 3650, DS_BAT_DISCHARGING, FIX_NOW);
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -84,4 +103,5 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
 static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather", "focus", "home_invalid",
                                                     "home_stale", "home_12h_charging", "indoor_cold",
                                                     "focus_seconds", "home_battery_details", "home_inverted",
-                                                    "indoor_hot_f", "indoor_frost", "home_frost", "grid_clock_12h" };
+                                                    "indoor_hot_f", "indoor_frost", "home_frost", "grid_clock_12h",
+                                                    "home_cs", "indoor_cs", "home_holiday_cs", "home_low_battery" };

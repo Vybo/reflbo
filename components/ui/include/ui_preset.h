@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "ui_layout.h"
 
@@ -16,6 +17,9 @@
 #define UI_PRESET_NAME_LEN 24
 #define UI_CYCLE_MIN_S 10
 #define UI_CYCLE_MAX_S 3600
+#define UI_SCHEDULE_MAX 8
+#define UI_PRESETS_JSON_MAX 8192 /* presets.json at its largest: 16 presets and 8 schedule entries */
+#define UI_JSON_MAX_DEPTH 16     /* the files nest 5 levels; anything deeper is rejected unparsed */
 
 typedef enum {
     UI_STALE_STALE,       /* show the value with its age (the default) */
@@ -50,12 +54,40 @@ typedef struct {
     uint8_t status_battery; /* UI_STATUS_BAT_* bits */
 } ui_preset_t;
 
+typedef enum {
+    UI_SCHED_PRESET, /* make a preset active */
+    UI_SCHED_NIGHT,  /* night sleep until `until_min` (spec §9.1) */
+} ui_sched_action_t;
+
+/* A schedule entry (spec §5.4, D15). Times are local minutes after midnight. */
+typedef struct {
+    uint16_t at_min;
+    uint8_t days;   /* bit 0 Monday ... bit 6 Sunday */
+    uint8_t action; /* ui_sched_action_t */
+    uint8_t preset; /* index into presets, for UI_SCHED_PRESET */
+    uint16_t until_min; /* for UI_SCHED_NIGHT, never `at_min`: before it means the next day */
+} ui_schedule_entry_t;
+
+typedef struct {
+    bool enabled;
+    uint8_t count;
+    ui_schedule_entry_t entries[UI_SCHEDULE_MAX];
+} ui_schedule_t;
+
+/* When the entries run (spec §5.4), with the local-time rules of spec §9.2. The first time after
+ * `after` that an entry runs, with that entry's index in *index; 0 if none ever will. */
+time_t ui_schedule_next(const ui_schedule_t *schedule, time_t after, int *index);
+/* The entries due in (after, now], in the order they run: by time, and within a minute the presets
+ * in list order before a night. Returns how many; `order` gets their indexes. */
+int ui_schedule_due(const ui_schedule_t *schedule, time_t after, time_t now, int order[UI_SCHEDULE_MAX]);
+
 typedef struct {
     uint8_t count;
     uint8_t active; /* index into presets */
     bool cycle_enabled;
     uint16_t cycle_interval_s;
     ui_preset_t presets[UI_PRESET_MAX];
+    ui_schedule_t schedule;
 } ui_presets_t;
 
 /* The built-in presets (spec §5.4): used when presets.json is missing or invalid. */

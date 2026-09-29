@@ -107,12 +107,12 @@ target_include_directories(storage_logic PUBLIC ${REPO_ROOT}/components/storage/
 target_compile_options(storage_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(storage_logic PRIVATE cjson m)
 
-# ui: pure C on top of gfx, locale and the datastore.
+# ui: pure C on top of gfx, locale, the datastore and the scheduler's local-time rules.
 file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)
 add_library(ui STATIC ${UI_SOURCES})
 target_include_directories(ui PUBLIC ${REPO_ROOT}/components/ui/include)
 target_compile_options(ui PRIVATE ${REFLBO_WARNINGS})
-target_link_libraries(ui PUBLIC gfx locale datastore util PRIVATE cjson m)
+target_link_libraries(ui PUBLIC gfx locale datastore util PRIVATE cjson scheduler m)
 
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
@@ -146,6 +146,7 @@ reflbo_host_test(test_lang_glyphs locale gfx)
 reflbo_host_test(test_datastore datastore)
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
+reflbo_host_test(test_ui_schedule ui)
 reflbo_host_test(test_ui_widget_fit ui)
 reflbo_host_test(test_settings storage_logic)
 reflbo_host_test(test_storage_file storage_logic)

@@ -5,6 +5,7 @@
 #include "cJSON.h"
 #include "ui_fields.h"
 #include "ui_preset.h"
+#include "util_json.h"
 
 #define SCHEMA 1
 
@@ -45,8 +46,45 @@ static bool optional_bool(const cJSON *obj, const char *key, bool fallback)
     return cJSON_IsBool(item) ? cJSON_IsTrue(item) : fallback;
 }
 
+/* Copies a name, cut to fit at a character boundary (a limit inside "ř" would split it). */
+static void copy_name(char *out, size_t size, const char *name)
+{
+    size_t n = strlen(name);
+    if (n >= size) {
+        n = size - 1;
+        while (n > 0 && ((unsigned char)name[n] & 0xC0) == 0x80) { /* name[n] continues a sequence */
+            n--;
+        }
+    }
+    memcpy(out, name, n);
+    out[n] = '\0';
+}
+
+/* "22:30" -> minutes after midnight. */
+static bool parse_hhmm(const cJSON *item, uint16_t *out)
+{
+    const char *s = cJSON_IsString(item) ? item->valuestring : "";
+    if (strlen(s) != 5 || s[2] != ':') {
+        return false;
+    }
+    for (int i = 0; i < 5; i++) {
+        if (i != 2 && (s[i] < '0' || s[i] > '9')) {
+            return false;
+        }
+    }
+    int h = (s[0] - '0') * 10 + (s[1] - '0'), m = (s[3] - '0') * 10 + (s[4] - '0');
+    if (h > 23 || m > 59) {
+        return false;
+    }
+    *out = (uint16_t)(h * 60 + m);
+    return true;
+}
+
 static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_preset_t *out, char *err, size_t size)
 {
+    if (!cJSON_IsObject(slots)) {
+        return fail(err, size, "preset \"%s\": slots must be an object of slot names", out->id);
+    }
     const cJSON *slot;
     cJSON_ArrayForEach(slot, slots)
     {
@@ -82,10 +120,7 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
     snprintf(out->id, sizeof(out->id), "%s", id->valuestring);
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
     if (cJSON_IsString(name)) {
-        if (strlen(name->valuestring) >= UI_PRESET_NAME_LEN) {
-            return fail(err, size, "preset \"%s\": name longer than %d bytes", out->id, UI_PRESET_NAME_LEN - 1);
-        }
-        snprintf(out->name, sizeof(out->name), "%s", name->valuestring);
+        copy_name(out->name, sizeof(out->name), name->valuestring);
     } else {
         snprintf(out->name, sizeof(out->name), "%s", out->id);
     }
@@ -97,7 +132,8 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
     out->layout = (uint8_t)layout;
     out->in_cycle = optional_bool(item, "in_cycle", true);
     const cJSON *slots = cJSON_GetObjectItemCaseSensitive(item, "slots");
-    if (slots != NULL && !parse_slots(slots, ui_layout((ui_layout_id_t)layout), out, err, size)) {
+    if (slots != NULL && !cJSON_IsNull(slots) &&
+        !parse_slots(slots, ui_layout((ui_layout_id_t)layout), out, err, size)) {
         return false;
     }
     const cJSON *options = cJSON_GetObjectItemCaseSensitive(item, "options");
@@ -107,7 +143,7 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
     out->invert = optional_bool(options, "invert", false);
     out->stale_policy = UI_STALE_STALE;
     const cJSON *policy = cJSON_GetObjectItemCaseSensitive(options, "stale_policy");
-    if (policy != NULL) {
+    if (policy != NULL && !cJSON_IsNull(policy)) {
         int found = -1;
         for (int i = 0; cJSON_IsString(policy) && i < (int)(sizeof(k_policies) / sizeof(k_policies[0])); i++) {
             if (strcmp(policy->valuestring, k_policies[i]) == 0) {
@@ -122,7 +158,7 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
     out->status_clock = optional_bool(options, "status_clock", false);
     out->status_battery = UI_STATUS_BAT_PERCENT;
     const cJSON *battery = cJSON_GetObjectItemCaseSensitive(options, "status_battery");
-    if (battery != NULL) {
+    if (battery != NULL && !cJSON_IsNull(battery)) {
         if (!cJSON_IsArray(battery)) {
             return fail(err, size, "preset \"%s\": status_battery must be a list", out->id);
         }
@@ -141,6 +177,55 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
             }
             out->status_battery |= (uint8_t)(1u << bit);
         }
+    }
+    return true;
+}
+
+static bool parse_schedule(const cJSON *schedule, ui_presets_t *out, char *err, size_t size)
+{
+    out->schedule.enabled = optional_bool(schedule, "enabled", false);
+    const cJSON *entries = cJSON_GetObjectItemCaseSensitive(schedule, "entries");
+    if (entries == NULL || cJSON_IsNull(entries)) {
+        return true;
+    }
+    if (!cJSON_IsArray(entries)) {
+        return fail(err, size, "schedule: entries must be a list");
+    }
+    if (cJSON_GetArraySize(entries) > UI_SCHEDULE_MAX) {
+        return fail(err, size, "schedule: at most %d entries", UI_SCHEDULE_MAX);
+    }
+    const cJSON *e;
+    cJSON_ArrayForEach(e, entries)
+    {
+        int n = out->schedule.count + 1;
+        ui_schedule_entry_t *se = &out->schedule.entries[out->schedule.count];
+        if (!parse_hhmm(cJSON_GetObjectItemCaseSensitive(e, "at"), &se->at_min)) {
+            return fail(err, size, "schedule entry %d: \"at\" must be HH:MM", n);
+        }
+        const cJSON *days = cJSON_GetObjectItemCaseSensitive(e, "days");
+        se->days = cJSON_IsNumber(days) ? (uint8_t)(days->valueint & 0x7F) : 0x7F;
+        const cJSON *action = cJSON_GetObjectItemCaseSensitive(e, "action");
+        const char *a = cJSON_IsString(action) ? action->valuestring : "";
+        if (strcmp(a, "preset") == 0) {
+            const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "preset");
+            int index = cJSON_IsString(id) ? ui_presets_find(out, id->valuestring) : -1;
+            if (index < 0) {
+                return fail(err, size, "schedule entry %d: unknown preset", n);
+            }
+            se->action = UI_SCHED_PRESET;
+            se->preset = (uint8_t)index;
+        } else if (strcmp(a, "night") == 0) {
+            if (!parse_hhmm(cJSON_GetObjectItemCaseSensitive(e, "until"), &se->until_min)) {
+                return fail(err, size, "schedule entry %d: night needs \"until\" as HH:MM", n);
+            }
+            if (se->until_min == se->at_min) {
+                return fail(err, size, "schedule entry %d: a night must end at another time than it starts", n);
+            }
+            se->action = UI_SCHED_NIGHT;
+        } else {
+            return fail(err, size, "schedule entry %d: action must be preset or night", n);
+        }
+        out->schedule.count++;
     }
     return true;
 }
@@ -179,11 +264,15 @@ static bool parse(const cJSON *root, ui_presets_t *out, char *err, size_t size)
     out->cycle_interval_s = (uint16_t)(seconds < UI_CYCLE_MIN_S ? UI_CYCLE_MIN_S
                                        : seconds > UI_CYCLE_MAX_S ? UI_CYCLE_MAX_S
                                                                   : seconds);
-    return true;
+    const cJSON *schedule = cJSON_GetObjectItemCaseSensitive(root, "schedule");
+    return schedule == NULL || cJSON_IsNull(schedule) || parse_schedule(schedule, out, err, size);
 }
 
 bool ui_presets_from_json(const char *json, ui_presets_t *out, char *err, size_t err_size)
 {
+    if (util_json_depth(json) > UI_JSON_MAX_DEPTH) {
+        return fail(err, err_size, "nested more than %d levels", UI_JSON_MAX_DEPTH);
+    }
     cJSON *root = json != NULL ? cJSON_Parse(json) : NULL;
     if (root == NULL) {
         return fail(err, err_size, "not valid JSON");
@@ -237,7 +326,30 @@ size_t ui_presets_to_json(const ui_presets_t *p, char *out, size_t size)
     for (int i = 0; i < p->count; i++) {
         cJSON_AddItemToArray(presets, preset_json(&p->presets[i]));
     }
-    bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
+    if (p->schedule.enabled || p->schedule.count) {
+        cJSON *schedule = cJSON_AddObjectToObject(root, "schedule");
+        cJSON_AddBoolToObject(schedule, "enabled", p->schedule.enabled);
+        cJSON *entries = cJSON_AddArrayToObject(schedule, "entries");
+        for (int i = 0; i < p->schedule.count && i < UI_SCHEDULE_MAX; i++) {
+            const ui_schedule_entry_t *e = &p->schedule.entries[i];
+            cJSON *obj = cJSON_CreateObject();
+            char hhmm[8];
+            snprintf(hhmm, sizeof(hhmm), "%02d:%02d", e->at_min / 60 % 24, e->at_min % 60);
+            cJSON_AddStringToObject(obj, "at", hhmm);
+            cJSON_AddNumberToObject(obj, "days", e->days);
+            if (e->action == UI_SCHED_NIGHT) {
+                cJSON_AddStringToObject(obj, "action", "night");
+                snprintf(hhmm, sizeof(hhmm), "%02d:%02d", e->until_min / 60 % 24, e->until_min % 60);
+                cJSON_AddStringToObject(obj, "until", hhmm);
+            } else {
+                cJSON_AddStringToObject(obj, "action", "preset");
+                cJSON_AddStringToObject(obj, "preset", e->preset < p->count ? p->presets[e->preset].id : "");
+            }
+            cJSON_AddItemToArray(entries, obj);
+        }
+    }
+    /* unformatted: the device reads it, and 16 presets must fit UI_PRESETS_JSON_MAX */
+    bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, false);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;
 }

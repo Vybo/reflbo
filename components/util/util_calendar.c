@@ -62,3 +62,16 @@ util_moon_t util_moon_phase(time_t utc)
     moon.illumination = (int)floor((1.0 + cos(phase_angle * r)) / 2.0 * 100.0 + 0.5);
     return moon;
 }
+
+void util_easter(int year, int *month, int *day)
+{
+    int a = year % 19, b = year / 100, c = year % 100;
+    int d = b / 4, e = b % 4, f = (b + 8) / 25, g = (b - f + 1) / 3;
+    int h = (19 * a + b - d - g + 15) % 30;
+    int i = c / 4, k = c % 4;
+    int l = (32 + 2 * e + 2 * i - h - k) % 7;
+    int m = (a + 11 * h + 22 * l) / 451;
+    int n = h + l - 7 * m + 114;
+    *month = n / 31;
+    *day = n % 31 + 1;
+}

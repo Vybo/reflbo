@@ -58,6 +58,25 @@ static void test_waxing_before_full_and_waning_after(void)
     TEST_ASSERT_TRUE(before.age < 0.5 && after.age > 0.5);
 }
 
+static void check_easter(int year, int month, int day)
+{
+    int m = 0, d = 0;
+    util_easter(year, &m, &d);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(month, m, "month");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(day, d, "day");
+}
+
+static void test_easter_sunday_including_the_earliest_and_latest_dates(void)
+{
+    check_easter(2024, 3, 31);
+    check_easter(2025, 4, 20);
+    check_easter(2026, 4, 5);
+    check_easter(2027, 3, 28);
+    check_easter(2008, 3, 23);
+    check_easter(2038, 4, 25); /* the latest possible date */
+    check_easter(2285, 3, 22); /* the earliest possible date */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -65,5 +84,6 @@ int main(void)
     RUN_TEST(test_new_quarter_and_full_moons_of_2026);
     RUN_TEST(test_illumination_between_phases);
     RUN_TEST(test_waxing_before_full_and_waning_after);
+    RUN_TEST(test_easter_sunday_including_the_earliest_and_latest_dates);
     return UNITY_END();
 }

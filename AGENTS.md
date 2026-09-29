@@ -29,7 +29,7 @@ Guiding principles:
 
 ## 2. Status and roadmap
 
-- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 runs as two plans. M3a is done: LittleFS config files, the datastore with the extra fields, the English pack, four layouts with widgets and a status bar, and presets that KEY switches and auto-cycles and that survive a reboot. M3b is next (menu, screens, settings, schedule and night sleep, Czech pack); its plan gets written before it starts.
+- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 runs as two plans. M3a is done: LittleFS config files, the datastore with the extra fields, the English pack, four layouts with widgets and a status bar, and presets that KEY switches and auto-cycles and that survive a reboot. M3b is built: the on-device menu with settings editing, toasts and the critical-battery screen, the preset schedule with timed night sleep, and the Czech pack with its public holidays. M3 is done once the owner has measured night sleep and checked the buttons (Owner acceptance in the M3b plan).
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
 - **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-29-m3b-menu-and-night.md`](docs/plans/2026-09-29-m3b-menu-and-night.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
@@ -40,7 +40,7 @@ Guiding principles:
 | M0 | Toolchain and skeleton: ESP-IDF, project builds and flashes, USB console, `tools/` helpers, licence files | `idf.py build` is clean and the console answers |
 | M1 | ST7305 driver, `gfx`, fonts, screenshot path (serial → PNG), host renderer | The test pattern on the panel (owner confirms orientation) matches the screenshot |
 | M2 | Board services: PCF85063, SHTC3, battery gauge, buttons; clock screen; both idle strategies | Values on screen match the console. The owner measures deep vs light sleep, and one idle strategy is chosen |
-| M3 | Data store, layouts, presets, cycling, status bar, on-device menu | KEY switches presets, and the choice survives a reboot |
+| M3 | Data store, layouts, presets, cycling, status bar, on-device menu, schedule and night sleep, Czech pack | KEY switches presets, and the choice survives a reboot. The owner measures night sleep |
 | M4 | Wi-Fi manager (STA/AP, captive portal), web configurator, mDNS, OTA | A phone sets up Wi-Fi from AP mode; OTA works |
 | M5 | Time sync, weather, astro, sync scheduler, power tuning | Daily sync works on battery; the measured average current is in `docs/power.md` |
 | M6 | MQTT and Home Assistant, including data from other local devices over MQTT | Entities appear in HA; a mapped MQTT value renders on the device |
@@ -135,6 +135,7 @@ Numbering follows the schematic. Check the silkscreen before wiring.
 21. **GPIO15 (RTC INT) needs the RTC-domain pull-up in deep sleep** (`rtc_gpio_pullup_en`); `gpio_pullup_en` does not apply there. Clear the alarm flag before sleeping, or ext1 wakes at once.
 22. **Download mode sticks until a power-on or watchdog reset.** Powering on with BOOT held latches download mode in the strapping register (`boot:0x21`). Resets over USB don't sample the pins again: esptool's hard reset after `flash`, and `devlog --reset`, land in "waiting for download" every time, so a freshly flashed app never runs. Leave with a watchdog reset, which samples them again: `tools/idf.sh exec python -m esptool --chip esp32s3 -p <port> --after watchdog_reset read_mac`. Seen at M2, 2026-09-28.
 23. **The 3V3 buck-boost runs in forced PWM.** The TPS63020's PS/SYNC pin (13) is tied to EN and VINA, so it is high, and "logic high forces PWM mode" (datasheet §7.4.4). TI's Figure 9 (power save disabled) shows about 1–2 % efficiency at 0.1 mA and about 10 % at 1 mA, so the converter burns tens of mW at almost no load. It does so in every mode and on battery too. At M2 the board drew a steady ~11.5 mA at 5.2 V (~60 mW) in deep sleep while the chip was awake 0.1 % of the time. Firmware can't change it; only a board rework can (PS/SYNC to GND enables power-save mode, 25–50 µA quiescent). The DSJ package is a 3×4 mm VSON with the pins underneath.
+24. **Sleep-out needs the init sequence again.** Both vendor init sequences set NRDSLP (`D6h`, second parameter `0x02`), which makes `SLPOUT` reload the NVM defaults: at M3b a plain SLPOUT brought the panel back at 2 Hz. So `st7305_sleep_out()` resets the panel and runs the init sequence, and `display_wake()` then pushes the frame and returns to LPM. `panel fps` reads high for a few seconds while the panel settles, then 1.00 Hz. Sleep-in from LPM goes through HPM first (datasheet §7.10), about 400 ms in all. Night sleep uses both (spec §9.1); `panel sleep` and `panel wake` try them by hand.
 
 Datasheets: [ST7305](https://files.waveshare.com/wiki/common/ST_7305_V0_2.pdf) · [ES8311](https://files.waveshare.com/wiki/common/ES8311.DS.pdf) · [PCF85063](https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf) · [SHTC3](https://files.waveshare.com/wiki/common/SHTC3_Datasheet.pdf) · [ESP32-S3](https://documentation.espressif.com/esp32-s3_datasheet_en.pdf)
 
@@ -196,14 +197,14 @@ components/
   st7305/        panel init, LPM/HPM, frame push, deep-sleep retention
   display/       canonical framebuffer, CRC-skipped pushes to the panel
   gfx/           framebuffer, primitives, text, fonts, bitmaps, QR    [host]
-  locale/        language packs: en, cs (M3b); API prefix lang_       [host]
+  locale/        language packs: en, cs; API prefix lang_             [host]
   astro/         sunrise/sunset, day length                           [host]
   datastore/     fields, freshness, change events, snapshot           [host]
   ui/            layouts, widgets, presets, screens, menu             [host]
   scheduler/     next-wake computation (display, alarms, sync)        [host]
   sensors/       SHTC3, battery gauge
   rtc/           PCF85063 driver
-  timekeeping/   system time from RTC, TZ, SNTP, manual set
+  timekeeping/   system time from RTC, TZ and its short list, SNTP, manual set
   power/         power states, idle strategy, sleep entry
   netmgr/        Wi-Fi STA/AP, captive DNS, mDNS
   webui/         HTTP server, REST API, embedded web assets
@@ -266,6 +267,9 @@ tools/idf.sh exec python tools/devlog.py --cmd "rtc set $(date -u +%Y-%m-%dT%H:%
 tools/idf.sh exec python tools/devlog.py --cmd "power idle deep"   # or light; kept in NVS (sys/idle)
 tools/idf.sh exec python tools/devlog.py --cmd "sleep test deep 2" # sleep cycles while tethered; then: sleep stats
 tools/idf.sh exec python tools/devlog.py --cmd "preset list" --cmd "field set env.temp -5.5"   # redraws at once
+tools/idf.sh exec python tools/devlog.py --cmd "btn key long"    # the menu: then KEY and BOOT, short or long
+tools/idf.sh exec python tools/devlog.py --cmd "schedule add 23:00 night 06:00" --cmd "schedule on"
+tools/idf.sh exec python tools/devlog.py --cmd "night 60"        # night sleep now; the console drops
 tools/idf.sh exec python tools/screenshot.py -o captures/screen.png --compare test/host/golden/test_pattern.pbm
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host \
   && ctest --test-dir build-host --output-on-failure
@@ -279,8 +283,9 @@ python3 tools/render.py                     # host renderings to captures/render
 - `tools/idf.sh` refuses commands that talk to the board (`flash`, `erase-*`, `monitor`, …) unless the port is given with `-p` or `ESPPORT`. Otherwise idf.py would probe every serial port and use the first ESP chip that answers.
 - `devlog.py` picks the port itself when exactly one `/dev/cu.usbmodem*` exists; otherwise pass `-p`. Exit codes: 0 ok, 2 port problem, 3 console prompt never appeared, 4 `--until` not seen in time. `screenshot.py` picks the port the same way and adds 5 (the image differs from `--compare`) and 6 (no complete, valid image arrived). It writes the PNG and the raw PBM next to it.
 - After adding a component directory, run `tools/idf.sh reconfigure` once. ESP-IDF finds components when CMake configures, so a plain `build` in an existing build directory silently leaves the new component out.
-- Config files live on LittleFS, mounted at `/fs`: `/fs/cfg/settings.json` and `/fs/cfg/presets.json`, each with a `.bak` of the previous version (spec §14.3). The first boot formats a blank `storage` partition; `idf.py flash` never writes it.
-- Golden renders: after an intentional UI change, rewrite a golden with `build-host/render_dashboard <fixture> test/host/golden/dash_<fixture>.pbm` (fixtures in `test/host/dashboard_fixtures.h`), look at the PNGs from `tools/render.py`, then commit.
+- Config files live on LittleFS, mounted at `/fs`: `/fs/cfg/settings.json` and `/fs/cfg/presets.json`, each with a `.bak` of the previous version (spec §14.3). A boot formats the `storage` partition whenever it doesn't mount: when it is blank, but also when it is corrupted. The menu's factory reset formats it too. `idf.py flash` never writes it.
+- Golden renders: after an intentional UI change, rewrite a golden with `build-host/render_dashboard <fixture> test/host/golden/dash_<fixture>.pbm` or `build-host/render_screen <fixture> test/host/golden/screen_<fixture>.pbm` (fixtures in `test/host/dashboard_fixtures.h` and `screen_fixtures.h`; `--list` prints them), look at the PNGs from `tools/render.py`, then commit.
+- **Night sleep deep-sleeps even while a PC is attached** (spec §9.1). After `night <minutes>` or a schedule's night entry, the port is gone until the end time or a KEY or BOOT press.
 - Do not run `idf.py monitor` from an agent shell; it needs an interactive TTY. Use `devlog.py`.
 - Do not run `idf.py erase-flash` or erase NVS without asking. Either wipes the owner's Wi-Fi credentials and presets.
 - If the port is missing, the board is probably in deep sleep. Press KEY. If it is still missing, ask the owner to enter download mode (hold BOOT while powering on).
@@ -299,7 +304,7 @@ Use the cheapest level that proves the change. Any UI change needs at least leve
 
 **Screenshots**: the `screenshot` console command prints the canonical framebuffer as base64 PBM between `-----BEGIN RLCD PBM-----` and `-----END RLCD PBM-----`. `tools/screenshot.py` turns that into a PNG using only pyserial and the standard library. The web UI will serve `/api/screenshot.bmp` *(planned, M4)*. A screenshot shows what the firmware drew, not what the panel shows, because the ST7305 is write-only. After any display-driver change, have the owner confirm the test pattern.
 
-**Diagnostics console** (`diag`; full list in spec §15). Available now: `help`, `version`, `heap`, `reboot`, `screenshot`, `panel status|test|clear|mode <hpm|lpm>|rate <0.25|0.5|1|2|4|8>|fps [s]|init <factory|xiaozhi>`, `btn <key|boot> <short|double|long>` (simulated presses), `sensors`, `battery`, `rtc get|set <ISO 8601>`, `tasks`, `power idle [deep|light]`, `sleep stats [reset]|test <deep|light> <n>`, `field list|get <id>|set <id> <value>|clear <id>`, `preset list|set <id>`. Planned: `wifi status|scan`, `sync now`, `audio tone`. Drive the UI with `btn` and `screenshot` instead of asking the owner to press buttons. Inject test data with `field set`. Run commands with `tools/idf.sh exec python tools/devlog.py --cmd <command>`. The console runs in plain line mode on purpose: no history, arrow keys or tab completion, even in a terminal. It never sends escape-code queries that a script can't answer (spec §15, `components/diag/diag.c`).
+**Diagnostics console** (`diag`; full list in spec §15). Available now: `help`, `version`, `heap`, `reboot`, `screenshot`, `panel status|test|clear|mode <hpm|lpm>|rate <0.25|0.5|1|2|4|8>|fps [s]|sleep|wake|init <factory|xiaozhi>`, `btn <key|boot> <short|double|long>` (simulated presses), `sensors`, `battery`, `rtc get|set <ISO 8601>`, `tasks`, `power idle [deep|light]`, `sleep stats [reset]|test <deep|light> <n>`, `field list|get <id>|set <id> <value>|clear <id>`, `preset list|set <id>`, `night <minutes>`, `schedule list|on|off|clear|add <HH:MM> preset <id> [days]|add <HH:MM> night <HH:MM> [days]`. Planned: `wifi status|scan`, `sync now`, `audio tone`. Drive the UI, the menu included, with `btn` and `screenshot` instead of asking the owner to press buttons. A `btn` gesture reaches the app through the buttons task, so a command in the same devlog call can run before it has taken effect: check its result in a separate call. Inject test data with `field set`. Run commands with `tools/idf.sh exec python tools/devlog.py --cmd <command>`. The console runs in plain line mode on purpose: no history, arrow keys or tab completion, even in a terminal. It never sends escape-code queries that a script can't answer (spec §15, `components/diag/diag.c`).
 
 **Done** means: the acceptance criteria pass at the right level, new logic has tests, power-affecting changes have measurements in `docs/power.md`, and this file and `docs/` are updated.
 
@@ -354,3 +359,4 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 | D14 | Light sleep is entered explicitly by the app (`power_sleep_light()`), not by esp_pm automatic light sleep; a tethered board stays awake |
 | D15 | Accepted M3 proposals (owner, 2026-09-28): the LPM refresh rate setting, a preset schedule that can also start a timed night sleep (screen off, woken only by buttons or the end time, its saving measured), extra local fields, and a Czech pack with name days and holidays. The Night layout stays deferred |
 | D16 | Owner, 2026-09-29: the Czech pack ships the public holidays but no name days until a source with a clean licence turns up (the best one found traces to CC BY-SA Wikipedia). A button still held at sleep time is left out of that sleep's wake sources |
+| D17 | Owner, 2026-09-29 (M3b render review): the menu leaves out Display ▸ Contrast for now, and the temperature offset steps by 0.1 °C |

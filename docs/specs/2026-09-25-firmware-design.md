@@ -53,6 +53,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D14 | Light sleep is entered explicitly by the app (`power_sleep_light()`); esp_pm automatic light sleep is not used. A tethered board stays awake (§3.4) | M2: the USB console drops in any light sleep, and automatic light sleep would need level-type interrupts on the button and RTC pins all the time |
 | D15 | Accepted M3 proposals (owner, 2026-09-28): the LPM refresh rate as a display setting (§4.2); a preset schedule whose entries can also start a timed night sleep (§5.4, §9.1); extra local fields (§5.1); a Czech language pack with name days and public holidays (§5.8) | The Night layout stays deferred (§19). The owner asked to measure what night sleep saves |
 | D16 | Owner, 2026-09-29: the `cs` pack ships the public holidays but no name-day calendar until a source with a clean licence turns up (§5.8, §20). A button still held when the board goes to sleep is left out of that sleep's wake sources (§9.2) | The best name-day list found (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA). A stuck KEY or BOOT would otherwise wake the board again and again |
+| D17 | Owner, 2026-09-29 (M3b render review): the menu leaves out Display ▸ Contrast for now, and the temperature offset steps by 0.1 °C (§5.7) | No contrast levels besides the factory sequence's (D12) have been checked on the panel |
 
 ### 1.3 Out of scope for v1
 
@@ -212,6 +213,10 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
     - For scale, the panel in LPM costs about 24 mAh/day.
   - The controller's Partial Display Mode (`PTLON`, 12h) is something else. It drives fewer gate lines and leaves the rest of the panel undriven, so it can't show a full-screen dashboard.
   - **v1 decision:** push full frames, and skip the push when the frame CRC is unchanged. Windowed pushes stay an optimisation candidate in case M2 measurements show they matter (§9.4).
+- **Sleep-in and wake** (night sleep, §9.1).
+  - Sleep-in follows datasheet §7.10: from LPM through HPM (`38h`, 300 ms), then `SLPIN` (`10h`, 100 ms). The panel stops scanning, and its image fades.
+  - Both init sequences set NRDSLP (`D6h`), so `SLPOUT` would reload the NVM defaults; at M3b the panel came back at 2 Hz that way. Waking therefore resets the panel and runs the init sequence again, then pushes the frame and returns to LPM.
+  - A deep-sleep wake keeps a sleeping panel asleep: the snapshot records it.
 - **Before deep sleep.** Drive CS high and RESET high, then call `gpio_hold_en()` on both and `gpio_deep_sleep_hold_en()`. Release the holds on wake.
 - **Test pattern (M1).** 1-px border, corner labels TL/TR/BL/BR, a 10-px grid, a checkerboard patch and a glyph sample. The owner confirms orientation and contrast, and the screenshot must match the panel.
 
@@ -253,7 +258,7 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 |---|---|---|---|
 | `time.clock` | time | system time | Valid whenever the time is valid |
 | `date.day` | date | system time | Same |
-| `env.temp` | number, °C | SHTC3 | Stale after 15 min without a reading |
+| `env.temp` | number, °C | SHTC3 | Stale after 15 min without a reading, or after twice the sample interval if that is longer |
 | `env.hum` | number, % | SHTC3 | Same |
 | `bat.level` | battery (%, V, charging state) | gauge | Stale after 15 min |
 | `wx.now` | weather (code, temperature) | Weather data (see below) | Normal until the expected sync interval (§9.3) plus 2 h has passed since the last fetch; stale after that; missing past the forecast range |
@@ -337,13 +342,15 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - no presets, or more than 16;
   - a bad or duplicate id;
   - an unknown layout, slot or field, or a field the slot can't show;
-  - an unknown `stale_policy` or `status_battery` value.
+  - an unknown `stale_policy` or `status_battery` value;
+  - nesting deeper than 16 levels, or `slots` that isn't an object;
+  - a bad schedule: more than 8 entries, or an entry with a bad time, action or preset, or a night that ends at the minute it starts.
 
   Everything else is lenient:
   - an unknown `active` selects the first preset;
   - the cycle interval is clamped to 10 s–1 h;
-  - a missing name takes the id;
-  - missing options take their defaults;
+  - a missing name takes the id, and a name longer than 23 bytes is cut at a character boundary;
+  - missing or `null` options take their defaults;
   - `null` or `""` leaves a slot empty.
 - **Switching.** Presets change by:
   - KEY short: next preset in cycle order.
@@ -356,6 +363,10 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 - **Schedule** (D15). `presets.json` holds `"schedule": { "enabled": true, "entries": [...] }` with up to 8 entries: `{ "at": "22:30", "days": 127, "action": "preset", "preset": "focus" }` or `{ "at": "23:00", "days": 127, "action": "night", "until": "06:00" }`. `days` is a Mon–Sun bitmask (bit 0 = Monday, default all). An entry runs at its local minute, with the same DST rules as user alarms (§9.2).
   - `preset` makes that preset active. Manual switching and auto-cycling carry on from there.
   - `night` starts night sleep (§9.1) until `until`, which may be on the next day.
+  - Entries of the same minute run in list order, presets before a night, because nothing runs once a night has started.
+  - Entries run only while the time is valid. They don't run late: not those a night covers or a clock change skips, and not those missed while the board was off.
+  - A preset entry's switch is not saved, like an auto-cycle switch.
+  - Until the web UI (M4), the `schedule` console command edits the entries (§15).
 
 ### 5.5 Screens
 
@@ -367,8 +378,8 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 | First run | "Hold BOOT 3 s to set up Wi-Fi · Hold KEY for menu", plus the clock if the time is valid |
 | Alarm ringing | Large time, the alarm label, button hints |
 | Radio | Station, ICY title, volume, a battery warning when on battery |
-| Critical battery | "Battery empty — charge me" and the last known time. Nothing else updates |
-| Toast | A short overlay (e.g. "Preset: Weather", "Sync failed") shown for about 3 s |
+| Critical battery | A large empty battery, "Battery empty" and "Please charge me", with the time and date it was drawn. Nothing else updates |
+| Toast | A short overlay near the bottom, in a black box (e.g. "Preset: Weather", "Sync failed"), shown for 3 s. The board stays awake meanwhile |
 
 `XXXX` is the last two bytes of the Wi-Fi STA MAC in lowercase hex. The same id is used for the hostname, AP SSID, MQTT client id and device id.
 
@@ -379,6 +390,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - Double press: 300 ms window, waited for only when the context binds a double press.
   - Long press: fires at 1 s while the button is still held.
   - BOOT on the dashboard: long press fires at 3 s instead, so Wi-Fi doesn't switch on by accident.
+  - In the menu KEY has no double press, so a short press answers at once, and BOOT's long press fires at 1 s.
 - A context binds at most one long gesture per button.
 
 | Context | KEY short | KEY double | KEY long | BOOT short | BOOT long |
@@ -410,6 +422,14 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 - The menu closes after 60 s without input.
 - Items for features that don't exist yet (Wi-Fi before M4, Sync before M5, Alarms and Radio before M7) are hidden, not shown disabled.
 - Schedule entries are edited in the web UI (M4); until then `presets.json` or the console sets them.
+- Display ▸ Contrast is hidden for now (D17). Info ▸ IP/MAC and Last sync result join with M4 and M5.
+- As built (M3b):
+  - A toggle flips at once. A choice or a number is edited in place and saved with KEY long.
+  - The temperature offset steps by 0.1 °C (±10 °C, D17), the humidity offset by 0.5 % (±20 %).
+  - The time zone list holds 14 zones. A zone set elsewhere stays selectable.
+  - Info shows the device id `reflbo-XXXX`, the firmware version with the first bytes of its ELF hash, and the uptime since the first valid clock after a cold boot.
+  - Reboot doesn't ask. Factory reset asks, and only KEY held confirms it.
+  - The panel is in HPM while the menu is open.
 - The full time zone picker is in the web UI.
 
 ### 5.8 Language packs
@@ -463,7 +483,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
 - Sampled every 5 min (configurable 1–30 min) and on BOOT short. The sensor is sent to sleep after each reading.
 - Low-power measurement mode (about 0.8 ms instead of about 12 ms) is used if M2 shows its accuracy is good enough.
-- Temperature and humidity offsets are settings. Defaults come from an M2/M5 comparison with a reference thermometer.
+- Temperature and humidity offsets are settings. The humidity with its offset stays within 0–100 %. Defaults come from an M2/M5 comparison with a reference thermometer.
 - Readings are taken right after wake, before Wi-Fi or the CPU warm the board.
 
 **Battery gauge**
@@ -482,8 +502,8 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
   `usb_serial_jtag_is_connected()` additionally marks external power when a PC is attached.
 - **Thresholds.**
-  - Low, 15 %: status icon; sync retries are skipped.
-  - Critical, 3.3 V or below: critical screen. Only KEY wakes the device.
+  - Low, 15 %: a "!" beside the status bar's battery; sync retries are skipped.
+  - Critical, 3.3 V or below while not charging: the critical screen. Only KEY wakes the device; if KEY is held, a timer checks again every 10 min instead (D16). The screen stays until the battery reads 3.4 V, or until charging is seen, so it doesn't flicker at the threshold.
 
 ## 9. Power management and scheduling
 
@@ -499,8 +519,12 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
 **Night sleep** (D15):
 
-- The chip deep-sleeps whatever the idle strategy, woken only by KEY, BOOT or the end time (the RTC alarm, with the usual backup timer). Nothing is sampled or drawn.
-- A button press wakes the panel (`SLPOUT`, then the datasheet's wait) and shows the dashboard. After 60 s without input, night sleep resumes. KEY long still opens the menu.
+- The chip deep-sleeps whatever the idle strategy, woken only by KEY, BOOT or the end time (the RTC alarm, with the usual backup timer). Nothing is sampled or drawn. It sleeps even while a PC is attached, so the console drops.
+- A button press wakes the panel (with the init sequence again, §4.2) and shows the dashboard.
+  - The press that woke it does nothing else.
+  - The board stays awake until 60 s after the last press, then night sleep resumes.
+  - KEY long still opens the menu. A night that comes due while the menu is open waits until it closes.
+  - A night that starts with a button held checks again every minute, so the button can wake it once released (D16).
 - At the end time the device renders the dashboard and carries on as usual.
 - The owner measures its current against the idle strategy, to see whether it saves enough to keep (M3 acceptance).
 
@@ -801,7 +825,9 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 - Every file carries a schema version, and migrations run at boot.
 - Writes are atomic: write `*.tmp`, fsync, rename, keeping the previous file as `*.bak`.
-- If a file is invalid, the firmware uses `*.bak`; if that is invalid too, it uses defaults and shows a toast (from M3b; M3a logs it).
+- If a file is invalid, the firmware uses `*.bak`; if that is invalid too, it uses defaults and shows the toast "Using default settings".
+  - A file rejected in favour of its `.bak` is removed, so the next save keeps the good backup.
+  - A file nested deeper than 16 levels is rejected before it is parsed.
 - The partition is mounted at `/fs`, so the files are `/fs/cfg/settings.json` and so on.
 
 `settings.json` sketch:
@@ -827,7 +853,7 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 ### 14.4 Backup, restore, factory reset
 
 - **Backup.** A JSON bundle of every `/cfg/*` file, without secrets. Restore validates the schemas before replacing anything.
-- **Factory reset.** From the menu (with confirmation) or the web UI. It erases `storage` and the NVS namespaces `wifi`, `secrets` and `ctr`. It keeps `sys`, the device identity.
+- **Factory reset.** From the menu (System ▸ Factory reset, confirmed by holding KEY), or from M4 the web UI. The board restarts afterwards. It erases `storage` and the NVS namespaces `wifi`, `secrets` and `ctr`. It keeps `sys`, the device identity.
 
 ### 14.5 microSD (M8)
 
@@ -842,12 +868,14 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 |---|---|
 | `version` · `reboot` · `heap` · `tasks` | Basics |
 | `screenshot` | Framebuffer as base64 PBM between markers |
-| `panel status` · `panel test` · `panel clear` · `panel mode <hpm\|lpm>` · `panel rate <Hz>` · `panel fps [s]` · `panel init <factory\|xiaozhi>` | Panel diagnostics: test pattern, power mode, LPM rate, measured frame rate, init sequence |
+| `panel status` · `panel test` · `panel clear` · `panel mode <hpm\|lpm>` · `panel rate <Hz>` · `panel fps [s]` · `panel sleep` · `panel wake` · `panel init <factory\|xiaozhi>` | Panel diagnostics: test pattern, power mode, LPM rate, measured frame rate, sleep-in and wake, init sequence |
 | `btn <key\|boot> <short\|double\|long>` | Inject button gestures |
 | `sensors` · `battery` | Readings |
 | `rtc get` · `rtc set <ISO 8601>` | RTC |
 | `field list` · `field get <id>` · `field set <id> <value>` · `field clear <id>` | Inspect and inject data, e.g. fixtures on the device |
 | `preset list` · `preset set <id>` | Presets |
+| `schedule list` · `schedule on\|off\|clear` · `schedule add <HH:MM> preset <id> [days]` · `schedule add <HH:MM> night <HH:MM> [days]` | The preset schedule (§5.4); `days` is the Mon–Sun mask, default 127 |
+| `night <minutes>` | Night sleep now (§9.1), for measuring; the console drops until it ends |
 | `wifi status` · `wifi scan` | Wi-Fi |
 | `sync now` | Run a sync |
 | `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging: sleeps, wake causes, and per-cycle awake and slept times; `sleep test` forces sleep cycles while tethered |
@@ -868,7 +896,7 @@ Screenshot framing:
 | `tools/idf.sh` | Source the IDF environment, then run `idf.py` | ESP-IDF |
 | `tools/devlog.py` | Capture the serial log for N seconds, reconnect when USB re-enumerates, optionally reset first | pyserial |
 | `tools/screenshot.py` | Request a screenshot and write a PNG (and the PBM) | pyserial, stdlib |
-| `tools/render.py` | Run the host renderer on presets and fixtures, writing PNGs | Host build |
+| `tools/render.py` | Run the host renderers on every fixture, writing PNGs; `render_dashboard --list` and `render_screen --list` name them | Host build |
 | `tools/fontgen.py` · `tools/imggen.py`, run by `tools/gen_fonts.sh` · `tools/gen_icons.sh` | Turn fonts and icons into C sources | uv, Pillow |
 
 pyserial comes from the ESP-IDF Python environment. The generators run through `uv` with the pinned versions in `tools/requirements.txt`.
@@ -900,7 +928,7 @@ pyserial comes from the ESP-IDF Python environment. The generators run through `
   - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
   - MQTT payload builders: golden JSON.
   - locale formatting.
-- **Golden renders.** Each built-in preset, the menu and each special screen are rendered with fixture data at fixed times. Each render is compared with `test/host/golden/*.pbm`. After an intentional change, the renderer rewrites the golden (`build-host/render_dashboard <fixture> <file>`), and the owner reviews the PNGs from `tools/render.py`.
+- **Golden renders.** Each built-in preset, the menu and each special screen are rendered with fixture data at fixed times. Each render is compared with `test/host/golden/*.pbm`. After an intentional change, the renderer rewrites the golden (`build-host/render_dashboard <fixture> <file>`, or `render_screen` for the menu and the special screens), and the owner reviews the PNGs from `tools/render.py`.
 - **Sanitizers.** `-DREFLBO_SANITIZE=ON` builds the host tests with AddressSanitizer and UndefinedBehaviorSanitizer.
 - **JSON on the host.** cJSON is built from the ESP-IDF tree (`$IDF_PATH/components/json/cJSON`).
 
@@ -953,6 +981,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M7; pick another decoder if needed |
 | Open-Meteo's free tier is for non-commercial use | Low request rate (daily sync); the provider can be swapped |
 | The Czech name-day calendar needs a source whose licence allows redistribution in this repository | Checked 2026-09-29: the best list (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA); others were incomplete, broken or unlicensed. Deferred (D16): `cs` ships the holidays only until a clean source turns up |
+| The critical-battery path has not met a really low battery: its thresholds are host-tested and its screen is a golden, but its KEY-only sleep has not run on the board | Watch the first time the board runs flat on battery (M5 power work) |
 | No RTC backup cell (D9): the time is lost at every PWR-off | Sync at boot when Wi-Fi is configured, otherwise a "Set time" prompt; the owner may fit an ML1220 (§7) |
 | Homebrew Python 3.14 on this Mac (3.14.6 and 3.14.7 checked) can't load `pyexpat` (it expects a newer libexpat than macOS 26.2 has), which breaks pip and the ESP-IDF installer | ESP-IDF uses uv's Python 3.13 through `~/esp/python-shim` (`AGENTS.md` §6) |
 
@@ -970,3 +999,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r8 | 2026-09-28 | M3 scope: accepted proposals (D15): the LPM rate setting (§4.2), extra local fields and trends (§5.1), the schedule (§5.4), night sleep (§9.1, §9.2), the `cs` pack (§5.8); hidden menu items for later features (§5.7); M3 split into M3a and M3b (§18) |
 | r9 | 2026-09-29 | M3a as built: the status bar's `status_clock` and `status_battery` options and the built-in Indoor preset, from the owner's render review (§5.2, §5.4); preset validation (§5.4); widget sizing and ellipsis (§5.3); the datastore's scope, ownership and snapshot (§6); fonts and Material icons (§4.4, §4.5); the `lang_` prefix and storage's host-tested parts (§3.1); `power_plan()` in the runtime model (§3.2); the settings keys read and the `/fs` mount (§14.3); `field clear` (§15); golden updates and the sanitizer build (§17) |
 | r10 | 2026-09-29 | Owner decisions (D16): the `cs` pack ships the public holidays only for now (§5.8, §20); a held button is left out of the wake sources (§9.2) |
+| r11 | 2026-09-29 | M3b as built. The menu without Contrast and with the offset steps (D17, §5.7), and the menu's gesture timings (§5.6). Toasts and the critical screen (§5.5), the critical hysteresis and the humidity clamp (§8). The schedule's order and validation (§5.4), and night sleep (§9.1). Panel sleep and wake with NRDSLP (§4.2). The fallback toast, the kept backup and the nesting limit (§14.3, §5.4), and factory reset (§14.4). The `night`, `schedule` and `panel sleep\|wake` commands, and `--list` for the renderers (§15, §17). The sensor TTL (§5.1) and a critical-battery risk (§20) |

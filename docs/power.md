@@ -21,6 +21,8 @@ Firmware at M2 (4704a19), measured with `sleep test` and `sleep stats` on 2026-0
 - The panel stays in LPM at 1 Hz throughout.
 - Full cycles slept 60.0 s, so nothing woke the board early.
 
+Firmware at M3a (the dashboards, 2026-09-28): 64 ms of app time per routine deep wake, measured on the M3a spike with `sleep test deep 2`. That is about the M2 figure, since a dashboard draws and pushes in about the time the clock screen did.
+
 ## The hardware floor
 
 The TPS63020 that makes the 3V3 rail has PS/SYNC tied high, which forces PWM and disables its power-save mode (AGENTS.md gotcha 23). TI's efficiency curve for that mode (datasheet Figure 9) is about 1–2 % at 0.1 mA and about 10 % at 1 mA, so the converter burns tens of mW even when the 3V3 load is almost nothing. That loss is there in every mode, deep sleep included, and on battery as well as on USB. Two deep-sleep runs, with and without the battery, both drew about 60 mW (11.4–11.5 mA at 5.2 V), while the chip was awake 0.1 % of the time. Deep and light sleep differ by less than that floor, so compare them in absolute mA.

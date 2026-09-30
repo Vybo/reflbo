@@ -74,6 +74,12 @@ target_include_directories(timekeeping_logic PUBLIC ${REPO_ROOT}/components/time
 target_compile_options(timekeeping_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(timekeeping_logic PUBLIC util)
 
+# netmgr: the captive DNS reply, the saved-network list and the scan choices build on the host.
+add_library(netmgr_logic STATIC ${REPO_ROOT}/components/netmgr/netmgr_dns.c
+            ${REPO_ROOT}/components/netmgr/netmgr_list.c ${REPO_ROOT}/components/netmgr/netmgr_scan.c)
+target_include_directories(netmgr_logic PUBLIC ${REPO_ROOT}/components/netmgr/include)
+target_compile_options(netmgr_logic PRIVATE ${REFLBO_WARNINGS})
+
 # power: only the sleep policy builds on the host.
 add_library(power_logic STATIC ${REPO_ROOT}/components/power/power_policy.c)
 target_include_directories(power_logic PUBLIC ${REPO_ROOT}/components/power/include)
@@ -146,6 +152,9 @@ reflbo_host_test(test_pcf85063_regs rtc_logic)
 reflbo_host_test(test_timekeeping_iso timekeeping_logic)
 reflbo_host_test(test_timekeeping_zones timekeeping_logic)
 reflbo_host_test(test_power_policy power_logic)
+reflbo_host_test(test_netmgr_dns netmgr_logic)
+reflbo_host_test(test_netmgr_list netmgr_logic)
+reflbo_host_test(test_netmgr_scan netmgr_logic)
 reflbo_host_test(test_lang locale)
 reflbo_host_test(test_lang_glyphs locale gfx)
 reflbo_host_test(test_datastore datastore)

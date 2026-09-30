@@ -273,10 +273,8 @@ void app_ui_sample(time_t now)
     } else {
         ESP_LOGW(TAG, "SHTC3: %s; keeping the last reading", esp_err_to_name(err));
     }
-    if (app_config_active()) { /* spec §8: the battery only while idle; the radio's load pulls VBAT down */
-        ds_take_changes(&s.ds);
-        return;
-    }
+    /* Config mode too (D20): the radio's load pulls VBAT down, which errs on the safe side, as a
+     * battery that sags under it would brown out anyway. */
     err = sensors_sample_battery(now);
     if (err == ESP_OK) {
         sensors_battery_t bat = sensors_battery(now);

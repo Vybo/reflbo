@@ -14,6 +14,7 @@ typedef enum {
     POWER_PLAN_LIGHT,
     POWER_PLAN_DEEP,
     POWER_PLAN_RETRY, /* boot failed and no PC is attached: sleep a while, then boot from scratch */
+    POWER_PLAN_ROLLBACK, /* boot failed on an uploaded image: back to the previous one (spec §10.5) */
 } power_plan_t;
 
 typedef struct {
@@ -23,6 +24,7 @@ typedef struct {
     int test_cycles;        /* > 0: `sleep test` cycles left; they sleep even when tethered */
     power_idle_t test_mode;
     bool boot_failed;       /* the app could not start: there is no schedule to sleep on */
+    bool image_pending;     /* this image came from an upload and is not yet marked valid */
 } power_policy_input_t;
 
 power_plan_t power_policy(const power_policy_input_t *in);

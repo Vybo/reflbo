@@ -163,10 +163,9 @@ void app_config_tick(void)
     if (!s_on) {
         return;
     }
-    if (app_state()->critical) { /* spec §8: nothing may drain the last of the battery */
-        ESP_LOGW(TAG, "battery critical: Wi-Fi off");
-        app_config_exit();
-    } else if (app_uptime_ms() >= app_config_deadline_ms()) {
+    /* No battery check: config mode takes no battery samples, as the radio's load pulls VBAT down
+     * (spec §8, §10.2); the idle timeout bounds it. */
+    if (app_uptime_ms() >= app_config_deadline_ms()) {
         ESP_LOGI(TAG, "no requests for %d min", IDLE_MS / 60000);
         app_config_exit();
     } else if (minutes_left() != s_shown_minutes) {

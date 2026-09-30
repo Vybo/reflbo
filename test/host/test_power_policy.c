@@ -55,6 +55,19 @@ static void test_failed_boot_serves_the_console_or_retries(void)
     TEST_ASSERT_EQUAL(POWER_PLAN_AWAKE, power_policy(&in));
 }
 
+/* An uploaded image that fails to boot goes back to the previous one at once (spec §10.5). The
+ * pending image held the board awake, so the retry sleep never came (M4 review). */
+static void test_a_new_image_that_fails_to_boot_rolls_back(void)
+{
+    power_policy_input_t in = { .strategy = POWER_IDLE_LIGHT, .hold_awake = true, .boot_failed = true,
+                                .image_pending = true };
+    TEST_ASSERT_EQUAL(POWER_PLAN_ROLLBACK, power_policy(&in));
+    in.tethered = true;
+    TEST_ASSERT_EQUAL(POWER_PLAN_ROLLBACK, power_policy(&in));
+    in.boot_failed = false; /* one that booted waits for its minute */
+    TEST_ASSERT_EQUAL(POWER_PLAN_AWAKE, power_policy(&in));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -63,5 +76,6 @@ int main(void)
     RUN_TEST(test_holding_awake_wins_even_during_a_sleep_test);
     RUN_TEST(test_sleep_test_cycles_sleep_even_when_tethered);
     RUN_TEST(test_failed_boot_serves_the_console_or_retries);
+    RUN_TEST(test_a_new_image_that_fails_to_boot_rolls_back);
     return UNITY_END();
 }

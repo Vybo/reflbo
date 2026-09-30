@@ -47,8 +47,9 @@ esp_err_t power_init(void);
  * the copy kept in RTC RAM. */
 esp_err_t power_load_settings(void);
 /* The app could not start: the policy keeps the board awake for the console while a PC is
- * attached, and returns POWER_PLAN_RETRY otherwise. */
-void power_boot_failed(void);
+ * attached, and returns POWER_PLAN_RETRY otherwise. On an image not yet marked valid it returns
+ * POWER_PLAN_ROLLBACK instead (spec §10.5). */
+void power_boot_failed(bool image_pending);
 power_wake_t power_boot_wake(void); /* why this boot happened */
 const char *power_wake_name(power_wake_t wake);
 bool power_tethered(void);

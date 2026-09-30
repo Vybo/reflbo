@@ -7,6 +7,9 @@ static power_plan_t plan_for(power_idle_t idle)
 
 power_plan_t power_policy(const power_policy_input_t *in)
 {
+    if (in->boot_failed && in->image_pending) {
+        return POWER_PLAN_ROLLBACK; /* before hold_awake: a pending image holds the board awake itself */
+    }
     if (in->hold_awake) {
         return POWER_PLAN_AWAKE;
     }

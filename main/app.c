@@ -53,7 +53,7 @@
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */
 #define OTA_VERIFY_MS     60000 /* spec §10.5: a new image is valid after this long without a panic */
 #define RESTART_MS        1500  /* a restart's toast stays this long; it also lets a web reply go out */
-#define RESUME_MAGIC      0x72636667u /* "rcfg" */
+#define NVS_KEY_RESUME    "resume_cfg" /* in `sys`: come back in config mode (spec §10.2) */
 
 #if CONFIG_REFLBO_PANEL_INIT_XIAOZHI
 #define PANEL_VARIANT ST7305_VARIANT_XIAOZHI
@@ -95,9 +95,6 @@ typedef struct {
 _Static_assert(sizeof(app_snapshot_t) <= 4096, "the RTC-RAM snapshot is at most 4 KB (spec §6)");
 
 static RTC_DATA_ATTR app_snapshot_t s_snap;
-/* A restart the web UI asked for (an update, Reboot) comes back in config mode, so the page finds
- * the device again. RTC_NOINIT survives a software reset; a power-on leaves garbage, hence the magic. */
-static RTC_NOINIT_ATTR uint32_t s_resume_config;
 static QueueHandle_t s_queue;
 static time_t s_next_alarm; /* the RTC alarm: the next minute slot */
 static time_t s_wake_at;    /* the earliest wake: the alarm, or a cycle switch or seconds tick before it */
@@ -142,9 +139,36 @@ esp_err_t app_post(void (*fn)(void *arg), void *arg)
     return xQueueSend(s_queue, &ev, pdMS_TO_TICKS(100)) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
+/* A restart the web UI asked for (an update, Restart) comes back in config mode, so the page finds
+ * the device again (spec §10.2). The flag is in NVS, not RTC RAM: another image lays RTC RAM out
+ * differently, and an update or a rollback is just such a restart. */
+static void resume_config_set(bool on)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("sys", NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+    esp_err_t err = on ? nvs_set_u8(nvs, NVS_KEY_RESUME, 1) : nvs_erase_key(nvs, NVS_KEY_RESUME);
+    if (err == ESP_OK) {
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+}
+
+static bool resume_config_get(void)
+{
+    nvs_handle_t nvs;
+    uint8_t on = 0;
+    if (nvs_open("sys", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, NVS_KEY_RESUME, &on);
+        nvs_close(nvs);
+    }
+    return on != 0;
+}
+
 void app_restart(lang_str_t message, bool config_after)
 {
-    s_resume_config = config_after ? RESUME_MAGIC : 0;
+    resume_config_set(config_after);
     app_menu_close();
     app_ui_toast(lang_str(lang_get(app_settings()->language), message));
     vTaskDelay(pdMS_TO_TICKS(RESTART_MS));
@@ -508,18 +532,18 @@ static esp_err_t boot(void)
 {
     esp_err_t err = power_init();
     power_wake_t wake = power_boot_wake();
-    bool resume_config = wake == POWER_WAKE_COLD && s_resume_config == RESUME_MAGIC;
     esp_ota_img_states_t ota = ESP_OTA_IMG_UNDEFINED;
     s_ota_pending = esp_ota_get_state_partition(esp_ota_get_running_partition(), &ota) == ESP_OK &&
                     ota == ESP_OTA_IMG_PENDING_VERIFY;
-    if (!s_ota_pending) {
+    if (!routine_wake(wake)) {
+        come_alive();
+    }
+    bool resume_config = wake == POWER_WAKE_COLD && resume_config_get(); /* NVS is up on a cold boot */
+    if (resume_config && !s_ota_pending) {
         /* Once: a crash in config mode must not bring it back forever. A new image keeps the flag
          * until it is valid, so that after a rollback the old one comes back in config mode too
          * and the web UI can tell. */
-        s_resume_config = 0;
-    }
-    if (!routine_wake(wake)) {
-        come_alive();
+        resume_config_set(false);
     }
     ESP_RETURN_ON_ERROR(err, TAG, "power");
     bool warm = wake != POWER_WAKE_COLD && util_snapshot_valid(&s_snap, sizeof(s_snap), SNAP_MAGIC, SNAP_VERSION);
@@ -597,7 +621,7 @@ static void check_ota(void)
     if (s_ota_pending && s_rendered && app_uptime_ms() >= OTA_VERIFY_MS) {
         esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
         s_ota_pending = false;
-        s_resume_config = 0;
+        resume_config_set(false);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "new firmware marked valid");
         } else {
@@ -613,7 +637,7 @@ static void app_task(void *arg)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "boot failed: %s; the console stays up while a PC is attached, otherwise the "
                  "board sleeps and boots again in %d s", esp_err_to_name(err), RETRY_S);
-        power_boot_failed();
+        power_boot_failed(s_ota_pending);
         power_hold_awake_ms(GRACE_MS);
     }
     for (;;) {
@@ -650,6 +674,14 @@ static void app_task(void *arg)
         case POWER_PLAN_RETRY:
             power_sleep_retry(RETRY_S);
             break;
+        case POWER_PLAN_ROLLBACK: { /* spec §10.5: the uploaded image failed to start */
+            ESP_LOGE(TAG, "the new firmware failed to start; back to the previous one");
+            esp_err_t rb = esp_ota_mark_app_invalid_rollback_and_reboot(); /* returns only on failure */
+            ESP_LOGE(TAG, "rollback: %s", esp_err_to_name(rb));
+            s_ota_pending = false;
+            power_boot_failed(false); /* the console or the retry sleep, as for any failed boot */
+            break;
+        }
         case POWER_PLAN_AWAKE:
             come_alive();
             break;

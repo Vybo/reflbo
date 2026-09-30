@@ -44,6 +44,7 @@ static RTC_DATA_ATTR power_state_t s_rtc; /* survives deep sleep only */
 static power_idle_t s_strategy;
 static power_wake_t s_boot_wake;
 static bool s_boot_failed;
+static bool s_image_pending; /* with s_boot_failed: the failed image came from an upload */
 static bool s_cpu_pd_ready;
 static int64_t s_hold_until_us;
 static int64_t s_awake_since_us; /* esp_timer time this awake phase began; -1 after a stats reset */
@@ -117,9 +118,10 @@ esp_err_t power_load_settings(void)
     return ESP_OK;
 }
 
-void power_boot_failed(void)
+void power_boot_failed(bool image_pending)
 {
     s_boot_failed = true;
+    s_image_pending = image_pending;
 }
 
 static power_wake_t decode_boot_wake(void)
@@ -176,6 +178,7 @@ power_plan_t power_plan(bool work_pending)
         .test_cycles = s_rtc.test_cycles,
         .test_mode = (power_idle_t)s_rtc.test_mode,
         .boot_failed = s_boot_failed,
+        .image_pending = s_image_pending,
     };
     return power_policy(&in);
 }

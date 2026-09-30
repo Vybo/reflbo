@@ -10,6 +10,7 @@
 
 #define SCHEMA 1
 #define SETTINGS_JSON_MAX_DEPTH 16 /* the sketch nests 3 levels */
+#define BAT_SPAN_MIN_MV 300 /* BATTERY_CAL_SPAN_MIN in sensors' battery_model.h */
 
 static bool fail(char *err, size_t size, const char *fmt, ...)
 {
@@ -104,6 +105,18 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
     read_string(location, "name", out->place, sizeof(out->place));
     out->lat_e4 = (int32_t)read_scaled(location, "lat", out->lat_e4, 1e4, -900000, 900000);
     out->lon_e4 = (int32_t)read_scaled(location, "lon", out->lon_e4, 1e4, -1800000, 1800000);
+    const cJSON *battery = child(root, "battery");
+    long empty = read_scaled(battery, "empty_v", out->bat_empty_mv, 1000, 3000, 4000);
+    long full = read_scaled(battery, "full_v", out->bat_full_mv, 1000, 3600, 4400);
+    bool room = full - empty >= BAT_SPAN_MIN_MV; /* else neither voltage is taken */
+    if (room) {
+        out->bat_empty_mv = (uint16_t)empty;
+        out->bat_full_mv = (uint16_t)full;
+    }
+    const cJSON *from = child(battery, "level_from");
+    if (cJSON_IsString(from)) {
+        out->bat_cal = strcmp(from->valuestring, "manual") == 0 && room ? SETTINGS_BAT_MANUAL : SETTINGS_BAT_CURVE;
+    }
     cJSON_Delete(root);
     return true;
 }
@@ -160,6 +173,10 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     put(location, "name", cJSON_CreateString(s->place));
     put(location, "lat", cJSON_CreateNumber(s->lat_e4 / 1e4));
     put(location, "lon", cJSON_CreateNumber(s->lon_e4 / 1e4));
+    cJSON *battery = object_at(root, "battery");
+    put(battery, "level_from", cJSON_CreateString(s->bat_cal == SETTINGS_BAT_MANUAL ? "manual" : "curve"));
+    put(battery, "empty_v", cJSON_CreateNumber(s->bat_empty_mv / 1000.0));
+    put(battery, "full_v", cJSON_CreateNumber(s->bat_full_mv / 1000.0));
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;

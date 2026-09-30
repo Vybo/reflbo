@@ -209,3 +209,50 @@ test('the preview names each slot where the layout puts it', async () => {
   assert.deepEqual(tags.map(text), ['main', 's1']);
   assert.deepEqual(tags.map((e) => [e.style.left, e.style.top]), [['100%', '7%'], ['50%', '57.333%']]); /* top right */
 });
+
+/* ---- the Device page's battery calibration (owner, 2026-09-30) ---- */
+
+/* The control a field() label introduces: the element after it. */
+function control(root, label) {
+  for (const el of below(root)) {
+    const i = el.children.findIndex((k) => k instanceof FakeElement && k.tag === 'label' && text(k) === label);
+    if (i >= 0) return el.children[i + 1];
+  }
+  assert.fail(`no field "${label}"`);
+}
+
+function settingsDevice(patches) {
+  const settings = { schema: 1, language: 'en', units: { temp: 'C' },
+                     sensors: { interval_min: 5, temp_offset_c: -2, hum_offset_pct: 0 },
+                     display: { update_min: 1, lpm_hz: 1 },
+                     battery: { level_from: 'curve', empty_v: 3.27, full_v: 4.2 } };
+  return {
+    'GET /api/settings': () => reply(200, settings),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, settings); },
+  };
+}
+
+test('the Device page saves your own battery voltages', async () => {
+  const patches = [];
+  const { ctx, main } = await load(settingsDevice(patches));
+  await ctx.devicePage();
+  control(main, 'Battery level from').value = 'manual';
+  control(main, 'Full, V').value = '4.12';
+  control(main, 'Empty, V').value = '3.45';
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.deepEqual(patches.at(-1).battery, { level_from: 'manual', empty_v: 3.45, full_v: 4.12 });
+});
+
+test('the Device page wants room between the battery voltages', async () => {
+  const patches = [];
+  const { ctx, main } = await load(settingsDevice(patches));
+  await ctx.devicePage();
+  control(main, 'Battery level from').value = 'manual';
+  control(main, 'Full, V').value = '4.0';
+  control(main, 'Empty, V').value = '3.9';
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.equal(patches.length, 0);
+  assert.match(text(main), /0\.3 V/);
+});

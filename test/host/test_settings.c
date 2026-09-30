@@ -12,7 +12,8 @@ void setUp(void)
 {
     s_defaults = (settings_t){ .language = "en", .clock_24h = true, .tz_posix = "CET-1CEST,M3.5.0,M10.5.0/3",
                                .tz_iana = "Europe/Prague", .sensors_every_min = 5, .display_every_min = 1,
-                               .lpm_quarter_hz = 4, .place = "Brno", .lat_e4 = 491951, .lon_e4 = 166068 };
+                               .lpm_quarter_hz = 4, .place = "Brno", .lat_e4 = 491951, .lon_e4 = 166068,
+                               .bat_cal = SETTINGS_BAT_CURVE, .bat_empty_mv = 3270, .bat_full_mv = 4200 };
     memset(&s_out, 0xAA, sizeof(s_out));
     s_err[0] = '\0';
 }
@@ -199,6 +200,33 @@ static void test_a_base_nested_too_deep_is_not_parsed(void)
     TEST_ASSERT_EQUAL_STRING("{\"schema\":1,\"language\":\"cs\"}", s_json);
 }
 
+/* Battery calibration (owner, 2026-09-30): the built-in curve or the owner's own voltages. */
+static void test_the_battery_calibration_parses_and_round_trips(void)
+{
+    const char *json = "{\"schema\": 1, \"battery\": {\"level_from\": \"manual\", \"empty_v\": 3.45, \"full_v\": 4.12}}";
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_BAT_MANUAL, s_out.bat_cal);
+    TEST_ASSERT_EQUAL_UINT16(3450, s_out.bat_empty_mv);
+    TEST_ASSERT_EQUAL_UINT16(4120, s_out.bat_full_mv);
+    settings_t s = s_out;
+    TEST_ASSERT_TRUE(settings_to_json(&s, NULL, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_TRUE(settings_from_json(s_json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_MEMORY(&s, &s_out, sizeof(s));
+}
+
+static void test_a_battery_calibration_without_room_keeps_the_curve(void)
+{
+    const char *json = "{\"schema\": 1, \"battery\": {\"level_from\": \"manual\", \"empty_v\": 3.9, \"full_v\": 4.0}}";
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_BAT_CURVE, s_out.bat_cal);
+    TEST_ASSERT_EQUAL_UINT16(3270, s_out.bat_empty_mv);
+    TEST_ASSERT_EQUAL_UINT16(4200, s_out.bat_full_mv);
+    json = "{\"schema\": 1, \"battery\": {\"level_from\": \"guesswork\", \"empty_v\": 3.4, \"full_v\": 4.1}}";
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_BAT_CURVE, s_out.bat_cal); /* an unknown method, maybe a later firmware's */
+    TEST_ASSERT_EQUAL_UINT16(3400, s_out.bat_empty_mv);         /* the voltages are good, and kept */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -214,5 +242,7 @@ int main(void)
     RUN_TEST(test_a_patch_follows_json_merge_patch);
     RUN_TEST(test_a_patch_must_be_an_object_that_keeps_the_schema);
     RUN_TEST(test_a_base_nested_too_deep_is_not_parsed);
+    RUN_TEST(test_the_battery_calibration_parses_and_round_trips);
+    RUN_TEST(test_a_battery_calibration_without_room_keeps_the_curve);
     return UNITY_END();
 }

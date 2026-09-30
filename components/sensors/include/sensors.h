@@ -42,6 +42,8 @@ esp_err_t sensors_sample_env(time_t now);
 esp_err_t sensors_sample_battery(time_t now);
 /* Calibration offsets added to every reading (settings sensors.temp_offset_c, hum_offset_pct). */
 void sensors_set_offsets(int temp_c100, int hum_pct100);
+/* How the battery's voltage becomes its level (settings battery.*); a change applies at once. */
+void sensors_set_battery_cal(const battery_cal_t *cal);
 sensors_env_t sensors_env(void);
 sensors_battery_t sensors_battery(time_t now);
 /* 0.1 days of battery left, or -1 (battery_gauge_days_left10). */

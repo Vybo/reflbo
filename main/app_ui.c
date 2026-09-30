@@ -41,6 +41,9 @@ static void default_settings(settings_t *out)
         .lpm_quarter_hz = 4, /* 1 Hz (D12) */
         .lat_e4 = CONFIG_REFLBO_LOCATION_LAT_E4,
         .lon_e4 = CONFIG_REFLBO_LOCATION_LON_E4,
+        .bat_cal = SETTINGS_BAT_CURVE,
+        .bat_empty_mv = BATTERY_EMPTY_MV,
+        .bat_full_mv = BATTERY_FULL_MV,
     };
     snprintf(out->place, sizeof(out->place), "%s", CONFIG_REFLBO_LOCATION_NAME);
     snprintf(out->tz_posix, sizeof(out->tz_posix), "%s", CONFIG_REFLBO_TZ);
@@ -153,6 +156,10 @@ void app_ui_apply_settings(void)
 {
     timekeeping_init(s.settings.tz_posix);
     sensors_set_offsets(s.settings.temp_offset_c100, s.settings.hum_offset_pct100);
+    sensors_set_battery_cal(&(battery_cal_t){ .method = s.settings.bat_cal == SETTINGS_BAT_MANUAL ? BATTERY_CAL_MANUAL
+                                                                                               : BATTERY_CAL_CURVE,
+                                              .empty_mv = s.settings.bat_empty_mv,
+                                              .full_mv = s.settings.bat_full_mv });
     /* Spec §5.1: stale after 15 min, but never before the next reading is due. */
     uint32_t ttl = (uint32_t)s.settings.sensors_every_min * 120u;
     ttl = ttl < 900 ? 900 : ttl;

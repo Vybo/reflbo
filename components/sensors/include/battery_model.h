@@ -24,6 +24,22 @@ typedef struct {
 
 #define BATTERY_LEVEL_HISTORY 25 /* hourly levels for the days-left estimate: a day's worth */
 
+/* How a voltage becomes a level (owner, 2026-09-30). */
+typedef enum {
+    BATTERY_CAL_CURVE,  /* the built-in Li-ion curve */
+    BATTERY_CAL_MANUAL, /* that curve stretched between the owner's empty and full voltages */
+} battery_cal_method_t;
+
+typedef struct {
+    uint8_t method;    /* battery_cal_method_t */
+    uint16_t empty_mv; /* 0 %, for BATTERY_CAL_MANUAL */
+    uint16_t full_mv;  /* 100 % */
+} battery_cal_t;
+
+#define BATTERY_EMPTY_MV     3270 /* the built-in curve's own ends */
+#define BATTERY_FULL_MV      4200
+#define BATTERY_CAL_SPAN_MIN 300  /* a manual calibration's voltages are at least this far apart */
+
 typedef struct {
     uint32_t time_s;
     uint16_t pct10; /* 0.1 % */
@@ -38,12 +54,20 @@ typedef struct {
     battery_level_point_t levels[BATTERY_LEVEL_HISTORY]; /* restart whenever charging is seen */
     uint8_t level_count;
     uint8_t level_head;
+    battery_cal_t cal;
 } battery_gauge_t;
 
 int battery_percent_from_mv(int mv);   /* OCV table, 0..100 */
 int battery_percent10_from_mv(int mv); /* the same in 0.1 %, 0..1000 */
+/* The level of `mv` in 0.1 % under `cal`; NULL is the built-in curve. */
+int battery_level10(const battery_cal_t *cal, int mv);
+/* A manual calibration's voltages: empty 3.0-4.0 V, full 3.6-4.4 V, at least 0.3 V apart. */
+bool battery_cal_valid(const battery_cal_t *cal);
 void battery_gauge_init(battery_gauge_t *g);
 void battery_gauge_add(battery_gauge_t *g, uint32_t now_s, int mv);
+/* A new calibration: the level follows it at once, and the days-left estimate starts over, as its
+ * history is in the old levels. battery_gauge_init() starts with the built-in curve. */
+void battery_gauge_set_cal(battery_gauge_t *g, const battery_cal_t *cal);
 int battery_gauge_mv(const battery_gauge_t *g);    /* smoothed; 0 before the first sample */
 int battery_gauge_level(const battery_gauge_t *g); /* %; -1 before the first sample */
 battery_state_t battery_gauge_state(const battery_gauge_t *g, uint32_t now_s);

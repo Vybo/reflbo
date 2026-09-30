@@ -205,6 +205,55 @@ static void test_critical_has_hysteresis_and_ignores_missing_readings(void)
     TEST_ASSERT_FALSE(battery_critical(false, 0, BATTERY_UNKNOWN));
 }
 
+/* Battery calibration (owner, 2026-09-30): the built-in curve, or the curve stretched between the
+ * owner's own empty and full voltages. */
+static void test_the_curve_calibration_is_the_built_in_curve(void)
+{
+    const battery_cal_t curve = { .method = BATTERY_CAL_CURVE, .empty_mv = 3500, .full_mv = 4100 }; /* ignored */
+    for (int mv = 3000; mv <= 4300; mv += 37) {
+        TEST_ASSERT_EQUAL_INT(battery_percent10_from_mv(mv), battery_level10(&curve, mv));
+        TEST_ASSERT_EQUAL_INT(battery_percent10_from_mv(mv), battery_level10(NULL, mv));
+    }
+}
+
+static void test_a_manual_calibration_stretches_the_curve_between_its_voltages(void)
+{
+    const battery_cal_t cal = { .method = BATTERY_CAL_MANUAL, .empty_mv = 3500, .full_mv = 4100 };
+    TEST_ASSERT_EQUAL_INT(0, battery_level10(&cal, 3500));
+    TEST_ASSERT_EQUAL_INT(0, battery_level10(&cal, 3400));
+    TEST_ASSERT_EQUAL_INT(1000, battery_level10(&cal, 4100));
+    TEST_ASSERT_EQUAL_INT(1000, battery_level10(&cal, 4150));
+    /* halfway between them is where halfway is on the curve's own span (3270-4200 mV) */
+    TEST_ASSERT_EQUAL_INT(battery_percent10_from_mv(3735), battery_level10(&cal, 3800));
+}
+
+static void test_a_new_calibration_moves_the_level_at_once_and_restarts_days_left(void)
+{
+    uint32_t t = add_steady(1000, 3840, 3);
+    for (int i = 1; i <= 72; i++) { /* six hours of slow discharge: an estimate exists */
+        battery_gauge_add(&s_g, t + (uint32_t)i * 300u, 3840 - i);
+    }
+    t += 72 * 300u;
+    TEST_ASSERT_TRUE(battery_gauge_days_left10(&s_g, t) > 0);
+    const battery_cal_t cal = { .method = BATTERY_CAL_MANUAL, .empty_mv = 3500, .full_mv = 3900 };
+    battery_gauge_set_cal(&s_g, &cal);
+    TEST_ASSERT_EQUAL_INT((battery_level10(&cal, battery_gauge_mv(&s_g)) + 5) / 10, battery_gauge_level(&s_g));
+    TEST_ASSERT_EQUAL_INT(-1, battery_gauge_days_left10(&s_g, t));
+    battery_gauge_add(&s_g, t + 300, battery_gauge_mv(&s_g));
+    TEST_ASSERT_EQUAL_INT((battery_level10(&cal, battery_gauge_mv(&s_g)) + 5) / 10, battery_gauge_level(&s_g));
+}
+
+static void test_a_manual_calibration_needs_room_between_its_voltages(void)
+{
+    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 3300, 4200 }));
+    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 3700, 4000 }));
+    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 3800, 4000 })); /* 200 mV */
+    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 4200, 3300 }));
+    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 2900, 4200 })); /* out of range */
+    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 3300, 4500 }));
+    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_CURVE, 0, 0 })); /* voltages unused */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -226,5 +275,9 @@ int main(void)
     RUN_TEST(test_a_clock_moved_forward_gives_no_estimate_rather_than_a_wrong_one);
     RUN_TEST(test_a_clock_moved_back_restarts_the_history);
     RUN_TEST(test_critical_has_hysteresis_and_ignores_missing_readings);
+    RUN_TEST(test_the_curve_calibration_is_the_built_in_curve);
+    RUN_TEST(test_a_manual_calibration_stretches_the_curve_between_its_voltages);
+    RUN_TEST(test_a_new_calibration_moves_the_level_at_once_and_restarts_days_left);
+    RUN_TEST(test_a_manual_calibration_needs_room_between_its_voltages);
     return UNITY_END();
 }

@@ -57,9 +57,44 @@ int battery_percent10_from_mv(int mv)
     return 1000;
 }
 
+/* `mv` moved onto the built-in curve's own span, where a manual calibration puts it. */
+static int curve_mv(const battery_cal_t *cal, int mv)
+{
+    if (cal == NULL || cal->method != BATTERY_CAL_MANUAL || !battery_cal_valid(cal)) {
+        return mv;
+    }
+    int span = cal->full_mv - cal->empty_mv, rel = mv - cal->empty_mv;
+    return BATTERY_EMPTY_MV + (rel * (BATTERY_FULL_MV - BATTERY_EMPTY_MV) + (rel >= 0 ? span / 2 : -span / 2)) / span;
+}
+
+int battery_level10(const battery_cal_t *cal, int mv)
+{
+    return battery_percent10_from_mv(curve_mv(cal, mv));
+}
+
+bool battery_cal_valid(const battery_cal_t *cal)
+{
+    if (cal->method != BATTERY_CAL_MANUAL) {
+        return cal->method == BATTERY_CAL_CURVE;
+    }
+    return cal->empty_mv >= 3000 && cal->empty_mv <= 4000 && cal->full_mv >= 3600 && cal->full_mv <= 4400 &&
+           cal->full_mv - cal->empty_mv >= BATTERY_CAL_SPAN_MIN;
+}
+
 void battery_gauge_init(battery_gauge_t *g)
 {
-    *g = (battery_gauge_t){ 0 };
+    *g = (battery_gauge_t){ .cal = { .method = BATTERY_CAL_CURVE, .empty_mv = BATTERY_EMPTY_MV,
+                                     .full_mv = BATTERY_FULL_MV } };
+}
+
+void battery_gauge_set_cal(battery_gauge_t *g, const battery_cal_t *cal)
+{
+    g->cal = *cal;
+    g->level_count = 0;
+    g->level_head = 0;
+    if (g->ema_mv16 != 0) {
+        g->level = (uint8_t)battery_percent_from_mv(curve_mv(&g->cal, battery_gauge_mv(g)));
+    }
 }
 
 static const battery_point_t *newest(const battery_gauge_t *g)
@@ -124,7 +159,7 @@ void battery_gauge_add(battery_gauge_t *g, uint32_t now_s, int mv)
             g->count++;
         }
     }
-    int pct = battery_percent_from_mv(battery_gauge_mv(g));
+    int pct = battery_percent_from_mv(curve_mv(&g->cal, battery_gauge_mv(g)));
     battery_state_t state = battery_gauge_state(g, now_s);
     if (first || state == BATTERY_CHARGING || state == BATTERY_FULL || pct < g->level) {
         g->level = (uint8_t)pct;
@@ -138,7 +173,7 @@ void battery_gauge_add(battery_gauge_t *g, uint32_t now_s, int mv)
         g->level_count ? &g->levels[(g->level_head + BATTERY_LEVEL_HISTORY - 1) % BATTERY_LEVEL_HISTORY] : NULL;
     if (last == NULL || now_s - last->time_s >= LEVEL_SPACING_S) {
         g->levels[g->level_head] =
-            (battery_level_point_t){ .time_s = now_s, .pct10 = (uint16_t)battery_percent10_from_mv(battery_gauge_mv(g)) };
+            (battery_level_point_t){ .time_s = now_s, .pct10 = (uint16_t)battery_level10(&g->cal, battery_gauge_mv(g)) };
         g->level_head = (uint8_t)((g->level_head + 1) % BATTERY_LEVEL_HISTORY);
         if (g->level_count < BATTERY_LEVEL_HISTORY) {
             g->level_count++;
@@ -162,7 +197,7 @@ int battery_gauge_days_left10(const battery_gauge_t *g, uint32_t now_s)
         return -1;
     }
     uint32_t span = now_s - oldest->time_s;
-    int now_pct10 = battery_percent10_from_mv(battery_gauge_mv(g));
+    int now_pct10 = battery_level10(&g->cal, battery_gauge_mv(g));
     int drop = oldest->pct10 - now_pct10;
     if (span < DAYS_MIN_SPAN_S || drop <= 0) {
         return -1;

@@ -492,6 +492,11 @@ async function devicePage() {
   const every = select(SENSOR_MIN.map((m) => [String(m), `${m} min`]), String(sensors.interval_min ?? 5));
   const update = select(Array.from({ length: 15 }, (_, i) => [String(i + 1), `${i + 1} min`]), String(display.update_min ?? 1));
   const rate = select(RATES.map((r) => [String(r), `${String(r)} Hz`]), String(display.lpm_hz ?? 1));
+  const bat = s.battery || {};
+  const levelFrom = select([['curve', 'The built-in Li-ion curve'], ['manual', 'My own voltages']],
+    bat.level_from === 'manual' ? 'manual' : 'curve');
+  const fullV = h('input', { type: 'number', step: 0.01, min: 3.6, max: 4.4, value: bat.full_v ?? 4.2 });
+  const emptyV = h('input', { type: 'number', step: 0.01, min: 3, max: 4, value: bat.empty_v ?? 3.27 });
   const note = h('p');
   const form = h('div', {},
     card('Language and units', field('Language on the device', language), field('Temperature', unit)),
@@ -501,17 +506,29 @@ async function devicePage() {
     card('Screen', field('Update every', update, 'How often the dashboard is redrawn. Each update wakes the device.'),
       field('Refresh rate', rate, 'How often the panel repaints its image between updates. At 1 Hz it looked as ' +
         'good as the faster rates (D12).')),
+    card('Battery', field('Battery level from', levelFrom), field('Full, V', fullV), field('Empty, V', emptyV,
+      'With your own voltages the level follows the Li-ion curve stretched between them. Read them on the ' +
+      'Status page: full just after the charger stops, empty when the device shows its low-battery screen.')),
     note,
     actions(button('Save', () => busy(form, note, async () => {
       const t = Number(temp.value), hu = Number(hum.value);
       if (temp.value === '' || !(t >= -10 && t <= 10)) throw new ApiError('Temperature offset: -10 to 10 °C.');
       if (hum.value === '' || !(hu >= -20 && hu <= 20)) throw new ApiError('Humidity offset: -20 to 20 %.');
+      const battery = { level_from: levelFrom.value };
+      if (levelFrom.value === 'manual') {
+        const fv = Number(fullV.value), ev = Number(emptyV.value);
+        if (emptyV.value === '' || !(ev >= 3 && ev <= 4)) throw new ApiError('Empty: 3.0 to 4.0 V.');
+        if (fullV.value === '' || !(fv >= 3.6 && fv <= 4.4)) throw new ApiError('Full: 3.6 to 4.4 V.');
+        if (Math.round((fv - ev) * 100) < 30) throw new ApiError('Full must be at least 0.3 V above empty.');
+        Object.assign(battery, { empty_v: Math.round(ev * 100) / 100, full_v: Math.round(fv * 100) / 100 });
+      }
       await api('PATCH', '/api/settings', {
         language: language.value,
         units: { temp: unit.value },
         sensors: { temp_offset_c: Math.round(t * 10) / 10, hum_offset_pct: Math.round(hu * 2) / 2,
                    interval_min: Number(every.value) },
         display: { update_min: Number(update.value), lpm_hz: Number(rate.value) },
+        battery,
       });
       toast('Saved');
     }), 'primary')));

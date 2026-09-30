@@ -163,6 +163,14 @@ void sensors_set_offsets(int temp_c100, int hum_pct100)
     s_hum_offset_pct100 = hum_pct100;
 }
 
+void sensors_set_battery_cal(const battery_cal_t *cal)
+{
+    const battery_cal_t *now = &s_state.gauge.cal;
+    if (cal->method != now->method || cal->empty_mv != now->empty_mv || cal->full_mv != now->full_mv) {
+        battery_gauge_set_cal(&s_state.gauge, cal);
+    }
+}
+
 int sensors_battery_days_left10(time_t now)
 {
     return battery_gauge_days_left10(&s_state.gauge, (uint32_t)now);

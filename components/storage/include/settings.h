@@ -15,6 +15,12 @@
 #define SETTINGS_TZ_IANA_LEN 40
 #define SETTINGS_PLACE_LEN 32
 
+/* battery.level_from (owner, 2026-09-30); the values match battery_cal_method_t in sensors. */
+typedef enum {
+    SETTINGS_BAT_CURVE,  /* "curve": the built-in Li-ion curve */
+    SETTINGS_BAT_MANUAL, /* "manual": that curve between battery.empty_v and battery.full_v */
+} settings_bat_cal_t;
+
 typedef struct {
     char language[4];                    /* "en" */
     bool clock_24h;
@@ -28,6 +34,8 @@ typedef struct {
     uint8_t lpm_quarter_hz;    /* panel refresh in LPM, 0.25 Hz steps: 1, 2, 4, 8, 16 or 32 */
     char place[SETTINGS_PLACE_LEN]; /* location.name: "Brno" */
     int32_t lat_e4, lon_e4;         /* location in 1e-4 degrees, north and east positive: 491951, 166068 */
+    uint8_t bat_cal;                    /* settings_bat_cal_t */
+    uint16_t bat_empty_mv, bat_full_mv; /* 0 % and 100 % for SETTINGS_BAT_MANUAL: 3000-4000, 3600-4400 */
 } settings_t;
 
 /* Fails only if the text is not a JSON object with "schema": 1. */

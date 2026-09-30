@@ -209,3 +209,11 @@ add_test(NAME tools_unittests
          COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -t . -v
          WORKING_DIRECTORY ${REPO_ROOT}/tools)
 set_tests_properties(tools_unittests PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1") # no tools/__pycache__
+
+# The web page's script against a fake device (Node's own test runner; no packages).
+find_program(NODE_EXECUTABLE node)
+if(NODE_EXECUTABLE)
+    add_test(NAME web_unittests COMMAND ${NODE_EXECUTABLE} --test ${REPO_ROOT}/test/web/test_app.mjs)
+else()
+    message(STATUS "node not found: the web page tests are left out")
+endif()

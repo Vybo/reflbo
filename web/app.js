@@ -47,9 +47,11 @@ async function api(method, path, body) {
   if (body instanceof Blob) {
     init.body = body;
     init.headers['Content-Type'] = 'application/octet-stream';
-  } else if (body !== undefined) {
-    init.body = JSON.stringify(body);
-    init.headers['Content-Type'] = 'application/json'; /* spec §10.4: blocks cross-site form posts */
+  } else if (method !== 'GET') {
+    /* Spec §10.4: the device refuses changes that don't say they are JSON, as a cross-site form
+     * can't; that includes requests without a body. */
+    init.headers['Content-Type'] = 'application/json';
+    if (body !== undefined) init.body = JSON.stringify(body);
   }
   let r;
   try {
@@ -789,8 +791,9 @@ async function backupPage() {
   const file = h('input', { type: 'file', accept: '.json,application/json' });
   const saveCard = card('Back up', h('p', { class: 'muted small', text: 'Settings and presets in one file. Wi-Fi ' +
     'passwords and the web password are not in it.' }), actions(button('Download backup', async () => {
-    const blob = await api('GET', '/api/backup');
-    download(blob, `${auth.host}-${new Date().toISOString().slice(0, 10)}.json`);
+    const backup = await api('GET', '/api/backup'); /* parsed, as it is JSON: a file again */
+    download(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }),
+      `${auth.host}-${new Date().toISOString().slice(0, 10)}.json`);
   }, 'primary')));
   const restoreCard = card('Restore', file, note, actions(button('Restore', () => busy(restoreCard, note, async () => {
     const f = file.files[0];

@@ -100,6 +100,10 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
     const cJSON *display = child(root, "display");
     out->display_every_min = (uint8_t)read_scaled(display, "update_min", out->display_every_min, 1, 1, 15);
     out->lpm_quarter_hz = lpm_from_hz(display, out->lpm_quarter_hz);
+    const cJSON *location = child(root, "location");
+    read_string(location, "name", out->place, sizeof(out->place));
+    out->lat_e4 = (int32_t)read_scaled(location, "lat", out->lat_e4, 1e4, -900000, 900000);
+    out->lon_e4 = (int32_t)read_scaled(location, "lon", out->lon_e4, 1e4, -1800000, 1800000);
     cJSON_Delete(root);
     return true;
 }
@@ -145,7 +149,58 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     cJSON *display = object_at(root, "display");
     put(display, "update_min", cJSON_CreateNumber(s->display_every_min));
     put(display, "lpm_hz", cJSON_CreateNumber(s->lpm_quarter_hz / 4.0));
+    cJSON *location = object_at(root, "location");
+    put(location, "name", cJSON_CreateString(s->place));
+    put(location, "lat", cJSON_CreateNumber(s->lat_e4 / 1e4));
+    put(location, "lon", cJSON_CreateNumber(s->lon_e4 / 1e4));
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;
+}
+
+/* RFC 7396 on cJSON trees: `patch` is an object; its members merge into `target`. */
+static void merge(cJSON *target, const cJSON *patch)
+{
+    for (const cJSON *p = patch->child; p != NULL; p = p->next) {
+        if (cJSON_IsNull(p)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(target, p->string);
+        } else if (cJSON_IsObject(p)) {
+            merge(object_at(target, p->string), p);
+        } else {
+            put(target, p->string, cJSON_Duplicate(p, true));
+        }
+    }
+}
+
+size_t settings_patch(const char *base_json, const char *patch, char *out, size_t size, char *err, size_t err_size)
+{
+    if (util_json_depth(patch) > SETTINGS_JSON_MAX_DEPTH) {
+        fail(err, err_size, "nested more than %d levels", SETTINGS_JSON_MAX_DEPTH);
+        return 0;
+    }
+    cJSON *p = patch != NULL ? cJSON_Parse(patch) : NULL;
+    if (!cJSON_IsObject(p)) {
+        cJSON_Delete(p);
+        fail(err, err_size, "the patch must be a JSON object");
+        return 0;
+    }
+    cJSON *root = base_json != NULL ? cJSON_Parse(base_json) : NULL;
+    if (!cJSON_IsObject(root)) { /* no file yet, or one the loader rejected */
+        cJSON_Delete(root);
+        root = cJSON_CreateObject();
+        cJSON_AddNumberToObject(root, "schema", SCHEMA);
+    }
+    merge(root, p);
+    cJSON_Delete(p);
+    const cJSON *schema = child(root, "schema");
+    size_t n = 0;
+    if (!cJSON_IsNumber(schema) || schema->valuedouble != SCHEMA) {
+        fail(err, err_size, "schema must be %d", SCHEMA);
+    } else if (size > 0 && cJSON_PrintPreallocated(root, out, (int)size, false)) {
+        n = strlen(out);
+    } else {
+        fail(err, err_size, "the settings don't fit %u bytes", (unsigned)size);
+    }
+    cJSON_Delete(root);
+    return n;
 }

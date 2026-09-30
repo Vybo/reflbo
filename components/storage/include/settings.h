@@ -13,6 +13,7 @@
 
 #define SETTINGS_TZ_POSIX_LEN 64
 #define SETTINGS_TZ_IANA_LEN 40
+#define SETTINGS_PLACE_LEN 32
 
 typedef struct {
     char language[4];                    /* "en" */
@@ -25,6 +26,8 @@ typedef struct {
     int16_t hum_offset_pct100; /* -2000..2000 */
     uint8_t display_every_min; /* 1..15 */
     uint8_t lpm_quarter_hz;    /* panel refresh in LPM, 0.25 Hz steps: 1, 2, 4, 8, 16 or 32 */
+    char place[SETTINGS_PLACE_LEN]; /* location.name: "Brno" */
+    int32_t lat_e4, lon_e4;         /* location in 1e-4 degrees, north and east positive: 491951, 166068 */
 } settings_t;
 
 /* Fails only if the text is not a JSON object with "schema": 1. */
@@ -32,3 +35,8 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
 /* `base_json` (the file as read, or NULL) with the known keys replaced by `s`. Returns the
  * length written, or 0 if `size` is too small. */
 size_t settings_to_json(const settings_t *s, const char *base_json, char *out, size_t size);
+/* PATCH /api/settings: `patch` merged into `base_json` (the file as read, or NULL for none) as an
+ * RFC 7396 merge patch. The result must keep "schema": 1. Returns the length written, or 0 with
+ * the reason in `err`. */
+size_t settings_patch(const char *base_json, const char *patch, char *out, size_t size, char *err,
+                      size_t err_size);

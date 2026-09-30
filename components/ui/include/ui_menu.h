@@ -21,6 +21,10 @@ typedef enum {
     UI_MI_AUTO_CYCLE,     /* toggle */
     UI_MI_CYCLE_INTERVAL, /* choice: interval labels */
     UI_MI_SCHEDULE,       /* toggle */
+    UI_MI_WIFI,
+    UI_MI_CONFIG_MODE,     /* action */
+    UI_MI_FORGET_NETWORKS, /* action, confirmed first */
+    UI_MI_RESET_PASSWORD,  /* action, confirmed first (D18) */
     UI_MI_TIME,
     UI_MI_SET_DATETIME, /* the date-time editor */
     UI_MI_CLOCK_24H,    /* toggle */
@@ -36,6 +40,8 @@ typedef enum {
     UI_MI_INFO_BATTERY, /* info texts */
     UI_MI_INFO_FIRMWARE,
     UI_MI_INFO_DEVICE,
+    UI_MI_INFO_IP,
+    UI_MI_INFO_MAC,
     UI_MI_INFO_UPTIME,
     UI_MI_INFO_MEMORY,
     UI_MI_SYSTEM,
@@ -66,7 +72,7 @@ typedef enum {
     UI_MENU_NONE,     /* only the menu changed: redraw it */
     UI_MENU_SET,      /* item = value */
     UI_MENU_SET_TIME, /* the local date and time in `local` */
-    UI_MENU_ACTION,   /* run item: reboot, factory reset */
+    UI_MENU_ACTION,   /* run item: config mode, forget networks, reset the password, reboot, factory reset */
     UI_MENU_CLOSE,
 } ui_menu_intent_kind_t;
 
@@ -100,6 +106,9 @@ int ui_menu_visible(const ui_menu_t *m, const ui_menu_model_t *model, ui_menu_it
 ui_menu_item_t ui_menu_current(const ui_menu_t *m, const ui_menu_model_t *model);
 /* The label of an item in the pack's language. */
 const char *ui_menu_label(ui_menu_item_t item, const lang_t *lang);
+bool ui_menu_is_section(ui_menu_item_t item);
+/* What an action that asks first asks; NULL for any other item. */
+const char *ui_menu_question(ui_menu_item_t item, const lang_t *lang);
 /* An item's value as the list shows it: "On", "Europe/Prague", "+0,5 °C". */
 void ui_menu_value_text(ui_menu_item_t item, int32_t value, const ui_menu_model_t *model, const lang_t *lang,
                         char *out, size_t size);

@@ -47,8 +47,7 @@ static void draw_list(gfx_fb_t *fb, const ui_menu_t *m, const ui_menu_model_t *m
             gfx_fill_rect(fb, r, GFX_BLACK);
         }
         char value[48];
-        if (item == UI_MI_PRESETS || item == UI_MI_TIME || item == UI_MI_DISPLAY || item == UI_MI_SENSORS ||
-            item == UI_MI_INFO || item == UI_MI_SYSTEM) {
+        if (ui_menu_is_section(item)) {
             snprintf(value, sizeof(value), "\xE2\x86\x92"); /* a section: → */
         } else {
             ui_menu_value_text(item, editing ? m->edit : model->value[item], model, lang, value, sizeof(value));
@@ -153,7 +152,7 @@ void ui_draw_menu(gfx_fb_t *fb, const ui_menu_t *m, const ui_menu_model_t *model
         break;
     case UI_MENU_CONFIRM:
         draw_header(fb, ui_menu_label(item, lang));
-        draw_question(fb, lang_str(lang, LS_CONFIRM_FACTORY_RESET), 110);
+        draw_question(fb, ui_menu_question(item, lang), 110);
         draw_hints(fb, lang_str(lang, LS_HINT_CONFIRM));
         break;
     default:

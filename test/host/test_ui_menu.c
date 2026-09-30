@@ -37,18 +37,18 @@ static ui_menu_intent_t open_item(ui_menu_item_t item)
 
 static void test_the_root_lists_the_sections_in_order(void)
 {
-    const ui_menu_item_t expected[] = { UI_MI_PRESETS, UI_MI_TIME, UI_MI_DISPLAY, UI_MI_SENSORS, UI_MI_INFO,
-                                        UI_MI_SYSTEM };
+    const ui_menu_item_t expected[] = { UI_MI_PRESETS, UI_MI_WIFI, UI_MI_TIME, UI_MI_DISPLAY, UI_MI_SENSORS,
+                                        UI_MI_INFO, UI_MI_SYSTEM };
     ui_menu_item_t items[UI_MI_COUNT];
     int n = ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT);
-    TEST_ASSERT_EQUAL_INT(6, n);
-    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 6);
+    TEST_ASSERT_EQUAL_INT(7, n);
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 7);
     TEST_ASSERT_EQUAL_INT(UI_MI_PRESETS, ui_menu_current(&s_m, &s_model));
 }
 
 static void test_next_wraps_select_enters_and_back_returns_to_the_section(void)
 {
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 7; i++) {
         press(UI_MENU_KEY_NEXT);
     }
     TEST_ASSERT_EQUAL_INT(UI_MI_PRESETS, ui_menu_current(&s_m, &s_model)); /* wrapped */
@@ -183,13 +183,56 @@ static void test_hidden_items_are_skipped_and_info_does_nothing(void)
 {
     s_model.hidden[UI_MI_DISPLAY] = true;
     ui_menu_item_t items[UI_MI_COUNT];
-    TEST_ASSERT_EQUAL_INT(5, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT(6, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    press(UI_MENU_KEY_NEXT);
     press(UI_MENU_KEY_NEXT);
     press(UI_MENU_KEY_NEXT);
     TEST_ASSERT_EQUAL_INT(UI_MI_SENSORS, ui_menu_current(&s_m, &s_model));
     open_item(UI_MI_INFO);
     TEST_ASSERT_EQUAL(UI_MENU_NONE, open_item(UI_MI_INFO_UPTIME).kind);
     TEST_ASSERT_EQUAL(UI_MENU_BROWSE, s_m.mode);
+}
+
+/* Spec §5.7, D18: config mode starts at once; forgetting the networks or the web password asks. */
+static void test_the_wifi_section_asks_before_it_forgets_anything(void)
+{
+    open_item(UI_MI_WIFI);
+    ui_menu_item_t items[UI_MI_COUNT];
+    const ui_menu_item_t expected[] = { UI_MI_CONFIG_MODE, UI_MI_FORGET_NETWORKS, UI_MI_RESET_PASSWORD };
+    TEST_ASSERT_EQUAL_INT(3, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 3);
+    ui_menu_intent_t in = open_item(UI_MI_CONFIG_MODE);
+    TEST_ASSERT_EQUAL(UI_MENU_ACTION, in.kind);
+    TEST_ASSERT_EQUAL_INT(UI_MI_CONFIG_MODE, in.item);
+    const lang_t *en = lang_get("en");
+    TEST_ASSERT_EQUAL(UI_MENU_NONE, open_item(UI_MI_FORGET_NETWORKS).kind);
+    TEST_ASSERT_EQUAL(UI_MENU_CONFIRM, s_m.mode);
+    TEST_ASSERT_EQUAL_STRING(lang_str(en, LS_CONFIRM_FORGET_NETWORKS), ui_menu_question(UI_MI_FORGET_NETWORKS, en));
+    in = press(UI_MENU_KEY_SELECT);
+    TEST_ASSERT_EQUAL(UI_MENU_ACTION, in.kind);
+    TEST_ASSERT_EQUAL_INT(UI_MI_FORGET_NETWORKS, in.item);
+    TEST_ASSERT_EQUAL(UI_MENU_NONE, open_item(UI_MI_RESET_PASSWORD).kind);
+    TEST_ASSERT_EQUAL(UI_MENU_CONFIRM, s_m.mode);
+    TEST_ASSERT_EQUAL_STRING(lang_str(en, LS_CONFIRM_RESET_PASSWORD), ui_menu_question(UI_MI_RESET_PASSWORD, en));
+    TEST_ASSERT_EQUAL(UI_MENU_NONE, press(UI_MENU_KEY_NEXT).kind); /* only a long press confirms */
+    in = press(UI_MENU_KEY_SELECT);
+    TEST_ASSERT_EQUAL(UI_MENU_ACTION, in.kind);
+    TEST_ASSERT_EQUAL_INT(UI_MI_RESET_PASSWORD, in.item);
+    TEST_ASSERT_EQUAL_STRING(lang_str(en, LS_CONFIRM_FACTORY_RESET), ui_menu_question(UI_MI_FACTORY_RESET, en));
+    TEST_ASSERT_NULL(ui_menu_question(UI_MI_REBOOT, en));
+}
+
+/* Spec §5.7: Info gains the IP address and the MAC with M4. */
+static void test_info_shows_the_network_addresses(void)
+{
+    open_item(UI_MI_INFO);
+    ui_menu_item_t items[UI_MI_COUNT];
+    const ui_menu_item_t expected[] = { UI_MI_INFO_BATTERY, UI_MI_INFO_FIRMWARE, UI_MI_INFO_DEVICE, UI_MI_INFO_IP,
+                                        UI_MI_INFO_MAC, UI_MI_INFO_UPTIME, UI_MI_INFO_MEMORY };
+    TEST_ASSERT_EQUAL_INT(7, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 7);
+    TEST_ASSERT_TRUE(ui_menu_is_section(UI_MI_WIFI));
+    TEST_ASSERT_FALSE(ui_menu_is_section(UI_MI_INFO_IP));
 }
 
 int main(void)
@@ -205,5 +248,7 @@ int main(void)
     RUN_TEST(test_the_date_time_editor_starts_in_2026_after_the_clock_was_lost);
     RUN_TEST(test_factory_reset_asks_first);
     RUN_TEST(test_hidden_items_are_skipped_and_info_does_nothing);
+    RUN_TEST(test_the_wifi_section_asks_before_it_forgets_anything);
+    RUN_TEST(test_info_shows_the_network_addresses);
     return UNITY_END();
 }

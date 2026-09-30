@@ -23,6 +23,7 @@ typedef struct {
     uint8_t decimals;
     const char *unit;
     bool confirm; /* actions */
+    lang_str_t question;
 } node_t;
 
 static const node_t k_nodes[UI_MI_COUNT] = {
@@ -32,6 +33,12 @@ static const node_t k_nodes[UI_MI_COUNT] = {
     [UI_MI_AUTO_CYCLE] = { .label = LS_M_AUTO_CYCLE, .kind = K_TOGGLE, .parent = UI_MI_PRESETS },
     [UI_MI_CYCLE_INTERVAL] = { .label = LS_M_CYCLE_INTERVAL, .kind = K_CHOICE, .parent = UI_MI_PRESETS },
     [UI_MI_SCHEDULE] = { .label = LS_M_SCHEDULE, .kind = K_TOGGLE, .parent = UI_MI_PRESETS },
+    [UI_MI_WIFI] = { .label = LS_M_WIFI, .kind = K_SECTION, .parent = UI_MI_ROOT },
+    [UI_MI_CONFIG_MODE] = { .label = LS_M_CONFIG_MODE, .kind = K_ACTION, .parent = UI_MI_WIFI },
+    [UI_MI_FORGET_NETWORKS] = { .label = LS_M_FORGET_NETWORKS, .kind = K_ACTION, .parent = UI_MI_WIFI,
+                                .confirm = true, .question = LS_CONFIRM_FORGET_NETWORKS },
+    [UI_MI_RESET_PASSWORD] = { .label = LS_M_RESET_PASSWORD, .kind = K_ACTION, .parent = UI_MI_WIFI,
+                               .confirm = true, .question = LS_CONFIRM_RESET_PASSWORD },
     [UI_MI_TIME] = { .label = LS_M_TIME, .kind = K_SECTION, .parent = UI_MI_ROOT },
     [UI_MI_SET_DATETIME] = { .label = LS_M_SET_DATETIME, .kind = K_DATETIME, .parent = UI_MI_TIME },
     [UI_MI_CLOCK_24H] = { .label = LS_M_CLOCK_24H, .kind = K_TOGGLE, .parent = UI_MI_TIME },
@@ -50,13 +57,15 @@ static const node_t k_nodes[UI_MI_COUNT] = {
     [UI_MI_INFO_BATTERY] = { .label = LS_BATTERY, .kind = K_INFO, .parent = UI_MI_INFO },
     [UI_MI_INFO_FIRMWARE] = { .label = LS_M_FIRMWARE, .kind = K_INFO, .parent = UI_MI_INFO },
     [UI_MI_INFO_DEVICE] = { .label = LS_M_DEVICE, .kind = K_INFO, .parent = UI_MI_INFO },
+    [UI_MI_INFO_IP] = { .label = LS_M_IP, .kind = K_INFO, .parent = UI_MI_INFO },
+    [UI_MI_INFO_MAC] = { .label = LS_M_MAC, .kind = K_INFO, .parent = UI_MI_INFO },
     [UI_MI_INFO_UPTIME] = { .label = LS_M_UPTIME, .kind = K_INFO, .parent = UI_MI_INFO },
     [UI_MI_INFO_MEMORY] = { .label = LS_M_FREE_MEMORY, .kind = K_INFO, .parent = UI_MI_INFO },
     [UI_MI_SYSTEM] = { .label = LS_M_SYSTEM, .kind = K_SECTION, .parent = UI_MI_ROOT },
     [UI_MI_LANGUAGE] = { .label = LS_M_LANGUAGE, .kind = K_CHOICE, .parent = UI_MI_SYSTEM },
     [UI_MI_REBOOT] = { .label = LS_M_REBOOT, .kind = K_ACTION, .parent = UI_MI_SYSTEM },
     [UI_MI_FACTORY_RESET] = { .label = LS_M_FACTORY_RESET, .kind = K_ACTION, .parent = UI_MI_SYSTEM,
-                              .confirm = true },
+                              .confirm = true, .question = LS_CONFIRM_FACTORY_RESET },
 };
 
 static const ui_menu_intent_t k_none = { .kind = UI_MENU_NONE };
@@ -89,6 +98,16 @@ ui_menu_item_t ui_menu_current(const ui_menu_t *m, const ui_menu_model_t *model)
 const char *ui_menu_label(ui_menu_item_t item, const lang_t *lang)
 {
     return (unsigned)item < UI_MI_COUNT ? lang_str(lang, k_nodes[item].label) : "";
+}
+
+bool ui_menu_is_section(ui_menu_item_t item)
+{
+    return (unsigned)item < UI_MI_COUNT && k_nodes[item].kind == K_SECTION;
+}
+
+const char *ui_menu_question(ui_menu_item_t item, const lang_t *lang)
+{
+    return (unsigned)item < UI_MI_COUNT && k_nodes[item].confirm ? lang_str(lang, k_nodes[item].question) : NULL;
 }
 
 void ui_menu_value_text(ui_menu_item_t item, int32_t value, const ui_menu_model_t *model, const lang_t *lang,

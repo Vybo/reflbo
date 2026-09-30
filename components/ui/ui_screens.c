@@ -39,3 +39,39 @@ void ui_draw_critical(gfx_fb_t *fb, const ui_context_t *ctx)
                          GFX_BLACK);
     }
 }
+
+void ui_draw_first_run(gfx_fb_t *fb, const ui_context_t *ctx)
+{
+    gfx_reset_clip(fb);
+    gfx_clear(fb, GFX_WHITE);
+    gfx_fill_rect(fb, (gfx_rect_t){ 0, 0, fb->width, 30 }, GFX_BLACK);
+    gfx_text_in_rect(fb, &gfx_font_sans_bold_20, (gfx_rect_t){ 12, 0, (int16_t)(fb->width - 24), 30 },
+                     GFX_ALIGN_LEFT, lang_str(ctx->lang, LS_F_TITLE), GFX_WHITE);
+    int y = 76;
+    if (ctx->time_valid) { /* spec §5.5: the clock, when there is a time to show */
+        ui_value_t t;
+        ui_resolve(ctx, UI_FIELD_TIME_CLOCK, &t);
+        const gfx_font_t *f = &gfx_font_num_cb_72;
+        int w = gfx_text_width(f, t.text);
+        int suffix_w = t.unit[0] ? gfx_text_width(&gfx_font_sans_bold_20, t.unit) + 6 : 0;
+        int x = gfx_text(fb, f, (fb->width - w - suffix_w) / 2, 110, t.text, GFX_BLACK);
+        if (suffix_w) {
+            gfx_text(fb, &gfx_font_sans_bold_20, x + 6, 110, t.unit, GFX_BLACK);
+        }
+        y = 138;
+    }
+    const lang_str_t hints[] = { LS_F_WIFI, LS_F_MENU, LS_F_CONTINUE };
+    for (int i = 0; i < 3; i++) {
+        const gfx_font_t *f = i == 2 ? &gfx_font_sans_20 : &gfx_font_sans_bold_20;
+        char line1[96], line2[96];
+        ui_split_two_lines(f, lang_str(ctx->lang, hints[i]), fb->width - 24, line1, line2, sizeof(line1));
+        gfx_text_in_rect(fb, f, (gfx_rect_t){ 0, (int16_t)y, fb->width, 28 }, GFX_ALIGN_CENTER, line1, GFX_BLACK);
+        y += 26;
+        if (line2[0] != '\0') {
+            gfx_text_in_rect(fb, f, (gfx_rect_t){ 0, (int16_t)y, fb->width, 28 }, GFX_ALIGN_CENTER, line2,
+                             GFX_BLACK);
+            y += 26;
+        }
+        y += 12;
+    }
+}

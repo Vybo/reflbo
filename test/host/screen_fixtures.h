@@ -66,6 +66,8 @@ static inline void fixture_menu_model(ui_menu_model_t *m, const lang_t *lang)
     m->info[UI_MI_INFO_BATTERY] = "82 % · 4.04 V";
     m->info[UI_MI_INFO_FIRMWARE] = "0.3.0 (0b21fcd)";
     m->info[UI_MI_INFO_DEVICE] = "reflbo-bb94";
+    m->info[UI_MI_INFO_IP] = "192.168.1.57";
+    m->info[UI_MI_INFO_MAC] = "14:c1:9f:54:bb:94";
     m->info[UI_MI_INFO_UPTIME] = "2 d 3 h";
     m->info[UI_MI_INFO_MEMORY] = "7.9 MB";
     m->local = fixture_local(20, 48, 0);
@@ -88,6 +90,37 @@ static inline void fixture_menu_open(ui_menu_t *m, const ui_menu_model_t *model,
         ui_menu_input(m, model, UI_MENU_KEY_SELECT);
     }
     fixture_menu_to(m, model, item);
+}
+
+/* Config mode (spec §10.2) in each Wi-Fi state; `name` picks the state and the QR code. */
+static inline bool fixture_config(const char *name, ui_config_view_t *v)
+{
+    *v = (ui_config_view_t){ .state = UI_NET_AP, .ap_on = true, .ssid = "", .ip = "", .host = "reflbo-bb94",
+                             .ap_ssid = "reflbo-bb94", .ap_pass = "k7m2xq9pde", .minutes_left = 10 };
+    if (strncmp(name, "config_ap_url", 13) == 0) {
+        v->qr_url = true;
+    } else if (strncmp(name, "config_starting", 15) == 0) {
+        *v = (ui_config_view_t){ .state = UI_NET_STARTING, .ssid = "", .ip = "", .host = "reflbo-bb94",
+                                 .ap_ssid = "reflbo-bb94", .ap_pass = "k7m2xq9pde", .minutes_left = 10 };
+    } else if (strncmp(name, "config_joining", 14) == 0) {
+        v->state = UI_NET_JOINING;
+        v->ap_on = false;
+        v->ssid = "Vybiral Home 5G";
+    } else if (strncmp(name, "config_station_ap", 17) == 0) { /* no web password yet (D18) */
+        v->state = UI_NET_STATION;
+        v->ssid = "Vybiral Home 5G";
+        v->ip = "192.168.1.57";
+        v->minutes_left = 7;
+    } else if (strncmp(name, "config_station", 14) == 0) {
+        v->state = UI_NET_STATION;
+        v->ap_on = false;
+        v->ssid = "Vybiral Home 5G";
+        v->ip = "192.168.1.57";
+        v->minutes_left = 3;
+    } else if (strncmp(name, "config_ap", 9) != 0) {
+        return false;
+    }
+    return true;
 }
 
 /* Draws screen fixture `name` into fb; false for an unknown name. */
@@ -119,6 +152,24 @@ static inline bool fixture_screen(const char *name, gfx_fb_t *fb)
     } else if (strcmp(name, "menu_confirm_cs") == 0) {
         fixture_menu_open(&menu, &model, UI_MI_SYSTEM, UI_MI_FACTORY_RESET);
         ui_menu_input(&menu, &model, UI_MENU_KEY_SELECT);
+    } else if (strcmp(name, "menu_wifi_en") == 0) {
+        fixture_menu_open(&menu, &model, UI_MI_WIFI, UI_MI_CONFIG_MODE);
+    } else if (strcmp(name, "menu_confirm_password_cs") == 0) {
+        fixture_menu_open(&menu, &model, UI_MI_WIFI, UI_MI_RESET_PASSWORD);
+        ui_menu_input(&menu, &model, UI_MENU_KEY_SELECT);
+    } else if (strncmp(name, "config_", 7) == 0) {
+        ui_config_view_t v;
+        if (!fixture_config(name, &v)) {
+            return false;
+        }
+        ui_draw_config(fb, &v, lang);
+        return true;
+    } else if (strncmp(name, "first_run", 9) == 0) {
+        ui_context_t ctx = fixture_context();
+        ctx.lang = lang;
+        ctx.time_valid = strstr(name, "invalid") == NULL;
+        ui_draw_first_run(fb, &ctx);
+        return true;
     } else if (strcmp(name, "toast_preset_cs") == 0) {
         ui_context_t ctx;
         ui_preset_t preset;
@@ -143,4 +194,7 @@ static inline bool fixture_screen(const char *name, gfx_fb_t *fb)
 static const char *const k_screen_fixtures[] = { "menu_root_en", "menu_root_cs", "menu_presets_cs",
                                                  "menu_edit_zone_en", "menu_edit_offset_cs", "menu_info_en",
                                                  "menu_system_cs", "menu_datetime_cs", "menu_confirm_cs",
-                                                 "toast_preset_cs", "critical_en", "critical_cs" };
+                                                 "toast_preset_cs", "critical_en", "critical_cs", "menu_wifi_en",
+                                                 "menu_confirm_password_cs", "config_ap_en", "config_ap_url_cs",
+                                                 "config_starting_en", "config_joining_en", "config_station_en",
+                                                 "config_station_ap_cs", "first_run_en", "first_run_invalid_cs" };

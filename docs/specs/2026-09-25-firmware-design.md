@@ -97,7 +97,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `st7305` | Panel init, frame push, LPM/HPM, deep-sleep retention | board | frame conversion |
 | `display` | Canonical framebuffer; pushes it to the panel when its CRC changes | gfx, st7305, util | — |
 | `gfx` | Framebuffer, primitives, text, fonts, bitmaps, QR, PBM/BMP encoders | — | ✓ |
-| `util` | Small pure-C helpers: CRC-32, base64, delay ticks | — | ✓ |
+| `util` | Small pure-C helpers: CRC-32, base64, delay ticks, SHA-256, HMAC and PBKDF2 | — | ✓ |
 | `locale` | Language packs (API prefix `lang_`, because libc owns `locale_t`): strings, date and number formats, name days and holidays | — | ✓ |
 | `astro` | Sunrise, sunset, day length | — | ✓ |
 | `datastore` | Measured and fetched values, freshness, derived values and trends, change mask (§6) | — | ✓ |
@@ -107,8 +107,8 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `rtc` | PCF85063 (API prefix `pcf85063_`, because ESP-IDF owns `rtc_*`): time, oscillator-stop flag, alarm → INT | board | register codec |
 | `timekeeping` | System time from the RTC, time zone, SNTP, manual set | rtc | TZ logic |
 | `power` | Power states, idle strategy, wake sources and wake cause, sleep entry, sleep statistics | board, rtc, st7305 | sleep policy |
-| `netmgr` | Wi-Fi STA/AP state machine, captive DNS, mDNS | IDF | — |
-| `webui` | HTTP server, REST API, embedded web assets | netmgr, storage, ui | — |
+| `netmgr` | Wi-Fi STA/AP state machine, captive DNS, mDNS | IDF | captive DNS reply, saved-network list, scan choices |
+| `webui` | HTTP server, the password and sessions, Wi-Fi and OTA routes, embedded web assets; every other API route goes to `main` | netmgr, util | password record, sessions, HTTP helpers |
 | `weather` | Open-Meteo client and parser | netmgr | parser |
 | `ha_mqtt` | MQTT session, discovery, state, commands, field mappings | netmgr, datastore | payload builders |
 | `sync` | Runs the sync sequence, handles backoff | timekeeping, weather, ha_mqtt, netmgr | — |
@@ -426,7 +426,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 - The menu closes after 60 s without input.
 - Items for features that don't exist yet (Wi-Fi before M4, Sync before M5, Alarms and Radio before M7) are hidden, not shown disabled.
 - Schedule entries are edited in the web UI (M4); until then `presets.json` or the console sets them.
-- Display ▸ Contrast is hidden for now (D17). Info ▸ IP/MAC and Last sync result join with M4 and M5.
+- Display ▸ Contrast is hidden for now (D17). Last sync result joins Info with M5.
 - As built (M3b):
   - A toggle flips at once. A choice or a number is edited in place and saved with KEY long.
   - The temperature offset steps by 0.1 °C (±10 °C, D17), the humidity offset by 0.5 % (±20 %).
@@ -435,6 +435,9 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - Reboot doesn't ask. Factory reset asks, and only KEY held confirms it.
   - The date-time editor starts from 2026 when the clock reads an earlier year, as after a power-off without the backup cell (D9).
   - The panel is in HPM while the menu is open.
+- As built (M4):
+  - Wi-Fi ▸ Config mode starts config mode at once. Forget networks and Reset web password ask first, like Factory reset, and end with a toast.
+  - Info shows IP and MAC as two rows. The IP shows only while Wi-Fi is on, otherwise a dash.
 - The full time zone picker is in the web UI.
 
 ### 5.8 Language packs
@@ -620,18 +623,23 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 ### 10.1 Wi-Fi manager
 
 - **Saved networks.** Up to 5 SSID/password pairs in NVS. They are tried in order of last success, 8 s per attempt.
-- **Fast connect.** BSSID and channel are cached in NVS and RTC RAM.
+- **Fast connect.** BSSID and channel are cached in NVS; RTC RAM joins with the M5 sync. A try with the cached BSSID that fails is repeated with a scan, as the router may have moved.
 - **Hostname.** mDNS `reflbo-XXXX.local`, advertising `_http._tcp`.
 - **AP.**
   - SSID `reflbo-XXXX`, WPA2-PSK with a random 10-character password generated at first boot and kept in NVS.
   - IP 192.168.4.1; at most 2 clients.
-  - Captive DNS answers every name with the AP IP, and OS connectivity-probe URLs redirect to `/`.
+  - Captive DNS answers every name with the AP IP, and OS connectivity-probe URLs redirect to `/`. DHCP offers `http://192.168.4.1/` as the captive portal (RFC 8910).
+  - The station shares the radio, so the AP must follow a network the station joins onto its channel, which drops the AP's clients. The AP therefore starts on the channel of the strongest saved network in sight, else of the strongest network, else 1: trying the likely network doesn't move it.
+- **Testing a network** (web UI). A scan comes first: a network out of reach is reported at once and never takes the AP off its channel. The device then joins by BSSID and channel, beside the AP. On success the network is saved first in the list and the device stays on it; on failure it returns to the network it was on. The test runs in the background, and the page polls for the result, as the phone may drop off the AP for a moment.
 
 ### 10.2 Config mode
 
 - **Entry.** BOOT long (3 s) on the dashboard, the menu, or first run.
 - **Connecting.** With saved networks, it joins as a station and shows the LAN URL and IP. If that fails or no network is saved, it starts the AP and captive portal. While the owner tests a new network from the web UI it runs AP and STA together. While no web password is set, it runs the AP as well, because only a phone on the AP may choose the password (§10.4).
 - **Exit.** BOOT long, "Done" in the web UI, or 10 min without HTTP requests. Wi-Fi then switches off.
+  - Only requests for the device's own pages and API count: a joined phone's connectivity probes would otherwise keep config mode on for good.
+  - A critical battery (§8) ends it too.
+- **While it runs.** The board stays awake, as neither sleep keeps Wi-Fi, and the panel is in HPM. The screen shows the state, a QR code and the minutes left; KEY switches the QR code (§5.6). No battery samples are taken, as the radio's load pulls VBAT down (§8).
 - **Restarts.** A restart the web UI asks for (a firmware update, Restart) comes back in config mode, so the page finds the device again; so does the image a rollback returns to (§10.5, D19).
 
 ### 10.3 Web UI and REST API
@@ -644,20 +652,21 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, last sync steps, firmware |
+| `GET /api/auth` · `POST /api/auth/setup` · `POST /api/auth/login` · `POST /api/auth/logout` · `POST /api/auth/password` | The web password (§10.4): whether one is set and the session is valid; choosing it (over the AP only); logging in and out; changing it. The only routes open without a session |
+| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; the last sync steps join with M5 |
 | `GET/PATCH /api/settings` | Non-secret settings; secrets are accepted on write and never returned |
-| `GET /api/wifi/scan` · `GET/POST/DELETE /api/wifi/networks` | Wi-Fi setup |
+| `GET /api/wifi/scan` · `GET/POST/DELETE /api/wifi/networks` | Wi-Fi setup. A POST starts a test and answers 202 at once; GET reports its result with the saved names, never their passwords. `"test": false` saves without trying |
 | `GET /api/layouts` · `GET /api/fields` | Slot definitions; the field catalogue with current values |
 | `GET/PUT /api/presets` | The preset document (§5.4) |
-| `GET /api/preview.bmp?preset=<id>` · `POST /api/preview.bmp` | Render a saved or unsaved preset with live data, using the real renderer |
+| `GET /api/preview.bmp?preset=<id>` · `POST /api/preview.bmp?preset=<id>` | Render a saved preset, or one from a presets document the editor posts (validated like `presets.json`), with live data, using the real renderer; a 1-bit BMP |
 | `GET /api/screenshot.bmp` | The current frame |
 | `POST /api/time` | Set time from the phone (epoch, IANA zone, POSIX TZ) |
-| `GET /api/geocode?q=` | Proxy for the Open-Meteo geocoding search (station mode only; manual lat/lon always works) |
-| `POST /api/sync` | Sync now |
+| `GET /api/geocode?q=` | Proxy for the Open-Meteo geocoding search (station mode only; manual lat/lon always works) (M5) |
+| `POST /api/sync` | Sync now (M5) |
 | `GET/PUT /api/alarms` · `GET/PUT /api/stations` · `POST /api/radio/play` · `POST /api/radio/stop` | Audio (M7) |
-| `POST /api/ota` · `GET /api/ota/status` | Firmware upload |
+| `POST /api/ota` · `GET /api/ota/status` | Firmware upload, as `application/octet-stream`; the running version, its slot, whether it is still pending, and the slot of an update that was rolled back |
 | `GET /api/backup` · `POST /api/restore` | Settings bundle without secrets |
-| `POST /api/reboot` · `POST /api/factory-reset` | System |
+| `POST /api/done` · `POST /api/reboot` · `POST /api/factory-reset` | End config mode; system. The reply goes out before the device acts |
 
 ### 10.4 Security
 
@@ -668,14 +677,18 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 - OTA images are checked for project name, chip and version before the device switches to them.
 - **Web UI password** (D18).
   - The first visit asks for a new password, and only a client on the device's AP may set it; every visit after needs it.
-  - It is kept as a salted hash in NVS `secrets`, is never returned or logged, and a factory reset erases it.
-  - A login starts a session that ends with config mode.
+  - It is kept as a salted hash in NVS `secrets`, is never returned or logged, and a factory reset erases it. The record is `pbkdf2-sha256$10000$<salt>$<hash>` with a 16-byte random salt; a login takes about 2 s on the chip. 8–64 characters.
+  - A login starts a session that ends with config mode: at most 4, each a random 128-bit token in a cookie that is `HttpOnly` and `SameSite=Strict`.
+  - After 5 wrong passwords, logins wait 60 s.
   - Menu ▸ Wi-Fi ▸ Reset web password clears it, for when it is forgotten.
   - The page can also change it, given the current one, and log out (D19).
 
 ### 10.5 OTA
 
 - Two app slots with rollback. A new image marks itself valid only after panel init, a first render, and 60 s without a panic. Otherwise the bootloader rolls back at the next reset.
+  - Until then the board doesn't deep-sleep: a deep-sleep wake is a reset, which would roll the image back.
+  - The upload streams into the other slot. Its header must name this project and chip, and the image's own checksum and hash must pass.
+  - Measured at M4: 1.3 MB in 11–15 s over the AP. A test build that crashed after 25 s rolled back to the previous image, which returned in config mode (§10.2) and reported it.
 - Sources: upload through the web UI (M4). A file on microSD is an M8 candidate.
 
 ## 11. Weather and astro
@@ -819,9 +832,9 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 | Namespace | Contents |
 |---|---|
-| `sys` | Device id, AP password, schema version, idle strategy override (`idle`) |
-| `wifi` | Saved networks (SSIDs and passwords), fast-connect cache |
-| `secrets` | MQTT password; the web UI password's salted hash (D18); future tokens |
+| `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`) |
+| `wifi` | Saved networks with their passwords and fast-connect cache (`nets`, one versioned blob) |
+| `secrets` | MQTT password; the web UI password's salted hash (`web_pass`, D18); future tokens |
 | `ctr` | Counters: boots, sync statistics |
 
 ### 14.3 LittleFS layout
@@ -861,11 +874,11 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 }
 ```
 
-M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
+M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
 
 ### 14.4 Backup, restore, factory reset
 
-- **Backup.** A JSON bundle of every `/cfg/*` file, without secrets. Restore validates the schemas before replacing anything.
+- **Backup.** A JSON bundle of every `/cfg/*` file, without secrets: `{"reflbo_backup": 1, "device": …, "firmware": …, "files": {"settings.json": {…}, "presets.json": {…}}}`. Restore validates every file it knows before replacing anything, applies them at once, and leaves out files of a later firmware.
 - **Factory reset.** From the menu (System ▸ Factory reset, confirmed by holding KEY), or from M4 the web UI. The board restarts afterwards. It erases `storage` and the NVS namespaces `wifi`, `secrets` and `ctr`. It keeps `sys`, the device identity.
 
 ### 14.5 microSD (M8)
@@ -889,7 +902,7 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 | `preset list` · `preset set <id>` | Presets |
 | `schedule list` · `schedule on\|off\|clear` · `schedule add <HH:MM> preset <id> [days]` · `schedule add <HH:MM> night <HH:MM> [days]` | The preset schedule (§5.4); `days` is the Mon–Sun mask, default 127 |
 | `night <minutes>` | Night sleep now (§9.1), for measuring; the console drops until it ends |
-| `wifi status` · `wifi scan` | Wi-Fi |
+| `wifi status` · `wifi scan` | Wi-Fi: the state, network, address, AP clients and saved names; the networks in sight while Wi-Fi is on (config mode) |
 | `sync now` | Run a sync |
 | `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging: sleeps, wake causes, and per-cycle awake and slept times; `sleep test` forces sleep cycles while tethered |
 | `audio tone <Hz> <ms>` | Audio check (M7) |
@@ -941,6 +954,7 @@ pyserial comes from the ESP-IDF Python environment. The generators run through `
   - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
   - MQTT payload builders: golden JSON.
   - locale formatting.
+  - The web configurator: SHA-256, HMAC and PBKDF2 against published vectors; the password record, sessions and login throttle; the captive DNS reply; the saved-network list and the scan choices; the settings merge patch; the backup bundle; the preset editor's catalogue; the config screen's QR codes; `tools/gen_zones.py`.
 - **Golden renders.** Each built-in preset, the menu and each special screen are rendered with fixture data at fixed times. Each render is compared with `test/host/golden/*.pbm`. After an intentional change, the renderer rewrites the golden (`build-host/render_dashboard <fixture> <file>`, or `render_screen` for the menu and the special screens), and the owner reviews the PNGs from `tools/render.py`.
 - **Sanitizers.** `-DREFLBO_SANITIZE=ON` builds the host tests with AddressSanitizer and UndefinedBehaviorSanitizer.
 - **JSON on the host.** cJSON is built from the ESP-IDF tree (`$IDF_PATH/components/json/cJSON`).
@@ -1016,3 +1030,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r12 | 2026-09-29 | M3b review: a held button no longer keeps the board awake, and an ignored press's release is debounced (§9.2); the critical sleep wakes on a held KEY's release and stays awake while a PC is attached (§8); schedule entries at a night's end run, and none run after a long gap or on the critical screen (§5.4); the date-time editor starts in 2026 (§5.7) |
 | r13 | 2026-09-30 | M4 scope (D18): a web UI password instead of the admin PIN (§10.2, §10.4, §14.2, §19), with Menu ▸ Wi-Fi ▸ Reset web password (§5.7); one M4 plan; no ELF hash in the snapshot |
 | r14 | 2026-09-30 | M4 spike review (D19): when the first-run screen appears, and its buttons (§5.5, §5.6); the status bar's Wi-Fi state moves to M5 and M6 (§5.2); web restarts return in config mode (§10.2); the M4 pages, with Device, and the clock set from the phone (§10.3); changing the web password and logging out (§10.4); the −2.0 °C default temperature offset (§8); accepted extras (§19) |
+| r15 | 2026-09-30 | M4 as built: the components (§3.1); the menu's Wi-Fi section and Info rows (§5.7); the AP's channel, testing a network, and the portal address (§10.1); what ends config mode and what runs meanwhile (§10.2); the API (§10.3); the password record, sessions and login throttle (§10.4); OTA checks and measurements (§10.5); NVS keys (§14.2); `location.*` and the merge patch (§14.3); the backup bundle (§14.4); `wifi` (§15); the new host tests (§17) |

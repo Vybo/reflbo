@@ -42,6 +42,9 @@ typedef struct {
 
 #define WEBUI_BODY_MAX  (16 * 1024) /* the largest request: a backup to restore */
 #define WEBUI_REPLY_MAX (20 * 1024) /* the largest reply: a BMP (15 662 bytes) or a backup */
+/* The deepest request: a backup bundle, a file's own 16 levels inside the bundle's two
+ * (storage_backup.c). Deeper ones are refused before anything parses them. */
+#define WEBUI_JSON_MAX_DEPTH 18
 
 esp_err_t webui_start(const webui_config_t *config);
 void webui_stop(void);

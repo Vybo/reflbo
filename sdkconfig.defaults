@@ -46,7 +46,8 @@ CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # Web configurator (spec §10.3): phone browsers send more than the default 512 bytes of headers,
-# and open several connections at once. The server takes 7 sockets plus 3 of its own, the captive
-# DNS one more: the default 10 sockets run out, and accept() fails with ENFILE.
-CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+# cookies other gadgets set for 192.168.4.1 among them, and open several connections at once. The
+# header buffer grows per request up to the limit. The server takes 7 sockets plus 3 of its own,
+# the captive DNS one more: the default 10 sockets run out, and accept() fails with ENFILE.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 CONFIG_LWIP_MAX_SOCKETS=16

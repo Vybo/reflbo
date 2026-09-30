@@ -5,6 +5,7 @@
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_image_format.h"
@@ -19,6 +20,7 @@
 #include "netmgr.h"
 #include "nvs.h"
 #include "sdkconfig.h"
+#include "util_json.h"
 #include "webui_auth.h"
 #include "webui_http.h"
 
@@ -28,6 +30,7 @@ static const char *TAG = "webui";
 #define SERVER_PRIORITY 4 /* below the app task (5): API calls wait for it anyway */
 #define STOPPER_STACK   3072
 #define OTA_CHUNK       4096
+#define RECV_TIMEOUTS   3 /* of recv_wait_timeout (5 s) in a row: a client whose data stopped is let go */
 #define COOKIE_ATTRS    "; Path=/; HttpOnly; SameSite=Strict"
 
 /* The pages, gzipped when the firmware is built (CMakeLists.txt). */
@@ -58,6 +61,9 @@ static webui_config_t s_cfg;
 static char *s_body;   /* PSRAM, one request at a time: the server has one task */
 static uint8_t *s_out; /* PSRAM */
 static SemaphoreHandle_t s_auth_lock; /* the sessions and the stored record; the menu may reset them */
+/* A Cookie header can carry other devices' cookies for 192.168.4.1 too: room for the whole header
+ * section. The server's task is the only user. */
+static EXT_RAM_BSS_ATTR char s_cookie[CONFIG_HTTPD_MAX_REQ_HDR_LEN + 1];
 static webui_sessions_t s_sessions;
 static volatile int64_t s_last_ms;
 
@@ -179,6 +185,7 @@ static const char *status_line(int status)
     case 403: return "403 Forbidden";
     case 404: return "404 Not Found";
     case 405: return "405 Method Not Allowed";
+    case 408: return "408 Request Timeout";
     case 409: return "409 Conflict";
     case 413: return "413 Content Too Large";
     case 415: return "415 Unsupported Media Type";
@@ -216,32 +223,61 @@ static esp_err_t send_cjson(httpd_req_t *req, int status, cJSON *o)
     return err;
 }
 
-/* The whole body into s_body, NUL-terminated. */
-static bool read_body(httpd_req_t *req)
+/* Up to `len` bytes of the body into buf. Returns how many, or a status negated: -408 once the client
+ * has sent nothing for RECV_TIMEOUTS waits in a row, -400 if it closed the connection. */
+static int recv_some(httpd_req_t *req, char *buf, size_t len)
+{
+    for (int timeouts = 0;;) {
+        int n = httpd_req_recv(req, buf, len);
+        if (n > 0) {
+            return n;
+        }
+        if (n != HTTPD_SOCK_ERR_TIMEOUT) {
+            return -400;
+        }
+        if (++timeouts >= RECV_TIMEOUTS) {
+            return -408;
+        }
+    }
+}
+
+/* The client's data stopped or broke off: answer, and close the connection rather than wait for
+ * the rest of the body (httpd would read it before the next request). */
+static esp_err_t give_up(httpd_req_t *req, int status)
+{
+    send_error(req, status, status == 408 ? "the request stopped arriving" : "the request broke off");
+    return ESP_FAIL;
+}
+
+/* The whole body into s_body, NUL-terminated. Returns 0, or the status to answer with. */
+static int read_body(httpd_req_t *req)
 {
     if (req->content_len > WEBUI_BODY_MAX) {
-        return false;
+        return 413;
     }
     size_t got = 0;
     while (got < req->content_len) {
-        int n = httpd_req_recv(req, s_body + got, req->content_len - got);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        if (n <= 0) {
-            return false;
+        int n = recv_some(req, s_body + got, req->content_len - got);
+        if (n < 0) {
+            return -n;
         }
         got += (size_t)n;
     }
     s_body[got] = '\0';
-    return true;
+    return 0;
+}
+
+/* The session token from the request's Cookie header; false if there is none. */
+static bool cookie_token(httpd_req_t *req, char token[WEBUI_TOKEN_LEN + 1])
+{
+    return httpd_req_get_hdr_value_str(req, "Cookie", s_cookie, sizeof(s_cookie)) == ESP_OK &&
+           webui_cookie_token(s_cookie, token);
 }
 
 static bool session_ok(httpd_req_t *req)
 {
-    char cookie[160], token[WEBUI_TOKEN_LEN + 1];
-    if (httpd_req_get_hdr_value_str(req, "Cookie", cookie, sizeof(cookie)) != ESP_OK ||
-        !webui_cookie_token(cookie, token)) {
+    char token[WEBUI_TOKEN_LEN + 1];
+    if (!cookie_token(req, token)) {
         return false;
     }
     xSemaphoreTake(s_auth_lock, portMAX_DELAY);
@@ -286,10 +322,7 @@ static esp_err_t auth_routes(httpd_req_t *req, const char *path)
     if (req->method != HTTP_POST) {
         return send_error(req, 405, "use POST");
     }
-    if (!read_body(req)) {
-        return send_error(req, 413, "request too large");
-    }
-    cJSON *in = cJSON_Parse(s_body);
+    cJSON *in = cJSON_Parse(s_body); /* api_handler read it and checked its depth */
     const char *password = json_string(in, "password");
     esp_err_t err;
     if (strcmp(path, "/api/auth/setup") == 0) {
@@ -333,9 +366,8 @@ static esp_err_t auth_routes(httpd_req_t *req, const char *path)
             }
         }
     } else if (strcmp(path, "/api/auth/logout") == 0) {
-        char cookie[160], token[WEBUI_TOKEN_LEN + 1];
-        if (httpd_req_get_hdr_value_str(req, "Cookie", cookie, sizeof(cookie)) == ESP_OK &&
-            webui_cookie_token(cookie, token)) {
+        char token[WEBUI_TOKEN_LEN + 1];
+        if (cookie_token(req, token)) {
             xSemaphoreTake(s_auth_lock, portMAX_DELAY);
             for (int i = 0; i < WEBUI_SESSIONS; i++) {
                 if (strcmp(s_sessions.s[i].token, token) == 0) {
@@ -411,10 +443,7 @@ static esp_err_t wifi_routes(httpd_req_t *req, const char *path, const char *que
         return send_cjson(req, 200, o);
     }
     if (req->method == HTTP_POST) {
-        if (!read_body(req)) {
-            return send_error(req, 413, "request too large");
-        }
-        cJSON *in = cJSON_Parse(s_body);
+        cJSON *in = cJSON_Parse(s_body); /* api_handler read it and checked its depth */
         const char *ssid = json_string(in, "ssid"), *pass = json_string(in, "password");
         const cJSON *test = cJSON_GetObjectItemCaseSensitive(in, "test");
         esp_err_t err;
@@ -460,12 +489,9 @@ static esp_err_t ota_upload(httpd_req_t *req)
     }
     size_t got = 0, filled = 0;
     while (filled < head) { /* the image header and the app description first */
-        int n = httpd_req_recv(req, (char *)s_out + filled, OTA_CHUNK - filled);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        if (n <= 0) {
-            return send_error(req, 400, "the upload broke off");
+        int n = recv_some(req, (char *)s_out + filled, OTA_CHUNK - filled);
+        if (n < 0) {
+            return give_up(req, -n);
         }
         filled += (size_t)n;
     }
@@ -488,28 +514,28 @@ static esp_err_t ota_upload(httpd_req_t *req)
         return send_error(req, 500, "the update partition won't open");
     }
     esp_err_t err = ESP_OK;
+    int stopped = 0; /* the status, if the client's data stopped */
     while (err == ESP_OK) {
         err = esp_ota_write(ota, s_out, filled);
         got += filled;
-        filled = 0;
-        if (got >= req->content_len) {
+        if (err != ESP_OK || got >= req->content_len) {
             break;
         }
-        int n = httpd_req_recv(req, (char *)s_out, OTA_CHUNK < req->content_len - got ? OTA_CHUNK
-                                                                                      : req->content_len - got);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        if (n <= 0) {
-            err = ESP_FAIL;
+        int n = recv_some(req, (char *)s_out, OTA_CHUNK < req->content_len - got ? OTA_CHUNK : req->content_len - got);
+        if (n < 0) {
+            stopped = -n;
             break;
         }
         filled = (size_t)n;
         touch(); /* a long upload is activity too */
     }
+    if (stopped != 0) {
+        esp_ota_abort(ota);
+        return give_up(req, stopped);
+    }
     if (err != ESP_OK) {
         esp_ota_abort(ota);
-        return send_error(req, 400, "the upload broke off");
+        return send_error(req, 500, "the update partition won't take it");
     }
     err = esp_ota_end(ota); /* checks the image's own checksum and hash */
     if (err == ESP_OK) {
@@ -582,6 +608,17 @@ static esp_err_t api_handler(httpd_req_t *req)
             !webui_is_json_type(type)) {
             return send_error(req, 415, "send application/json");
         }
+        int status = read_body(req); /* every route's body, read once, before any login */
+        if (status == 413) {
+            send_error(req, 413, "request too large");
+            return ESP_FAIL; /* close rather than read what is left */
+        }
+        if (status != 0) {
+            return give_up(req, status);
+        }
+        if (util_json_depth(s_body) > WEBUI_JSON_MAX_DEPTH) { /* cJSON recurses per level, on this stack */
+            return send_error(req, 400, "the JSON is nested too deeply");
+        }
     }
     if (strncmp(path, "/api/auth", 9) == 0) {
         return auth_routes(req, path);
@@ -613,9 +650,6 @@ static esp_err_t api_handler(httpd_req_t *req)
             s_cfg.event(k_events[i].event); /* after the reply */
             return sent;
         }
-    }
-    if (mutating && !read_body(req)) {
-        return send_error(req, 413, "request too large");
     }
     api_call_t call = { .method = method_name(req->method), .path = path, .query = has_query ? query : "",
                         .body = mutating ? s_body : "", .reply = { .status = 404, .type = "application/json" } };

@@ -56,6 +56,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D17 | Owner, 2026-09-29 (M3b render review): the menu leaves out Display ▸ Contrast for now, and the temperature offset steps by 0.1 °C (§5.7) | No contrast levels besides the factory sequence's (D12) have been checked on the panel |
 | D18 | Owner, 2026-09-30 (M4 planning): the web UI gets a password instead of the admin PIN, chosen on the first visit over the device's own AP and needed on every visit after (§10.4); web UI translations stay deferred; M4 runs as one plan; the snapshot header gets no ELF hash | A PIN guards little that a password doesn't; every firmware change resets the chip, and only deep-sleep wakes read the snapshot |
 | D19 | Owner, 2026-09-30 (M4 spike review): the first-run screen appears when `settings.json` is missing at boot (§5.5); the status bar's Wi-Fi state moves to M5 and M6 (§5.2); a restart from the web UI returns in config mode (§10.2); the web UI sets a lost clock from the phone, can change the password and log out, and gets a Device page (§10.3, §10.4); the temperature offset defaults to −2.0 °C (§8) | In M4 Wi-Fi runs only in config mode, which has its own screen. The board warms the SHTC3 by about 2 °C at all times; the user trims the rest |
+| D20 | Owner, 2026-09-30 (M4 acceptance): config mode watches the battery (§8, §10.2); while a phone is logged in, config mode shows the dashboard with a globe in the status bar (§5.2, §10.2); the preset preview names its slots, and a new preset joins the cycle (§10.3); seconds keep the refresh rate the user picked (§7); the battery level can follow the owner's own full and empty voltages (§8) | A battery that sags under the radio would brown out anyway. The owner wants to watch settings change on the screen itself. The refresh rate is the user's to tune |
 
 ### 1.3 Out of scope for v1
 
@@ -285,7 +286,7 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 
 Every layout has a status bar (top 20 px):
 
-- Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale.
+- Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale. After either, a globe while a phone is logged in to the web UI (D20).
 - Middle: a small clock, if the preset sets `status_clock`. It is meant for data-first presets (owner request, 2026-09-28).
 - Right: the charging bolt and the battery icon, with the parts `status_battery` lists: level %, voltage, days left. The default is the level.
 - Later: the sync state (M5), the Wi-Fi state (M5 and M6, the first times Wi-Fi runs under the dashboard, D19) and the next alarm (M7).
@@ -471,7 +472,9 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
 ## 7. Timekeeping
 
-- The PCF85063 stores UTC. At boot and on every wake the firmware reads the RTC and calls `settimeofday()`. If the oscillator-stop flag is set, the time counts as invalid until SNTP or a manual set.
+- The PCF85063 stores UTC. At boot and on every wake the firmware reads the RTC and sets the system time from it. If the oscillator-stop flag is set, the time counts as invalid until SNTP or a manual set.
+  - The running clock keeps its fraction of a second while it agrees with the RTC within a second; setting it to the RTC's whole second at every read lost each read's latency, and a seconds display skipped a second now and then. The RTC's minute alarm fires as the RTC's second begins, so that wake takes the phase.
+  - Seconds keep the panel refresh rate the user picked (D20); a user who sees them stutter raises it.
 - The time zone is a POSIX TZ string in the settings (default `CET-1CEST,M3.5.0,M10.5.0/3`), stored alongside its IANA name for display. The web UI maps IANA names to POSIX strings.
 - SNTP runs during each sync (servers `cz.pool.ntp.org` and `pool.ntp.org`, 5 s timeout) and writes the result to the RTC.
 - Manual set: the date/time editor in the menu, or "set time from phone" in the web UI (sends the epoch and time zone).
@@ -498,8 +501,13 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 **Battery gauge**
 
 - **Reading.** ADC1_CH3 one-shot at 12 dB with curve-fitting calibration. Average 16 samples, then multiply by 3 (the divider) and by a per-device factor (default 1.000).
-- **When.** Only while idle (no Wi-Fi, no audio): every 5 min and before each sync.
+- **When.** Every 5 min and before each sync, in config mode too (D20): the radio's load pulls VBAT down, which errs on the safe side, as a battery that sags under it would brown out anyway. Not during audio.
 - **Level.** Voltage maps to % through a Li-ion open-circuit-voltage table (NCR18650B-like). The result is smoothed with an EMA and never jumps up unless charging is inferred.
+- **Calibration** (owner request, 2026-09-30; settings `battery.*`, the web UI's Device page).
+  - `curve`: the built-in table, 3.27 V for 0 % to 4.20 V for 100 %. The default.
+  - `manual`: the same table stretched between the owner's empty and full voltages (empty 3.0–4.0 V, full 3.6–4.4 V, at least 0.3 V apart), so the shape stays.
+  - A change applies at once: the level follows the new mapping, and the days-left estimate starts over, as its history is in the old levels.
+  - A curve learned over a full cycle is an open item (§20). The critical thresholds stay in volts whatever the calibration.
 - **Charging state (inferred; there is no hardware signal).**
 
   | State | Rule |
@@ -639,8 +647,9 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 - **Connecting.** With saved networks, it joins as a station and shows the LAN URL and IP. If that fails or no network is saved, it starts the AP and captive portal. While the owner tests a new network from the web UI it runs AP and STA together. While no web password is set, it runs the AP as well, because only a phone on the AP may choose the password (§10.4).
 - **Exit.** BOOT long, "Done" in the web UI, or 10 min without HTTP requests. Wi-Fi then switches off.
   - Only requests for the device's own pages and API count: a joined phone's connectivity probes would otherwise keep config mode on for good.
-  - It doesn't watch the battery: no samples are taken while it runs (below), so a critical battery can't end it, and the idle timeout bounds it.
-- **While it runs.** The board stays awake, as neither sleep keeps Wi-Fi, and the panel is in HPM. The screen shows the state, a QR code and the minutes left; KEY switches the QR code (§5.6). No battery samples are taken, as the radio's load pulls VBAT down (§8).
+  - A critical battery (§8) ends it too; battery samples go on while it runs (D20).
+- **While it runs.** The board stays awake, as neither sleep keeps Wi-Fi, and the panel is in HPM. The screen shows the state, a QR code and the minutes left; KEY switches the QR code (§5.6).
+  - While a phone is logged in to the web UI, the screen shows the dashboard instead, with a globe in the status bar, so settings can be watched as they change (D20). KEY short brings the setup screen back for another phone ("KEY back"), and KEY again returns to the dashboard. Logging out, or the last session ending, brings the setup screen back.
 - **Restarts.** A restart the web UI asks for (a firmware update, Restart) comes back in config mode, so the page finds the device again; so does the image a rollback returns to (§10.5, D19). The flag is in NVS (`sys/resume_cfg`): another image lays out RTC RAM differently.
 
 ### 10.3 Web UI and REST API
@@ -648,7 +657,8 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 - **Tech.** Plain HTML/CSS/JS, mobile-first. The files are gzipped and **embedded in the app image**, so OTA updates them and flashing never touches user data.
 - **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), MQTT/HA (M6), Alarms and Radio (M7) join later.
   - Status sets the device's clock from the phone at once when the device has lost the time (D9, D19).
-  - Device holds the menu's language, units, sensor offsets, sensor interval, update interval and refresh rate (D19).
+  - Device holds the menu's language, units, sensor offsets, sensor interval, update interval and refresh rate (D19), and the battery calibration (§8).
+  - Presets: the preview names each slot at its corner as the slot fields call it; a new preset joins the cycle; "Undo changes" asks first, as the save bar can float over other buttons (D20).
 - **API.** JSON. Mutating requests must send `Content-Type: application/json`, those without a body too.
   - The server reads each body once, before any route and any login: at most 16 KB (413), nested at most 18 levels, a backup bundle's depth (400).
   - A client that sends nothing for 15 s gets 408, and the connection closes, so one phone that vanishes mid-request can't stop the server.
@@ -872,6 +882,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
   "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60 },
   "sensors": { "interval_min": 5, "temp_offset_c": 0.0, "hum_offset_pct": 0.0 },
   "display": { "contrast": "default", "update_min": 1, "lpm_hz": 1 },
+  "battery": { "level_from": "curve", "empty_v": 3.27, "full_v": 4.2 },
   "mqtt": { "enabled": false, "host": "", "port": 1883, "user": "",
             "discovery_prefix": "homeassistant", "discovery": true }
 }
@@ -1013,6 +1024,8 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | The Czech name-day calendar needs a source whose licence allows redistribution in this repository | Checked 2026-09-29: the best list (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA); others were incomplete, broken or unlicensed. Deferred (D16): `cs` ships the holidays only until a clean source turns up |
 | The critical-battery path has not met a really low battery: its thresholds are host-tested and its screen is a golden, but its KEY-only sleep has not run on the board | Watch the first time the board runs flat on battery (M5 power work) |
 | No RTC backup cell (D9): the time is lost at every PWR-off | Sync at boot when Wi-Fi is configured, otherwise a "Set time" prompt; the owner may fit an ML1220 (§7) |
+| A learned battery curve (owner request, 2026-09-30): the firmware can't see charging (hardware gotcha 3), and the charger's current lifts VBAT, so a charge maps poorly to the resting level | Proposed: learn from one full discharge on battery, which this board's steady load suits; waiting for the owner's choice |
+| The web UI moving focus to a text box on a phone (owner, 2026-09-30) | Not reproduced in iOS 26 Safari; waiting for the phone and browser |
 | Homebrew Python 3.14 on this Mac (3.14.6 and 3.14.7 checked) can't load `pyexpat` (it expects a newer libexpat than macOS 26.2 has), which breaks pip and the ESP-IDF installer | ESP-IDF uses uv's Python 3.13 through `~/esp/python-shim` (`AGENTS.md` §6) |
 
 ## 21. Revision history
@@ -1035,3 +1048,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r14 | 2026-09-30 | M4 spike review (D19): when the first-run screen appears, and its buttons (§5.5, §5.6); the status bar's Wi-Fi state moves to M5 and M6 (§5.2); web restarts return in config mode (§10.2); the M4 pages, with Device, and the clock set from the phone (§10.3); changing the web password and logging out (§10.4); the −2.0 °C default temperature offset (§8); accepted extras (§19) |
 | r15 | 2026-09-30 | M4 as built: the components (§3.1); the menu's Wi-Fi section and Info rows (§5.7); the AP's channel, testing a network, and the portal address (§10.1); what ends config mode and what runs meanwhile (§10.2); the API (§10.3); the password record, sessions and login throttle (§10.4); OTA checks and measurements (§10.5); NVS keys (§14.2); `location.*` and the merge patch (§14.3); the backup bundle (§14.4); `wifi` (§15); the new host tests (§17) |
 | r16 | 2026-09-30 | M4 review: long menu values are cut (§5.7); leaving a network for a test is never its failure (§10.1); config mode doesn't watch the battery, and the resume flag is in NVS (§10.2, §14.2); bodies are read once, nested at most 18 levels, and a stalled client gets 408 (§10.3); 2 KB of headers for other gadgets' cookies (§10.4); an image that fails to start rolls back at once (§10.5) |
+| r17 | 2026-09-30 | M4 acceptance (D20): the globe in the status bar and the dashboard in config mode while a phone is logged in (§5.2, §10.2); the running clock's phase and the seconds' refresh rate (§7); battery samples in config mode and the battery calibration (§8, §14.3); the Device page's battery card and the preset editor's slot names, new presets in the cycle and Undo (§10.3); two open items (§20) |

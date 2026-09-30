@@ -1,5 +1,7 @@
 #include "sensors.h"
 
+#include <string.h>
+
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_oneshot.h"
@@ -21,6 +23,7 @@
 #define SHTC3_MEASURE_MS    13     /* datasheet: 12.1 ms max in normal mode */
 #define I2C_TIMEOUT_MS      50     /* at least two 10 ms ticks; shorter timeouts round down to zero */
 
+#define LEARN_MIN_EPOCH 1577836800 /* 2020-01-01 */
 #define BAT_CHANNEL         ADC_CHANNEL_3 /* GPIO4 */
 #define BAT_SAMPLES         16
 #define BAT_DIVIDER         3             /* 200k / 100k */
@@ -154,7 +157,54 @@ esp_err_t sensors_sample_battery(time_t now)
     s_state.last_mv = mv;
     s_state.battery_time = now;
     battery_gauge_add(&s_state.gauge, (uint32_t)now, mv);
+    if (now >= LEARN_MIN_EPOCH) { /* a clock that was never set starts in 2000 */
+        battery_learn_t *l = &s_state.learn;
+        int points = battery_learn_points(l);
+        uint8_t state = l->state;
+        battery_learn_add(l, (uint32_t)now, battery_gauge_mv(&s_state.gauge),
+                          battery_gauge_state(&s_state.gauge, (uint32_t)now));
+        s_state.learn_changed |= battery_learn_points(l) != points || l->state != state;
+    }
     return ESP_OK;
+}
+
+void sensors_learn_start(void)
+{
+    battery_learn_start(&s_state.learn);
+    s_state.learn_changed = true;
+}
+
+void sensors_learn_stop(void)
+{
+    battery_learn_stop(&s_state.learn);
+    s_state.learn_changed = true;
+}
+
+const battery_learn_t *sensors_learn(void)
+{
+    return &s_state.learn;
+}
+
+bool sensors_learn_take_curve(uint16_t curve[BATTERY_CURVE_POINTS])
+{
+    if (!battery_learn_curve(&s_state.learn, curve)) {
+        return false;
+    }
+    battery_learn_stop(&s_state.learn);
+    s_state.learn_changed = true;
+    return true;
+}
+
+bool sensors_learn_take_changed(void)
+{
+    bool changed = s_state.learn_changed;
+    s_state.learn_changed = false;
+    return changed;
+}
+
+void sensors_learn_restore(const battery_learn_t *l)
+{
+    s_state.learn = *l;
 }
 
 void sensors_set_offsets(int temp_c100, int hum_pct100)
@@ -165,8 +215,7 @@ void sensors_set_offsets(int temp_c100, int hum_pct100)
 
 void sensors_set_battery_cal(const battery_cal_t *cal)
 {
-    const battery_cal_t *now = &s_state.gauge.cal;
-    if (cal->method != now->method || cal->empty_mv != now->empty_mv || cal->full_mv != now->full_mv) {
+    if (memcmp(cal, &s_state.gauge.cal, sizeof(*cal)) != 0) {
         battery_gauge_set_cal(&s_state.gauge, cal);
     }
 }
@@ -179,6 +228,7 @@ int sensors_battery_days_left10(time_t now)
 void sensors_shift_time(int64_t delta_s)
 {
     battery_gauge_shift_time(&s_state.gauge, delta_s);
+    battery_learn_shift_time(&s_state.learn, delta_s);
     if (s_state.env.time != 0) {
         s_state.env.time += (time_t)delta_s;
     }

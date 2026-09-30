@@ -482,7 +482,7 @@ const SENSOR_MIN = [1, 2, 5, 10, 15, 30];
 const RATES = [0.25, 0.5, 1, 2, 4, 8];
 
 async function devicePage() {
-  const s = await api('GET', '/api/settings');
+  const [s, st] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status')]);
   const sensors = s.sensors || {}, display = s.display || {};
   const select = (pairs, current) => h('select', {}, pairs.map(([v, t]) => h('option', { value: v, selected: v === current }, t)));
   const language = select(LANGUAGES, s.language || 'en');
@@ -493,11 +493,30 @@ async function devicePage() {
   const update = select(Array.from({ length: 15 }, (_, i) => [String(i + 1), `${i + 1} min`]), String(display.update_min ?? 1));
   const rate = select(RATES.map((r) => [String(r), `${String(r)} Hz`]), String(display.lpm_hz ?? 1));
   const bat = s.battery || {};
-  const levelFrom = select([['curve', 'The built-in Li-ion curve'], ['manual', 'My own voltages']],
-    bat.level_from === 'manual' ? 'manual' : 'curve');
+  const learned = Array.isArray(bat.learned_mv); /* D21: a full discharge was learned */
+  const levelFrom = select([['curve', 'The built-in Li-ion curve'], ['manual', 'My own voltages'],
+    ...(learned ? [['learned', `Learned from a discharge (${new Date(bat.learned_at * 1000).toISOString().slice(0, 10)})`]] : [])],
+    bat.level_from === 'manual' || (learned && bat.level_from === 'learned') ? bat.level_from : 'curve');
+  const learn = (st.battery && st.battery.learn) || { state: 'off', hours: 0 };
+  const learnNote = h('p', { class: 'muted small', text: {
+    waiting: 'Learning: waiting for a full charge. Charge the battery full, then unplug it.',
+    recording: `Learning: ${learn.hours} h of discharge so far. It ends when the battery is low.`,
+    failed: 'The last discharge was too short to learn from; the next full charge tries again.',
+  }[learn.state] || 'The device can learn this battery\'s own curve from one full discharge: charge it full, ' +
+    'unplug it, and it learns until the battery is low, about a week on this board. It then uses that curve.' });
+  const running = ['waiting', 'recording', 'failed'].includes(learn.state);
+  const learnButton = button(running ? 'Stop learning' : 'Learn from the next full discharge', () => busy(batCard,
+    learnNote, async () => {
+      await api('POST', '/api/battery/learn', running ? { stop: true } : { start: true });
+      await devicePage();
+    }));
   const fullV = h('input', { type: 'number', step: 0.01, min: 3.6, max: 4.4, value: bat.full_v ?? 4.2 });
   const emptyV = h('input', { type: 'number', step: 0.01, min: 3, max: 4, value: bat.empty_v ?? 3.27 });
   const note = h('p');
+  const batCard = card('Battery', field('Battery level from', levelFrom), field('Full, V', fullV), field('Empty, V', emptyV,
+    'With your own voltages the level follows the Li-ion curve stretched between them. Read them on the ' +
+    'Status page: full just after the charger stops, empty when the device shows its low-battery screen.'),
+  learnNote, actions(learnButton));
   const form = h('div', {},
     card('Language and units', field('Language on the device', language), field('Temperature', unit)),
     card('Sensors', field('Temperature offset, °C', temp, 'Added to every reading. The board warms the sensor by ' +
@@ -506,9 +525,7 @@ async function devicePage() {
     card('Screen', field('Update every', update, 'How often the dashboard is redrawn. Each update wakes the device.'),
       field('Refresh rate', rate, 'How often the panel repaints its image between updates. At 1 Hz it looked as ' +
         'good as the faster rates (D12).')),
-    card('Battery', field('Battery level from', levelFrom), field('Full, V', fullV), field('Empty, V', emptyV,
-      'With your own voltages the level follows the Li-ion curve stretched between them. Read them on the ' +
-      'Status page: full just after the charger stops, empty when the device shows its low-battery screen.')),
+    batCard,
     note,
     actions(button('Save', () => busy(form, note, async () => {
       const t = Number(temp.value), hu = Number(hum.value);

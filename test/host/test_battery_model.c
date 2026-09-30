@@ -245,13 +245,60 @@ static void test_a_new_calibration_moves_the_level_at_once_and_restarts_days_lef
 
 static void test_a_manual_calibration_needs_room_between_its_voltages(void)
 {
-    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 3300, 4200 }));
-    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 3700, 4000 }));
-    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 3800, 4000 })); /* 200 mV */
-    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 4200, 3300 }));
-    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 2900, 4200 })); /* out of range */
-    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_MANUAL, 3300, 4500 }));
-    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ BATTERY_CAL_CURVE, 0, 0 })); /* voltages unused */
+    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ .method = BATTERY_CAL_MANUAL, .empty_mv = 3300, .full_mv = 4200 }));
+    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ .method = BATTERY_CAL_MANUAL, .empty_mv = 3700, .full_mv = 4000 }));
+    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ .method = BATTERY_CAL_MANUAL, .empty_mv = 3800, .full_mv = 4000 })); /* 200 mV */
+    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ .method = BATTERY_CAL_MANUAL, .empty_mv = 4200, .full_mv = 3300 }));
+    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ .method = BATTERY_CAL_MANUAL, .empty_mv = 2900, .full_mv = 4200 })); /* out of range */
+    TEST_ASSERT_FALSE(battery_cal_valid(&(battery_cal_t){ .method = BATTERY_CAL_MANUAL, .empty_mv = 3300, .full_mv = 4500 }));
+    TEST_ASSERT_TRUE(battery_cal_valid(&(battery_cal_t){ .method = BATTERY_CAL_CURVE, .empty_mv = 0, .full_mv = 0 })); /* voltages unused */
+}
+
+/* A curve learned from a full discharge (D21): the voltage at every 5 %. */
+static battery_cal_t learned_cal(void)
+{
+    battery_cal_t cal = { .method = BATTERY_CAL_LEARNED };
+    for (int p = 0; p < BATTERY_CURVE_POINTS; p++) {
+        cal.learned_mv[p] = (uint16_t)(3300 + 45 * p); /* 3.30 V to 4.20 V, straight */
+    }
+    return cal;
+}
+
+static void test_a_learned_curve_is_looked_up(void)
+{
+    battery_cal_t cal = learned_cal();
+    TEST_ASSERT_EQUAL_INT(0, battery_level10(&cal, 3300));
+    TEST_ASSERT_EQUAL_INT(0, battery_level10(&cal, 3200));
+    TEST_ASSERT_EQUAL_INT(500, battery_level10(&cal, 3750));
+    TEST_ASSERT_EQUAL_INT(524, battery_level10(&cal, 3772)); /* 22/45 of the way to 55 %: 52.4 % */
+    TEST_ASSERT_EQUAL_INT(1000, battery_level10(&cal, 4200));
+    TEST_ASSERT_EQUAL_INT(1000, battery_level10(&cal, 4300));
+}
+
+static void test_a_learned_curve_must_rise_within_the_battery_range(void)
+{
+    battery_cal_t cal = learned_cal();
+    TEST_ASSERT_TRUE(battery_cal_valid(&cal));
+    cal.learned_mv[7] = cal.learned_mv[6]; /* flat */
+    TEST_ASSERT_FALSE(battery_cal_valid(&cal));
+    cal = learned_cal();
+    cal.learned_mv[0] = 2500; /* below any Li-ion cell's use */
+    TEST_ASSERT_FALSE(battery_cal_valid(&cal));
+    cal = learned_cal();
+    for (int p = 0; p < BATTERY_CURVE_POINTS; p++) {
+        cal.learned_mv[p] = (uint16_t)(3900 + p); /* 20 mV from empty to full */
+    }
+    TEST_ASSERT_FALSE(battery_cal_valid(&cal));
+    const battery_cal_t unusable = { .method = BATTERY_CAL_LEARNED }; /* no curve yet */
+    TEST_ASSERT_EQUAL_INT(battery_percent10_from_mv(3840), battery_level10(&unusable, 3840)); /* the built-in one */
+}
+
+static void test_the_gauge_shows_the_level_on_a_learned_curve(void)
+{
+    battery_cal_t cal = learned_cal();
+    battery_gauge_set_cal(&s_g, &cal);
+    battery_gauge_add(&s_g, 1000, 3750);
+    TEST_ASSERT_EQUAL_INT(50, battery_gauge_level(&s_g)); /* the built-in curve says 26 % */
 }
 
 int main(void)
@@ -279,5 +326,8 @@ int main(void)
     RUN_TEST(test_a_manual_calibration_stretches_the_curve_between_its_voltages);
     RUN_TEST(test_a_new_calibration_moves_the_level_at_once_and_restarts_days_left);
     RUN_TEST(test_a_manual_calibration_needs_room_between_its_voltages);
+    RUN_TEST(test_a_learned_curve_is_looked_up);
+    RUN_TEST(test_a_learned_curve_must_rise_within_the_battery_range);
+    RUN_TEST(test_the_gauge_shows_the_level_on_a_learned_curve);
     return UNITY_END();
 }

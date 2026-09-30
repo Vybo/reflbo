@@ -60,6 +60,10 @@ void app_ui_tick(bool force);
 sched_wake_t app_ui_next_wake(time_t now);
 esp_err_t app_ui_save_settings(void);
 esp_err_t app_ui_save_presets(void);
+/* Learning the battery curve from the next full discharge (D21): start or stop, saved at once. */
+void app_ui_learn(bool start);
+/* A cold boot: the learning session saved in LittleFS, if one runs. */
+void app_ui_restore_learning(void);
 
 /* A short message over the screen for about 3 s (spec §5.5). */
 void app_ui_toast(const char *text);

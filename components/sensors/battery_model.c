@@ -67,13 +67,50 @@ static int curve_mv(const battery_cal_t *cal, int mv)
     return BATTERY_EMPTY_MV + (rel * (BATTERY_FULL_MV - BATTERY_EMPTY_MV) + (rel >= 0 ? span / 2 : -span / 2)) / span;
 }
 
+/* The level of `mv` on a learned curve, in 0.1 %. */
+static int learned_level10(const uint16_t *curve, int mv)
+{
+    if (mv <= curve[0]) {
+        return 0;
+    }
+    for (int i = 1; i < BATTERY_CURVE_POINTS; i++) {
+        if (mv <= curve[i]) {
+            int dv = curve[i] - curve[i - 1];
+            return (i - 1) * 50 + ((mv - curve[i - 1]) * 50 + dv / 2) / dv;
+        }
+    }
+    return 1000;
+}
+
 int battery_level10(const battery_cal_t *cal, int mv)
 {
+    if (cal != NULL && cal->method == BATTERY_CAL_LEARNED && battery_cal_valid(cal)) {
+        return learned_level10(cal->learned_mv, mv);
+    }
     return battery_percent10_from_mv(curve_mv(cal, mv));
+}
+
+/* The whole-percent level the gauge shows; the built-in curve rounds as it always has. */
+static int level_pct(const battery_cal_t *cal, int mv)
+{
+    if (cal->method == BATTERY_CAL_LEARNED && battery_cal_valid(cal)) {
+        return (learned_level10(cal->learned_mv, mv) + 5) / 10;
+    }
+    return battery_percent_from_mv(curve_mv(cal, mv));
 }
 
 bool battery_cal_valid(const battery_cal_t *cal)
 {
+    if (cal->method == BATTERY_CAL_LEARNED) {
+        const uint16_t *c = cal->learned_mv;
+        for (int i = 1; i < BATTERY_CURVE_POINTS; i++) {
+            if (c[i] <= c[i - 1]) {
+                return false;
+            }
+        }
+        return c[0] >= 3000 && c[BATTERY_CURVE_POINTS - 1] <= 4400 &&
+               c[BATTERY_CURVE_POINTS - 1] - c[0] >= BATTERY_CAL_SPAN_MIN;
+    }
     if (cal->method != BATTERY_CAL_MANUAL) {
         return cal->method == BATTERY_CAL_CURVE;
     }
@@ -93,7 +130,7 @@ void battery_gauge_set_cal(battery_gauge_t *g, const battery_cal_t *cal)
     g->level_count = 0;
     g->level_head = 0;
     if (g->ema_mv16 != 0) {
-        g->level = (uint8_t)battery_percent_from_mv(curve_mv(&g->cal, battery_gauge_mv(g)));
+        g->level = (uint8_t)level_pct(&g->cal, battery_gauge_mv(g));
     }
 }
 
@@ -159,7 +196,7 @@ void battery_gauge_add(battery_gauge_t *g, uint32_t now_s, int mv)
             g->count++;
         }
     }
-    int pct = battery_percent_from_mv(curve_mv(&g->cal, battery_gauge_mv(g)));
+    int pct = level_pct(&g->cal, battery_gauge_mv(g));
     battery_state_t state = battery_gauge_state(g, now_s);
     if (first || state == BATTERY_CHARGING || state == BATTERY_FULL || pct < g->level) {
         g->level = (uint8_t)pct;

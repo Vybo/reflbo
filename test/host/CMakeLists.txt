@@ -57,8 +57,10 @@ target_compile_options(board_logic PRIVATE ${REFLBO_WARNINGS})
 
 # sensors: only the SHTC3 codec and the battery model build on the host.
 add_library(sensors_logic STATIC ${REPO_ROOT}/components/sensors/shtc3_codec.c
-                                 ${REPO_ROOT}/components/sensors/battery_model.c)
+                                 ${REPO_ROOT}/components/sensors/battery_model.c
+                                 ${REPO_ROOT}/components/sensors/battery_learn.c)
 target_include_directories(sensors_logic PUBLIC ${REPO_ROOT}/components/sensors/include)
+target_link_libraries(sensors_logic PUBLIC util)
 target_compile_options(sensors_logic PRIVATE ${REFLBO_WARNINGS})
 
 # rtc: only the PCF85063 register codec builds on the host.
@@ -157,6 +159,7 @@ reflbo_host_test(test_scheduler scheduler)
 reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)
+reflbo_host_test(test_battery_learn sensors_logic)
 reflbo_host_test(test_pcf85063_regs rtc_logic)
 reflbo_host_test(test_timekeeping_iso timekeeping_logic)
 reflbo_host_test(test_timekeeping_zones timekeeping_logic)

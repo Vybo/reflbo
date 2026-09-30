@@ -13,6 +13,7 @@
 #include "esp_mac.h"
 #include "esp_system.h"
 #include "netmgr.h"
+#include "sensors.h"
 #include "storage_backup.h"
 #include "timekeeping.h"
 #include "ui_catalog.h"
@@ -133,6 +134,10 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
     }
     add_value(bat, "days_left", DS_BAT_DAYS, 10.0);
     cJSON_AddBoolToObject(bat, "critical", st->critical);
+    const battery_learn_t *l = sensors_learn(); /* D21 */
+    cJSON *learn = cJSON_AddObjectToObject(bat, "learn");
+    cJSON_AddStringToObject(learn, "state", battery_learn_state_name(battery_learn_state(l)));
+    cJSON_AddNumberToObject(learn, "hours", battery_learn_hours(l));
 
     cJSON *env = cJSON_AddObjectToObject(o, "sensors");
     add_value(env, "temp_c", DS_ENV_TEMP, 100.0);
@@ -256,6 +261,28 @@ static void set_time(const char *body, uint8_t *out, size_t size, webui_reply_t 
     cJSON_Delete(in);
 }
 
+/* POST /api/battery/learn (D21): {"start": true} arms learning from the next full discharge,
+ * {"stop": true} ends it. */
+static void learn(const char *body, uint8_t *out, size_t size, webui_reply_t *reply)
+{
+    cJSON *in = cJSON_Parse(body);
+    bool start = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(in, "start"));
+    bool stop = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(in, "stop"));
+    cJSON_Delete(in);
+    if (start == stop) {
+        reply_error(reply, out, size, 400, "send {\"start\": true} or {\"stop\": true}");
+        return;
+    }
+    if (start && !timekeeping_valid()) {
+        reply_error(reply, out, size, 409, "set the clock first");
+        return;
+    }
+    app_ui_learn(start);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "state", battery_learn_state_name(battery_learn_state(sensors_learn())));
+    reply_cjson(reply, out, size, o);
+}
+
 /* GET /api/backup (spec §14.4): the /cfg files as the firmware would save them now. */
 static void backup(uint8_t *out, size_t size, webui_reply_t *reply)
 {
@@ -361,6 +388,8 @@ void app_web_api(const char *method, const char *path, const char *query, const 
         reply_bmp(display_fb(), out, size, reply);
     } else if (strcmp(path, "/api/time") == 0 && strcmp(method, "POST") == 0) {
         set_time(body, out, size, reply);
+    } else if (strcmp(path, "/api/battery/learn") == 0 && strcmp(method, "POST") == 0) {
+        learn(body, out, size, reply);
     } else if (strcmp(path, "/api/backup") == 0 && get) {
         backup(out, size, reply);
     } else if (strcmp(path, "/api/restore") == 0 && strcmp(method, "POST") == 0) {

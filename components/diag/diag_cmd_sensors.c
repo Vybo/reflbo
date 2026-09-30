@@ -55,8 +55,17 @@ static const char *battery_state_name(battery_state_t state)
 
 static int battery_body(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
+    if (argc >= 2 && strcmp(argv[1], "learn") == 0) { /* D21: from the next full discharge */
+        if (argc != 3 || (strcmp(argv[2], "start") != 0 && strcmp(argv[2], "stop") != 0)) {
+            printf("usage: battery learn start|stop\n");
+            return 1;
+        }
+        if (strcmp(argv[2], "start") == 0) {
+            sensors_learn_start();
+        } else {
+            sensors_learn_stop();
+        }
+    }
     time_t now = time(NULL);
     esp_err_t err = sensors_sample_battery(now);
     if (err != ESP_OK) {
@@ -66,6 +75,9 @@ static int battery_body(int argc, char **argv)
     sensors_battery_t b = sensors_battery(now);
     printf("battery: %d mV now, %d mV smoothed, %d %%, %s\n", b.last_mv, b.smoothed_mv, b.level,
            battery_state_name(b.state));
+    const battery_learn_t *l = sensors_learn();
+    printf("learning: %s, %u h of discharge, %d points\n", battery_learn_state_name(battery_learn_state(l)),
+           (unsigned)battery_learn_hours(l), battery_learn_points(l));
     return 0;
 }
 
@@ -128,7 +140,8 @@ esp_err_t diag_register_sensor_commands(void)
 {
     const esp_console_cmd_t cmds[] = {
         { .command = "sensors", .help = "Read the SHTC3 now", .func = &cmd_sensors },
-        { .command = "battery", .help = "Read the battery now and show the gauge", .func = &cmd_battery },
+        { .command = "battery", .help = "Read the battery now and show the gauge; battery learn start|stop",
+          .func = &cmd_battery },
         { .command = "rtc", .help = "rtc get | rtc set <ISO 8601 time; Z, +HH:MM or local>", .func = &cmd_rtc },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {

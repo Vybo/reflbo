@@ -221,16 +221,20 @@ function control(root, label) {
   assert.fail(`no field "${label}"`);
 }
 
-function settingsDevice(patches) {
+function settingsDevice(patches, battery = {}, learn = { state: 'off', hours: 0 }, learnCalls = []) {
   const settings = { schema: 1, language: 'en', units: { temp: 'C' },
                      sensors: { interval_min: 5, temp_offset_c: -2, hum_offset_pct: 0 },
                      display: { update_min: 1, lpm_hz: 1 },
-                     battery: { level_from: 'curve', empty_v: 3.27, full_v: 4.2 } };
+                     battery: { level_from: 'curve', empty_v: 3.27, full_v: 4.2, ...battery } };
   return {
     'GET /api/settings': () => reply(200, settings),
+    'GET /api/status': () => reply(200, { battery: { percent: 82, mv: 4050, learn } }),
     'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, settings); },
+    'POST /api/battery/learn': (init) => { learnCalls.push(JSON.parse(init.body)); return reply(200, { state: 'waiting' }); },
   };
 }
+
+const options = (sel) => sel.children.filter((k) => k instanceof FakeElement).map((o) => o.value);
 
 test('the Device page saves your own battery voltages', async () => {
   const patches = [];
@@ -255,4 +259,35 @@ test('the Device page wants room between the battery voltages', async () => {
   await settle();
   assert.equal(patches.length, 0);
   assert.match(text(main), /0\.3 V/);
+});
+
+/* ---- learning the battery curve from a full discharge (D21) ---- */
+
+test('the learned curve is on offer once there is one', async () => {
+  let page = await load(settingsDevice([]));
+  await page.ctx.devicePage();
+  assert.deepEqual(options(control(page.main, 'Battery level from')), ['curve', 'manual']);
+  const curve = Array.from({ length: 21 }, (_, i) => 3300 + 45 * i);
+  page = await load(settingsDevice([], { level_from: 'learned', learned_mv: curve, learned_at: 1790786009 }));
+  await page.ctx.devicePage();
+  assert.deepEqual(options(control(page.main, 'Battery level from')), ['curve', 'manual', 'learned']);
+});
+
+test('Learn from the next full discharge arms it', async () => {
+  const learnCalls = [];
+  const { ctx, main } = await load(settingsDevice([], {}, { state: 'off', hours: 0 }, learnCalls));
+  await ctx.devicePage();
+  await buttonNamed(main, 'Learn from the next full discharge').click();
+  await settle();
+  assert.deepEqual(learnCalls, [{ start: true }]);
+});
+
+test('a discharge being learned shows its hours and can be stopped', async () => {
+  const learnCalls = [];
+  const { ctx, main } = await load(settingsDevice([], {}, { state: 'recording', hours: 42 }, learnCalls));
+  await ctx.devicePage();
+  assert.match(text(main), /42 h/);
+  await buttonNamed(main, 'Stop learning').click();
+  await settle();
+  assert.deepEqual(learnCalls, [{ stop: true }]);
 });

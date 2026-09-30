@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -69,6 +70,29 @@ static uint8_t lpm_from_hz(const cJSON *display, uint8_t fallback)
     return fallback;
 }
 
+/* battery.learned_mv into `out` if it is a usable curve: 21 rising voltages within 3.0-4.4 V and at
+ * least 0.3 V from 0 % to 100 %, as battery_cal_valid() in sensors wants. */
+static bool read_curve(const cJSON *arr, uint16_t out[SETTINGS_BAT_CURVE_POINTS])
+{
+    if (!cJSON_IsArray(arr) || cJSON_GetArraySize(arr) != SETTINGS_BAT_CURVE_POINTS) {
+        return false;
+    }
+    uint16_t c[SETTINGS_BAT_CURVE_POINTS];
+    for (int i = 0; i < SETTINGS_BAT_CURVE_POINTS; i++) {
+        const cJSON *v = cJSON_GetArrayItem(arr, i);
+        if (!cJSON_IsNumber(v) || v->valuedouble < 3000 || v->valuedouble > 4400 ||
+            (i > 0 && lround(v->valuedouble) <= c[i - 1])) {
+            return false;
+        }
+        c[i] = (uint16_t)lround(v->valuedouble);
+    }
+    if (c[SETTINGS_BAT_CURVE_POINTS - 1] - c[0] < BAT_SPAN_MIN_MV) {
+        return false;
+    }
+    memcpy(out, c, sizeof(c));
+    return true;
+}
+
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size)
 {
     if (util_json_depth(json) > SETTINGS_JSON_MAX_DEPTH) {
@@ -113,9 +137,13 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
         out->bat_empty_mv = (uint16_t)empty;
         out->bat_full_mv = (uint16_t)full;
     }
+    bool learned = read_curve(child(battery, "learned_mv"), out->bat_learned_mv);
+    out->bat_learned_at = (uint32_t)read_scaled(battery, "learned_at", out->bat_learned_at, 1, 0, UINT32_MAX);
     const cJSON *from = child(battery, "level_from");
     if (cJSON_IsString(from)) {
-        out->bat_cal = strcmp(from->valuestring, "manual") == 0 && room ? SETTINGS_BAT_MANUAL : SETTINGS_BAT_CURVE;
+        out->bat_cal = strcmp(from->valuestring, "manual") == 0 && room     ? SETTINGS_BAT_MANUAL
+                       : strcmp(from->valuestring, "learned") == 0 && learned ? SETTINGS_BAT_LEARNED
+                                                                              : SETTINGS_BAT_CURVE;
     }
     cJSON_Delete(root);
     return true;
@@ -174,9 +202,19 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     put(location, "lat", cJSON_CreateNumber(s->lat_e4 / 1e4));
     put(location, "lon", cJSON_CreateNumber(s->lon_e4 / 1e4));
     cJSON *battery = object_at(root, "battery");
-    put(battery, "level_from", cJSON_CreateString(s->bat_cal == SETTINGS_BAT_MANUAL ? "manual" : "curve"));
+    put(battery, "level_from", cJSON_CreateString(s->bat_cal == SETTINGS_BAT_MANUAL    ? "manual"
+                                                  : s->bat_cal == SETTINGS_BAT_LEARNED ? "learned"
+                                                                                       : "curve"));
     put(battery, "empty_v", cJSON_CreateNumber(s->bat_empty_mv / 1000.0));
     put(battery, "full_v", cJSON_CreateNumber(s->bat_full_mv / 1000.0));
+    if (s->bat_learned_mv[SETTINGS_BAT_CURVE_POINTS - 1] != 0) {
+        cJSON *curve = cJSON_CreateArray();
+        for (int i = 0; i < SETTINGS_BAT_CURVE_POINTS; i++) {
+            cJSON_AddItemToArray(curve, cJSON_CreateNumber(s->bat_learned_mv[i]));
+        }
+        put(battery, "learned_mv", curve);
+        put(battery, "learned_at", cJSON_CreateNumber(s->bat_learned_at));
+    }
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;

@@ -227,6 +227,34 @@ static void test_a_battery_calibration_without_room_keeps_the_curve(void)
     TEST_ASSERT_EQUAL_UINT16(3400, s_out.bat_empty_mv);         /* the voltages are good, and kept */
 }
 
+/* A curve learned from a full discharge (D21), kept with the time it was learned. */
+static void test_a_learned_battery_curve_parses_and_round_trips(void)
+{
+    char json[512];
+    size_t n = (size_t)snprintf(json, sizeof(json), "{\"schema\": 1, \"battery\": {\"level_from\": \"learned\", "
+                                                    "\"learned_at\": 1790786009, \"learned_mv\": [");
+    for (int p = 0; p < SETTINGS_BAT_CURVE_POINTS; p++) {
+        n += (size_t)snprintf(json + n, sizeof(json) - n, "%s%d", p ? ", " : "", 3300 + 45 * p);
+    }
+    snprintf(json + n, sizeof(json) - n, "]}}");
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_BAT_LEARNED, s_out.bat_cal);
+    TEST_ASSERT_EQUAL_UINT16(3750, s_out.bat_learned_mv[10]);
+    TEST_ASSERT_EQUAL_UINT32(1790786009u, s_out.bat_learned_at);
+    settings_t s = s_out;
+    TEST_ASSERT_TRUE(settings_to_json(&s, NULL, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_TRUE(settings_from_json(s_json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_MEMORY(&s, &s_out, sizeof(s));
+}
+
+static void test_learned_without_a_usable_curve_keeps_the_built_in_one(void)
+{
+    const char *json = "{\"schema\": 1, \"battery\": {\"level_from\": \"learned\", \"learned_mv\": [3300, 3200]}}";
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_BAT_CURVE, s_out.bat_cal);
+    TEST_ASSERT_EQUAL_UINT16(0, s_out.bat_learned_mv[0]); /* not taken */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -244,5 +272,7 @@ int main(void)
     RUN_TEST(test_a_base_nested_too_deep_is_not_parsed);
     RUN_TEST(test_the_battery_calibration_parses_and_round_trips);
     RUN_TEST(test_a_battery_calibration_without_room_keeps_the_curve);
+    RUN_TEST(test_a_learned_battery_curve_parses_and_round_trips);
+    RUN_TEST(test_learned_without_a_usable_curve_keeps_the_built_in_one);
     return UNITY_END();
 }

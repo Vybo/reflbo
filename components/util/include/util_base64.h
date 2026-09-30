@@ -8,3 +8,5 @@ size_t util_base64_encoded_len(size_t len);
 /* Writes the NUL-terminated encoding of data to out. Returns false, writing nothing, when out_size
  * is smaller than util_base64_encoded_len(len) + 1. */
 bool util_base64_encode(const void *data, size_t len, char *out, size_t out_size);
+/* Decodes padded base64 into out. Returns the byte count, or -1 for bad input or no room. */
+int util_base64_decode(const char *in, void *out, size_t out_size);

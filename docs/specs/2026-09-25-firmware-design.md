@@ -57,6 +57,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D18 | Owner, 2026-09-30 (M4 planning): the web UI gets a password instead of the admin PIN, chosen on the first visit over the device's own AP and needed on every visit after (§10.4); web UI translations stay deferred; M4 runs as one plan; the snapshot header gets no ELF hash | A PIN guards little that a password doesn't; every firmware change resets the chip, and only deep-sleep wakes read the snapshot |
 | D19 | Owner, 2026-09-30 (M4 spike review): the first-run screen appears when `settings.json` is missing at boot (§5.5); the status bar's Wi-Fi state moves to M5 and M6 (§5.2); a restart from the web UI returns in config mode (§10.2); the web UI sets a lost clock from the phone, can change the password and log out, and gets a Device page (§10.3, §10.4); the temperature offset defaults to −2.0 °C (§8) | In M4 Wi-Fi runs only in config mode, which has its own screen. The board warms the SHTC3 by about 2 °C at all times; the user trims the rest |
 | D20 | Owner, 2026-09-30 (M4 acceptance): config mode watches the battery (§8, §10.2); while a phone is logged in, config mode shows the dashboard with a globe in the status bar (§5.2, §10.2); the preset preview names its slots, and a new preset joins the cycle (§10.3); seconds keep the refresh rate the user picked (§7); the battery level can follow the owner's own full and empty voltages (§8) | A battery that sags under the radio would brown out anyway. The owner wants to watch settings change on the screen itself. The refresh rate is the user's to tune |
+| D21 | Owner, 2026-09-30: the battery curve is learned from one full discharge, not a charge (§8) | The firmware can't see charging, and the charger's current lifts VBAT, so a charge maps poorly to the resting level; this board's steady load makes time a fair measure of charge |
 
 ### 1.3 Out of scope for v1
 
@@ -507,7 +508,13 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - `curve`: the built-in table, 3.27 V for 0 % to 4.20 V for 100 %. The default.
   - `manual`: the same table stretched between the owner's empty and full voltages (empty 3.0–4.0 V, full 3.6–4.4 V, at least 0.3 V apart), so the shape stays.
   - A change applies at once: the level follows the new mapping, and the days-left estimate starts over, as its history is in the old levels.
-  - A curve learned over a full cycle is an open item (§20). The critical thresholds stay in volts whatever the calibration.
+  - `learned`: a curve learned from one full discharge (D21), below. The critical thresholds stay in volts whatever the calibration.
+- **Learning the curve** (D21; the Device page, or `battery learn start|stop`).
+  - Started, it waits for a charge: readings while charging, or at the charger's plateau, set the start. The discharge begins when the smoothed voltage falls 10 mV below that plateau.
+  - It records the smoothed voltage once an hour, 256 readings at most; when they run out they thin to every other one, twice as far apart, so any length fits.
+  - It ends at the critical level (3.3 V). This board's load is steady, so the share of the time gone is the share of the charge used: the voltage at every 5 % of the time becomes a 21-point curve, saved as `battery.learned_mv` with `battery.learned_at`, and the level switches to it.
+  - A discharge shorter than 12 h is no curve: something drew far more than this board does. A charge on the way, or a gap of more than 2 h between readings, starts the wait again. A clock set moves the session with it; a clock that was never set (before 2020) records nothing.
+  - The session lives in the sensors' RTC-RAM state through deep sleep, and in `/fs/state/battery_learn.txt` (base64 with a CRC) whenever it gains a point, so a restart keeps it. Its cost: one LittleFS write an hour.
 - **Charging state (inferred; there is no hardware signal).**
 
   | State | Rule |
@@ -674,6 +681,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 | `GET /api/preview.bmp?preset=<id>` · `POST /api/preview.bmp?preset=<id>` | Render a saved preset, or one from a presets document the editor posts (validated like `presets.json`), with live data, using the real renderer; a 1-bit BMP |
 | `GET /api/screenshot.bmp` | The current frame |
 | `POST /api/time` | Set time from the phone (epoch, IANA zone, POSIX TZ) |
+| `POST /api/battery/learn` | `{"start": true}` learns the battery curve from the next full discharge, `{"stop": true}` ends it (D21); `GET /api/status` reports its state and hours |
 | `GET /api/geocode?q=` | Proxy for the Open-Meteo geocoding search (station mode only; manual lat/lon always works) (M5) |
 | `POST /api/sync` | Sync now (M5) |
 | `GET/PUT /api/alarms` · `GET/PUT /api/stations` · `POST /api/radio/play` · `POST /api/radio/stop` | Audio (M7) |
@@ -888,7 +896,9 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 }
 ```
 
-M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
+Once a discharge is learned, `battery` also holds `learned_mv` (21 voltages, 0 % to 100 %) and `learned_at` (UTC seconds), and `level_from` can be `learned` (D21).
+
+M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
 
 ### 14.4 Backup, restore, factory reset
 
@@ -910,7 +920,7 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 | `screenshot` | Framebuffer as base64 PBM between markers |
 | `panel status` · `panel test` · `panel clear` · `panel mode <hpm\|lpm>` · `panel rate <Hz>` · `panel fps [s]` · `panel sleep` · `panel wake` · `panel init <factory\|xiaozhi>` | Panel diagnostics: test pattern, power mode, LPM rate, measured frame rate, sleep-in and wake, init sequence |
 | `btn <key\|boot> <short\|double\|long>` | Inject button gestures |
-| `sensors` · `battery` | Readings |
+| `sensors` · `battery` · `battery learn start\|stop` | Readings; learning the battery curve from the next full discharge (D21) |
 | `rtc get` · `rtc set <ISO 8601>` | RTC |
 | `field list` · `field get <id>` · `field set <id> <value>` · `field clear <id>` | Inspect and inject data, e.g. fixtures on the device |
 | `preset list` · `preset set <id>` | Presets |
@@ -1024,7 +1034,6 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | The Czech name-day calendar needs a source whose licence allows redistribution in this repository | Checked 2026-09-29: the best list (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA); others were incomplete, broken or unlicensed. Deferred (D16): `cs` ships the holidays only until a clean source turns up |
 | The critical-battery path has not met a really low battery: its thresholds are host-tested and its screen is a golden, but its KEY-only sleep has not run on the board | Watch the first time the board runs flat on battery (M5 power work) |
 | No RTC backup cell (D9): the time is lost at every PWR-off | Sync at boot when Wi-Fi is configured, otherwise a "Set time" prompt; the owner may fit an ML1220 (§7) |
-| A learned battery curve (owner request, 2026-09-30): the firmware can't see charging (hardware gotcha 3), and the charger's current lifts VBAT, so a charge maps poorly to the resting level | Proposed: learn from one full discharge on battery, which this board's steady load suits; waiting for the owner's choice |
 | The web UI moving focus to a text box on a phone (owner, 2026-09-30) | Not reproduced in iOS 26 Safari; waiting for the phone and browser |
 | Homebrew Python 3.14 on this Mac (3.14.6 and 3.14.7 checked) can't load `pyexpat` (it expects a newer libexpat than macOS 26.2 has), which breaks pip and the ESP-IDF installer | ESP-IDF uses uv's Python 3.13 through `~/esp/python-shim` (`AGENTS.md` §6) |
 
@@ -1049,3 +1058,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r15 | 2026-09-30 | M4 as built: the components (§3.1); the menu's Wi-Fi section and Info rows (§5.7); the AP's channel, testing a network, and the portal address (§10.1); what ends config mode and what runs meanwhile (§10.2); the API (§10.3); the password record, sessions and login throttle (§10.4); OTA checks and measurements (§10.5); NVS keys (§14.2); `location.*` and the merge patch (§14.3); the backup bundle (§14.4); `wifi` (§15); the new host tests (§17) |
 | r16 | 2026-09-30 | M4 review: long menu values are cut (§5.7); leaving a network for a test is never its failure (§10.1); config mode doesn't watch the battery, and the resume flag is in NVS (§10.2, §14.2); bodies are read once, nested at most 18 levels, and a stalled client gets 408 (§10.3); 2 KB of headers for other gadgets' cookies (§10.4); an image that fails to start rolls back at once (§10.5) |
 | r17 | 2026-09-30 | M4 acceptance (D20): the globe in the status bar and the dashboard in config mode while a phone is logged in (§5.2, §10.2); the running clock's phase and the seconds' refresh rate (§7); battery samples in config mode and the battery calibration (§8, §14.3); the Device page's battery card and the preset editor's slot names, new presets in the cycle and Undo (§10.3); two open items (§20) |
+| r18 | 2026-09-30 | D21: learning the battery curve from a full discharge (§8), `POST /api/battery/learn` (§10.3), `battery.learned_mv` (§14.3); the open item on a learned curve is closed (§20) |

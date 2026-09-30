@@ -17,9 +17,12 @@
 
 /* battery.level_from (owner, 2026-09-30); the values match battery_cal_method_t in sensors. */
 typedef enum {
-    SETTINGS_BAT_CURVE,  /* "curve": the built-in Li-ion curve */
-    SETTINGS_BAT_MANUAL, /* "manual": that curve between battery.empty_v and battery.full_v */
+    SETTINGS_BAT_CURVE,   /* "curve": the built-in Li-ion curve */
+    SETTINGS_BAT_MANUAL,  /* "manual": that curve between battery.empty_v and battery.full_v */
+    SETTINGS_BAT_LEARNED, /* "learned": battery.learned_mv, from a full discharge (D21) */
 } settings_bat_cal_t;
+
+#define SETTINGS_BAT_CURVE_POINTS 21 /* BATTERY_CURVE_POINTS: 0 %, 5 %, ... 100 % */
 
 typedef struct {
     char language[4];                    /* "en" */
@@ -36,6 +39,8 @@ typedef struct {
     int32_t lat_e4, lon_e4;         /* location in 1e-4 degrees, north and east positive: 491951, 166068 */
     uint8_t bat_cal;                    /* settings_bat_cal_t */
     uint16_t bat_empty_mv, bat_full_mv; /* 0 % and 100 % for SETTINGS_BAT_MANUAL: 3000-4000, 3600-4400 */
+    uint16_t bat_learned_mv[SETTINGS_BAT_CURVE_POINTS]; /* all 0 until a discharge was learned */
+    uint32_t bat_learned_at;                            /* UTC seconds, 0 for never */
 } settings_t;
 
 /* Fails only if the text is not a JSON object with "schema": 1. */

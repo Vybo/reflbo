@@ -14,6 +14,7 @@
 #include "timekeeping.h"
 #include "ui_dashboard.h"
 #include "ui_screens.h"
+#include "util_base64.h"
 #include "util_time.h"
 #include "webui.h"
 
@@ -28,6 +29,10 @@ EXT_RAM_BSS_ATTR static char s_settings_base[2048]; /* settings.json as read: un
 static char s_err[96];
 static char s_toast[64];
 static int64_t s_toast_until_ms;
+
+#define LEARN_PATH "/fs/state/battery_learn.txt" /* the battery learning session in base64 (D21) */
+#define LEARN_TEXT_MAX ((BATTERY_LEARN_PACKED_MAX + 2) / 3 * 4 + 1)
+_Static_assert(SETTINGS_BAT_CURVE_POINTS == BATTERY_CURVE_POINTS, "settings keep a learned curve whole");
 
 static void default_settings(settings_t *out)
 {
@@ -156,10 +161,12 @@ void app_ui_apply_settings(void)
 {
     timekeeping_init(s.settings.tz_posix);
     sensors_set_offsets(s.settings.temp_offset_c100, s.settings.hum_offset_pct100);
-    sensors_set_battery_cal(&(battery_cal_t){ .method = s.settings.bat_cal == SETTINGS_BAT_MANUAL ? BATTERY_CAL_MANUAL
-                                                                                               : BATTERY_CAL_CURVE,
-                                              .empty_mv = s.settings.bat_empty_mv,
-                                              .full_mv = s.settings.bat_full_mv });
+    battery_cal_t cal = { .method = s.settings.bat_cal == SETTINGS_BAT_MANUAL    ? BATTERY_CAL_MANUAL
+                                    : s.settings.bat_cal == SETTINGS_BAT_LEARNED ? BATTERY_CAL_LEARNED
+                                                                                 : BATTERY_CAL_CURVE,
+                          .empty_mv = s.settings.bat_empty_mv, .full_mv = s.settings.bat_full_mv };
+    memcpy(cal.learned_mv, s.settings.bat_learned_mv, sizeof(cal.learned_mv));
+    sensors_set_battery_cal(&cal);
     /* Spec §5.1: stale after 15 min, but never before the next reading is due. */
     uint32_t ttl = (uint32_t)s.settings.sensors_every_min * 120u;
     ttl = ttl < 900 ? 900 : ttl;
@@ -269,6 +276,61 @@ static ds_bat_state_t ds_battery_state(battery_state_t state)
     }
 }
 
+static bool parse_learning(const char *text, void *ctx)
+{
+    static uint8_t raw[BATTERY_LEARN_PACKED_MAX];
+    int n = util_base64_decode(text, raw, sizeof(raw));
+    return n > 0 && battery_learn_unpack(ctx, raw, (size_t)n);
+}
+
+void app_ui_restore_learning(void)
+{
+    static battery_learn_t l;
+    static char text[LEARN_TEXT_MAX + 1];
+    bool from_backup = false;
+    if (storage_ready() && storage_load(LEARN_PATH, text, sizeof(text), parse_learning, &l, &from_backup) == ESP_OK) {
+        sensors_learn_restore(&l);
+        ESP_LOGI(TAG, "battery learning resumed: %s, %u h recorded", battery_learn_state_name(battery_learn_state(&l)),
+                 (unsigned)battery_learn_hours(&l));
+    }
+}
+
+/* The session into LittleFS when it changed (a point, a state); routine wakes without storage
+ * leave it for the next time storage is up. */
+static void save_learning(void)
+{
+    if (!storage_ready() || !sensors_learn_take_changed()) {
+        return;
+    }
+    const battery_learn_t *l = sensors_learn();
+    if (battery_learn_state(l) == BATTERY_LEARN_OFF) {
+        remove(LEARN_PATH);
+        remove(LEARN_PATH ".bak");
+        return;
+    }
+    static uint8_t raw[BATTERY_LEARN_PACKED_MAX];
+    static char text[LEARN_TEXT_MAX];
+    size_t n = battery_learn_pack(l, raw, sizeof(raw));
+    if (n == 0 || !util_base64_encode(raw, n, text, sizeof(text))) {
+        return;
+    }
+    esp_err_t err = storage_write_atomic(LEARN_PATH, text, strlen(text));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "battery learning not saved: %s", esp_err_to_name(err));
+    }
+}
+
+void app_ui_learn(bool start)
+{
+    if (start) {
+        sensors_learn_start();
+    } else {
+        sensors_learn_stop();
+    }
+    ESP_LOGI(TAG, "battery learning %s", start ? "armed: waiting for a charge" : "stopped");
+    save_learning();
+}
+
 void app_ui_sample(time_t now)
 {
     struct tm local;
@@ -299,6 +361,17 @@ void app_ui_sample(time_t now)
             ESP_LOGI(TAG, "battery recovered: %d mV", bat.smoothed_mv);
         }
         s.critical = critical;
+        uint16_t curve[BATTERY_CURVE_POINTS];
+        if (sensors_learn_take_curve(curve)) { /* D21: a full discharge reached its end */
+            memcpy(s.settings.bat_learned_mv, curve, sizeof(curve));
+            s.settings.bat_learned_at = (uint32_t)now;
+            s.settings.bat_cal = SETTINGS_BAT_LEARNED;
+            app_ui_save_settings();
+            app_ui_apply_settings();
+            ESP_LOGI(TAG, "battery curve learned: %u mV at 0 %%, %u mV at 50 %%, %u mV at 100 %%", curve[0], curve[10],
+                     curve[BATTERY_CURVE_POINTS - 1]);
+        }
+        save_learning();
     } else {
         ESP_LOGW(TAG, "battery: %s", esp_err_to_name(err));
     }

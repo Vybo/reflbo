@@ -563,6 +563,9 @@ static esp_err_t boot(void)
         ESP_LOGE(TAG, "RTC read: %s", esp_err_to_name(err));
     }
     ESP_RETURN_ON_ERROR(sensors_init(board_i2c(), !warm), TAG, "sensors");
+    if (!warm) {
+        app_ui_restore_learning(); /* D21: a restart keeps a discharge being learned */
+    }
     if (warm) {
         sensors_import(&s_snap.sensors);
         ESP_RETURN_ON_ERROR(display_init_warm(&s_snap.display), TAG, "display");

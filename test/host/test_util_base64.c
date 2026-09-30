@@ -49,12 +49,42 @@ static void test_too_small_buffer_writes_nothing(void)
     TEST_ASSERT_EQUAL_STRING("abcd", out);
 }
 
+/* Decoding, for the battery learning session kept in LittleFS (D21). */
+static void test_decoding_undoes_encoding(void)
+{
+    const char *const k_in[] = { "", "f", "fo", "foo", "foob", "fooba", "foobar" };
+    for (size_t i = 0; i < sizeof(k_in) / sizeof(k_in[0]); i++) {
+        char enc[16];
+        uint8_t dec[8];
+        TEST_ASSERT_TRUE(util_base64_encode(k_in[i], strlen(k_in[i]), enc, sizeof(enc)));
+        TEST_ASSERT_EQUAL_INT((int)strlen(k_in[i]), util_base64_decode(enc, dec, sizeof(dec)));
+        if (k_in[i][0] != '\0') { /* Unity won't compare zero bytes */
+            TEST_ASSERT_EQUAL_MEMORY(k_in[i], dec, strlen(k_in[i]));
+        }
+    }
+    uint8_t out[4];
+    TEST_ASSERT_EQUAL_INT(3, util_base64_decode("AP8Q", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_HEX8(0xFF, out[1]);
+}
+
+static void test_bad_base64_is_refused(void)
+{
+    uint8_t out[8];
+    TEST_ASSERT_EQUAL_INT(-1, util_base64_decode("Zm9", out, sizeof(out)));   /* not a multiple of 4 */
+    TEST_ASSERT_EQUAL_INT(-1, util_base64_decode("Zm9*", out, sizeof(out)));  /* not the alphabet */
+    TEST_ASSERT_EQUAL_INT(-1, util_base64_decode("Z===", out, sizeof(out)));  /* too much padding */
+    TEST_ASSERT_EQUAL_INT(-1, util_base64_decode("Zm9vYmFy", out, 5));        /* no room */
+    TEST_ASSERT_EQUAL_INT(-1, util_base64_decode("Zg==Zg==", out, sizeof(out))); /* padding inside */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_rfc4648_vectors);
     RUN_TEST(test_binary_bytes);
     RUN_TEST(test_encoded_length);
+    RUN_TEST(test_decoding_undoes_encoding);
+    RUN_TEST(test_bad_base64_is_refused);
     RUN_TEST(test_too_small_buffer_writes_nothing);
     return UNITY_END();
 }

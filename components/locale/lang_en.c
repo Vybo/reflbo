@@ -110,6 +110,7 @@ const lang_t lang_en = {
         [LS_C_SCAN_OPEN] = "Scan to open",
         [LS_HINT_CONFIG] = "Hold BOOT to turn Wi-Fi off",
         [LS_HINT_CONFIG_SWITCH] = "KEY other code     Hold BOOT to turn Wi-Fi off",
+        [LS_HINT_CONFIG_BACK] = "KEY back     Hold BOOT to turn Wi-Fi off",
         [LS_F_TITLE] = "Welcome",
         [LS_F_WIFI] = "Hold BOOT 3 s to set up Wi-Fi",
         [LS_F_MENU] = "Hold KEY for the menu",

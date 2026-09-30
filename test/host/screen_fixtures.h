@@ -99,6 +99,12 @@ static inline bool fixture_config(const char *name, ui_config_view_t *v)
                              .ap_ssid = "reflbo-bb94", .ap_pass = "k7m2xq9pde", .minutes_left = 10 };
     if (strncmp(name, "config_ap_url", 13) == 0) {
         v->qr_url = true;
+    } else if (strncmp(name, "config_station_back", 19) == 0) { /* KEY brought it back over the dashboard (D20) */
+        v->state = UI_NET_STATION;
+        v->ssid = "Vybiral Home 5G";
+        v->ip = "192.168.1.57";
+        v->ap_on = false; /* a password is set, so the AP doesn't run beside the station */
+        v->back = true;
     } else if (strncmp(name, "config_starting", 15) == 0) {
         *v = (ui_config_view_t){ .state = UI_NET_STARTING, .ssid = "", .ip = "", .host = "reflbo-bb94",
                                  .ap_ssid = "reflbo-bb94", .ap_pass = "k7m2xq9pde", .minutes_left = 10 };
@@ -197,4 +203,5 @@ static const char *const k_screen_fixtures[] = { "menu_root_en", "menu_root_cs",
                                                  "toast_preset_cs", "critical_en", "critical_cs", "menu_wifi_en",
                                                  "menu_confirm_password_cs", "config_ap_en", "config_ap_url_cs",
                                                  "config_starting_en", "config_joining_en", "config_station_en",
-                                                 "config_station_ap_cs", "first_run_en", "first_run_invalid_cs" };
+                                                 "config_station_ap_cs", "config_station_back_en", "config_station_back_cs",
+                                                 "first_run_en", "first_run_invalid_cs" };

@@ -99,7 +99,9 @@ void ui_draw_config(gfx_fb_t *fb, const ui_config_view_t *v, const lang_t *lang)
     gfx_reset_clip(fb);
     gfx_clear(fb, GFX_WHITE);
     draw_header(fb, v, lang);
-    draw_hints(fb, lang_str(lang, ui_config_can_switch(v) ? LS_HINT_CONFIG_SWITCH : LS_HINT_CONFIG));
+    draw_hints(fb, lang_str(lang, v->back                   ? LS_HINT_CONFIG_BACK
+                                  : ui_config_can_switch(v) ? LS_HINT_CONFIG_SWITCH
+                                                            : LS_HINT_CONFIG));
 
     char qr[160], line[64];
     ui_qr_kind_t kind = ui_config_qr(v, qr, sizeof(qr));

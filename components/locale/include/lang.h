@@ -102,6 +102,7 @@ typedef enum {
     LS_C_SCAN_OPEN,
     LS_HINT_CONFIG,
     LS_HINT_CONFIG_SWITCH, /* with a second QR code to switch to */
+    LS_HINT_CONFIG_BACK,   /* shown on KEY while a phone is logged in: KEY goes back to the dashboard (D20) */
     LS_F_TITLE,
     LS_F_WIFI,
     LS_F_MENU,

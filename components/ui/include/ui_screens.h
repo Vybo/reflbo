@@ -27,6 +27,7 @@ typedef struct {
     ui_net_state_t state;
     bool ap_on;          /* the AP runs: the AP state, or beside a station while no web password is set */
     bool qr_url;         /* KEY short picked the code that opens the web UI; otherwise it joins the AP */
+    bool back;           /* a phone is logged in and KEY brought this up: KEY goes back to the dashboard (D20) */
     const char *ssid;    /* the network joined, or being joined */
     const char *ip;      /* on that network; "" while it has none */
     const char *host;    /* reflbo-XXXX, the mDNS name without .local */

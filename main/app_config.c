@@ -210,7 +210,8 @@ void app_config_draw(gfx_fb_t *fb, const lang_t *lang)
     static netmgr_status_t st;
     netmgr_status(&st);
     s_shown_minutes = minutes_left();
-    ui_config_view_t v = { .state = view_state(st.state), .ap_on = st.ap_on, .qr_url = s_qr_url, .ssid = st.ssid,
+    ui_config_view_t v = { .state = view_state(st.state), .ap_on = st.ap_on, .qr_url = s_qr_url,
+                           .back = webui_session_active(), .ssid = st.ssid,
                            .ip = st.ip, .host = st.host, .ap_ssid = st.ap_ssid, .ap_pass = st.ap_pass,
                            .minutes_left = s_shown_minutes };
     ui_draw_config(fb, &v, lang);

@@ -150,6 +150,7 @@ const lang_t lang_cs = {
         [LS_C_SCAN_OPEN] = "Otevřít",
         [LS_HINT_CONFIG] = "Podržte BOOT pro vypnutí Wi-Fi",
         [LS_HINT_CONFIG_SWITCH] = "KEY jiný kód     Podržte BOOT pro vypnutí Wi-Fi",
+        [LS_HINT_CONFIG_BACK] = "KEY zpět     Podržte BOOT pro vypnutí Wi-Fi",
         [LS_F_TITLE] = "Vítejte",
         [LS_F_WIFI] = "Podržte BOOT 3 s pro nastavení Wi-Fi",
         [LS_F_MENU] = "Podržte KEY pro menu",

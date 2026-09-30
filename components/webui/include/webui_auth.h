@@ -43,6 +43,10 @@ void webui_sessions_clear(webui_sessions_t *t);
 const char *webui_session_new(webui_sessions_t *t, const uint8_t random[16], int64_t now_s);
 /* True if `token` is a live session; it counts as used now. */
 bool webui_session_check(webui_sessions_t *t, const char *token, int64_t now_s);
+/* Logging out: ends the session `token`; false if there was none. */
+bool webui_session_end(webui_sessions_t *t, const char *token);
+/* Whether anyone is logged in: config mode shows the dashboard meanwhile (D20). */
+bool webui_sessions_any(const webui_sessions_t *t);
 /* The session token in a Cookie header ("...; session=<token>; ..."), or false. */
 bool webui_cookie_token(const char *cookie, char out[WEBUI_TOKEN_LEN + 1]);
 /* Login throttling: false while waiting after WEBUI_FAILS_BEFORE_WAIT failures in a row. */

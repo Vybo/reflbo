@@ -77,6 +77,7 @@ typedef struct {
     bool clock_24h;
     bool seconds;
     bool fahrenheit;
+    bool web_session; /* config mode with a phone logged in to the web UI: marked in the status bar (D20) */
 } ui_context_t;
 
 typedef enum {

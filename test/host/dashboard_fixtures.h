@@ -89,6 +89,13 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
     } else if (strcmp(name, "home_low_battery") == 0) { /* 12 %: the status bar marks it */
         *preset = fixture_preset("home");
         ds_set_battery(&s_fix_ds, 12, 3650, DS_BAT_DISCHARGING, FIX_NOW);
+    } else if (strcmp(name, "home_web") == 0) { /* config mode with a phone logged in (D20) */
+        *preset = fixture_preset("home");
+        ctx->web_session = true;
+    } else if (strcmp(name, "home_stale_web") == 0) { /* the web mark goes after the stale one */
+        *preset = fixture_preset("home");
+        fixture_fill(&s_fix_ds, FIX_NOW - 3 * 3600);
+        ctx->web_session = true;
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -104,4 +111,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "home_stale", "home_12h_charging", "indoor_cold",
                                                     "focus_seconds", "home_battery_details", "home_inverted",
                                                     "indoor_hot_f", "indoor_frost", "home_frost", "grid_clock_12h",
-                                                    "home_cs", "indoor_cs", "home_holiday_cs", "home_low_battery" };
+                                                    "home_cs", "indoor_cs", "home_holiday_cs", "home_low_battery",
+                                                    "home_web", "home_stale_web" };

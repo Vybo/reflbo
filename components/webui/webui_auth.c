@@ -122,6 +122,31 @@ bool webui_session_check(webui_sessions_t *t, const char *token, int64_t now_s)
     return found;
 }
 
+bool webui_session_end(webui_sessions_t *t, const char *token)
+{
+    if (token == NULL || strlen(token) != WEBUI_TOKEN_LEN) {
+        return false;
+    }
+    bool found = false;
+    for (int i = 0; i < WEBUI_SESSIONS; i++) {
+        if (t->s[i].token[0] != '\0' && util_ct_equal(t->s[i].token, token, WEBUI_TOKEN_LEN)) {
+            memset(&t->s[i], 0, sizeof(t->s[i]));
+            found = true;
+        }
+    }
+    return found;
+}
+
+bool webui_sessions_any(const webui_sessions_t *t)
+{
+    for (int i = 0; i < WEBUI_SESSIONS; i++) {
+        if (t->s[i].token[0] != '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool webui_cookie_token(const char *cookie, char out[WEBUI_TOKEN_LEN + 1])
 {
     for (const char *p = cookie; p != NULL && *p != '\0';) {

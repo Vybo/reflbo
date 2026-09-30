@@ -113,6 +113,21 @@ static void test_five_failed_logins_make_the_next_wait_a_minute(void)
     TEST_ASSERT_TRUE(webui_login_allowed(&s_t, 72));
 }
 
+/* Config mode shows the dashboard while any phone is logged in (D20). */
+static void test_any_session_tells_whether_someone_is_logged_in(void)
+{
+    uint8_t random[16] = { 7 };
+    TEST_ASSERT_FALSE(webui_sessions_any(&s_t));
+    const char *token = webui_session_new(&s_t, random, 100);
+    TEST_ASSERT_TRUE(webui_sessions_any(&s_t));
+    TEST_ASSERT_TRUE(webui_session_end(&s_t, token)); /* logging out */
+    TEST_ASSERT_FALSE(webui_sessions_any(&s_t));
+    TEST_ASSERT_FALSE(webui_session_end(&s_t, token));
+    webui_session_new(&s_t, random, 101);
+    webui_sessions_clear(&s_t);
+    TEST_ASSERT_FALSE(webui_sessions_any(&s_t));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -120,6 +135,7 @@ int main(void)
     RUN_TEST(test_a_record_is_salted_pbkdf2_and_checks_the_password);
     RUN_TEST(test_a_malformed_record_matches_nothing);
     RUN_TEST(test_sessions_are_random_tokens_and_the_oldest_makes_room);
+    RUN_TEST(test_any_session_tells_whether_someone_is_logged_in);
     RUN_TEST(test_the_cookie_header_yields_the_token);
     RUN_TEST(test_five_failed_logins_make_the_next_wait_a_minute);
     return UNITY_END();

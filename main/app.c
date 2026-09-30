@@ -279,7 +279,7 @@ static void handle_button(board_button_t button, gesture_t gesture)
                                                 : (held ? UI_MENU_KEY_EXIT : UI_MENU_KEY_BACK));
     } else if (app_config_active()) { /* spec §5.6 */
         if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT) {
-            app_config_toggle_qr();
+            app_config_key();
         } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
             app_config_exit();
         }

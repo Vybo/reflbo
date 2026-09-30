@@ -26,6 +26,7 @@ static const gesture_config_t k_config_buttons[BOARD_BUTTON_COUNT] = {
 };
 
 static bool s_net_ready, s_on, s_qr_url;
+static bool s_setup_asked; /* KEY short brought the setup screen back while a phone is logged in */
 static int64_t s_started_ms;
 static int s_shown_minutes;
 
@@ -71,6 +72,12 @@ static void web_event_on_app(void *arg)
     case WEBUI_EVENT_FACTORY_RESET:
         app_factory_reset();
         break;
+    case WEBUI_EVENT_SESSION: /* D20: the dashboard while someone is logged in, the setup screen after */
+        s_setup_asked = false;
+        if (s_on) {
+            app_ui_render();
+        }
+        break;
     }
 }
 
@@ -88,6 +95,7 @@ void app_config_enter(void)
     app_ui_end_first_run();
     s_on = true;
     s_qr_url = false;
+    s_setup_asked = false;
     s_started_ms = app_uptime_ms();
     board_buttons_set_config(k_config_buttons);
     esp_err_t err = st7305_set_mode(ST7305_MODE_HPM); /* spec §9.1: the screen answers at once */
@@ -127,9 +135,18 @@ bool app_config_active(void)
     return s_on;
 }
 
-void app_config_toggle_qr(void)
+bool app_config_shows_setup(void)
 {
-    s_qr_url = !s_qr_url;
+    return s_on && (s_setup_asked || !webui_session_active());
+}
+
+void app_config_key(void)
+{
+    if (webui_session_active()) {
+        s_setup_asked = !s_setup_asked; /* for another phone to join; KEY again goes back */
+    } else {
+        s_qr_url = !s_qr_url;
+    }
     app_ui_render();
 }
 
@@ -151,8 +168,8 @@ static int minutes_left(void)
 
 int64_t app_config_redraw_ms(void)
 {
-    if (!s_on) {
-        return 0;
+    if (!app_config_shows_setup()) {
+        return 0; /* the dashboard keeps its own schedule */
     }
     int m = minutes_left(); /* the count drops at the next whole minute before the deadline */
     return m > 0 ? app_config_deadline_ms() - (int64_t)(m - 1) * 60000 : app_config_deadline_ms();
@@ -168,7 +185,7 @@ void app_config_tick(void)
     if (app_uptime_ms() >= app_config_deadline_ms()) {
         ESP_LOGI(TAG, "no requests for %d min", IDLE_MS / 60000);
         app_config_exit();
-    } else if (minutes_left() != s_shown_minutes) {
+    } else if (app_config_shows_setup() && minutes_left() != s_shown_minutes) {
         app_ui_render();
     }
 }

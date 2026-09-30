@@ -10,3 +10,4 @@ calendar       calendar_today        24 48
 person         person                24 48
 celebration    celebration           24 48
 cloud          cloud                 24 48
+web            language              16

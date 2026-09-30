@@ -15,6 +15,7 @@
 #include "ui_dashboard.h"
 #include "ui_screens.h"
 #include "util_time.h"
+#include "webui.h"
 
 #define TOAST_MS 3000
 
@@ -184,7 +185,8 @@ void app_ui_context(ui_context_t *ctx)
     time_t now = time(NULL);
     *ctx = (ui_context_t){ .now = now, .time_valid = timekeeping_valid(), .ds = &s.ds,
                            .lang = lang_get(s.settings.language), .clock_24h = s.settings.clock_24h,
-                           .fahrenheit = s.settings.fahrenheit };
+                           .fahrenheit = s.settings.fahrenheit,
+                           .web_session = app_config_active() && webui_session_active() };
     localtime_r(&now, &ctx->local);
     ctx->local_day = local_day(&ctx->local);
 }
@@ -203,7 +205,7 @@ void app_ui_render(void)
     app_ui_context(&ctx);
     if (s.critical) {
         ui_draw_critical(fb, &ctx);
-    } else if (app_config_active()) {
+    } else if (app_config_shows_setup()) { /* while a phone is logged in, the dashboard (D20) */
         app_config_draw(fb, ctx.lang);
     } else if (s.first_run) {
         ui_draw_first_run(fb, &ctx);

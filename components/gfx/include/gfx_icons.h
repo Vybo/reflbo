@@ -25,3 +25,4 @@ extern const gfx_bitmap_t gfx_icon_celebration_24;
 extern const gfx_bitmap_t gfx_icon_celebration_48;
 extern const gfx_bitmap_t gfx_icon_cloud_24;
 extern const gfx_bitmap_t gfx_icon_cloud_48;
+extern const gfx_bitmap_t gfx_icon_web_16;

@@ -30,6 +30,7 @@ typedef enum {
     WEBUI_EVENT_REBOOT,  /* the Status page asked */
     WEBUI_EVENT_UPDATED, /* a firmware upload finished: restart into it */
     WEBUI_EVENT_FACTORY_RESET,
+    WEBUI_EVENT_SESSION, /* someone logged in or out: see webui_session_active() */
 } webui_event_t;
 
 typedef struct {
@@ -52,5 +53,7 @@ bool webui_running(void);
 /* When the last request came in (esp_timer ms); config mode ends 10 min after it (spec §10.2). */
 int64_t webui_last_request_ms(void);
 bool webui_password_set(void);
+/* A phone is logged in to the web UI (D20). */
+bool webui_session_active(void);
 /* Menu ▸ Wi-Fi ▸ Reset web password (D18): the next visit, over the AP, chooses a new one. */
 esp_err_t webui_reset_password(void);

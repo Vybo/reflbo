@@ -103,7 +103,8 @@ esp_err_t app_net_init(void); /* the Wi-Fi manager, started on first use */
 void app_config_enter(void);
 void app_config_exit(void);
 bool app_config_active(void);
-void app_config_toggle_qr(void); /* KEY short: the other QR code */
+void app_config_key(void); /* KEY short: the other QR code, or the setup screen and the dashboard (D20) */
+bool app_config_shows_setup(void); /* the setup screen, rather than the dashboard while a phone is logged in */
 void app_config_tick(void);      /* the timeout and the minutes left; call from the app loop */
 int64_t app_config_deadline_ms(void); /* app_uptime_ms() at which config mode ends; 0 when off */
 int64_t app_config_redraw_ms(void);   /* when the minutes left change next; 0 when off */

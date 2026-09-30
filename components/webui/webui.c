@@ -117,6 +117,25 @@ bool webui_password_set(void)
     return record_get(record, sizeof(record));
 }
 
+bool webui_session_active(void)
+{
+    if (s_auth_lock == NULL) {
+        return false;
+    }
+    xSemaphoreTake(s_auth_lock, portMAX_DELAY);
+    bool any = webui_sessions_any(&s_sessions);
+    xSemaphoreGive(s_auth_lock);
+    return any;
+}
+
+/* Tells the app that someone logged in or out, so the screen follows (D20). */
+static void sessions_changed(void)
+{
+    if (s_cfg.event != NULL) {
+        s_cfg.event(WEBUI_EVENT_SESSION);
+    }
+}
+
 esp_err_t webui_reset_password(void)
 {
     if (s_auth_lock == NULL) {
@@ -127,6 +146,7 @@ esp_err_t webui_reset_password(void)
     esp_err_t err = record_put("");
     xSemaphoreGive(s_auth_lock);
     ESP_LOGI(TAG, "web password reset");
+    sessions_changed();
     return err;
 }
 
@@ -342,6 +362,7 @@ static esp_err_t auth_routes(httpd_req_t *req, const char *path)
                 ESP_LOGI(TAG, "web password set");
                 set_session_cookie(req);
                 err = send_json(req, 200, "{\"ok\":true}");
+                sessions_changed();
             }
         }
     } else if (strcmp(path, "/api/auth/login") == 0) {
@@ -360,6 +381,7 @@ static esp_err_t auth_routes(httpd_req_t *req, const char *path)
             if (ok) {
                 set_session_cookie(req);
                 err = send_json(req, 200, "{\"ok\":true}");
+                sessions_changed();
             } else {
                 ESP_LOGW(TAG, "a failed login");
                 err = send_error(req, 401, "wrong password");
@@ -367,17 +389,17 @@ static esp_err_t auth_routes(httpd_req_t *req, const char *path)
         }
     } else if (strcmp(path, "/api/auth/logout") == 0) {
         char token[WEBUI_TOKEN_LEN + 1];
+        bool ended = false;
         if (cookie_token(req, token)) {
             xSemaphoreTake(s_auth_lock, portMAX_DELAY);
-            for (int i = 0; i < WEBUI_SESSIONS; i++) {
-                if (strcmp(s_sessions.s[i].token, token) == 0) {
-                    s_sessions.s[i].token[0] = '\0';
-                }
-            }
+            ended = webui_session_end(&s_sessions, token);
             xSemaphoreGive(s_auth_lock);
         }
         httpd_resp_set_hdr(req, "Set-Cookie", "session=; Max-Age=0" COOKIE_ATTRS);
         err = send_json(req, 200, "{\"ok\":true}");
+        if (ended) {
+            sessions_changed();
+        }
     } else if (strcmp(path, "/api/auth/password") == 0) {
         const char *old = json_string(in, "old");
         if (!set || !session_ok(req)) {

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>reflbo</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#status">reflbo <span id="device"></span></a>
+  <button id="done" class="btn" type="button" hidden>Done</button>
+</header>
+<nav id="nav" hidden>
+  <a href="#status">Status</a>
+  <a href="#wifi">Wi-Fi</a>
+  <a href="#place">Location &amp; time</a>
+  <a href="#device">Device</a>
+  <a href="#presets">Presets</a>
+  <a href="#firmware">Firmware</a>
+  <a href="#backup">Backup</a>
+</nav>
+<main id="main"><p class="muted">Loading…</p></main>
+<div id="toast" role="status" hidden></div>
+<script src="/zones.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

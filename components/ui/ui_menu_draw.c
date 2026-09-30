@@ -52,9 +52,19 @@ static void draw_list(gfx_fb_t *fb, const ui_menu_t *m, const ui_menu_model_t *m
         } else {
             ui_menu_value_text(item, editing ? m->edit : model->value[item], model, lang, value, sizeof(value));
         }
+        /* Both fit, or the value is shortened: a zone the web UI chose can be long. A short label
+         * keeps its width; a long one gets half the room. */
+        const char *name = ui_menu_label(item, lang);
+        int room = r.w - 36, name_w = gfx_text_width(f, name);
         int value_w = value[0] ? gfx_text_width(f, value) : 0;
+        int value_max = room - (name_w < room / 2 ? name_w : room / 2);
+        if (value_w > value_max) {
+            char whole[sizeof(value)];
+            memcpy(whole, value, sizeof(whole));
+            value_w = gfx_text_ellipsize(f, whole, value_max, value, sizeof(value));
+        }
         char label[48];
-        gfx_text_ellipsize(f, ui_menu_label(item, lang), r.w - 20 - value_w - 16, label, sizeof(label));
+        gfx_text_ellipsize(f, name, room - value_w, label, sizeof(label));
         gfx_text_in_rect(fb, f, (gfx_rect_t){ (int16_t)(r.x + 8), r.y, (int16_t)(r.w - 16), r.h }, GFX_ALIGN_LEFT,
                          label, ink);
         if (value[0] == '\0') {

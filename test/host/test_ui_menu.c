@@ -1,5 +1,8 @@
 #include <string.h>
 
+#include "gfx.h"
+#include "gfx_fonts.h"
+#include "lang.h"
 #include "ui_menu.h"
 #include "unity.h"
 
@@ -235,6 +238,59 @@ static void test_info_shows_the_network_addresses(void)
     TEST_ASSERT_FALSE(ui_menu_is_section(UI_MI_INFO_IP));
 }
 
+static uint8_t s_fb_buf[400 * 300 / 8];
+
+/* The Time section with `zone` as the zone's value and the cursor on its first row, drawn into
+ * s_fb_buf. Returns the zone's row. */
+static int draw_time_section(const char *zone)
+{
+    static const char *zones[1];
+    zones[0] = zone;
+    s_model.choices[UI_MI_TIME_ZONE] = zones;
+    s_model.choice_count[UI_MI_TIME_ZONE] = 1;
+    s_model.value[UI_MI_TIME_ZONE] = 0;
+    ui_menu_open(&s_m);
+    open_item(UI_MI_TIME);
+    gfx_fb_t fb;
+    gfx_fb_init(&fb, s_fb_buf, 400, 300);
+    gfx_clear(&fb, GFX_WHITE);
+    ui_draw_menu(&fb, &s_m, &s_model, lang_get("en"));
+    ui_menu_item_t items[UI_MI_COUNT];
+    int n = ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT);
+    for (int i = 0; i < n; i++) {
+        if (items[i] == UI_MI_TIME_ZONE) {
+            return i;
+        }
+    }
+    TEST_FAIL_MESSAGE("no zone row");
+    return -1;
+}
+
+static bool black(const uint8_t *buf, int x, int y)
+{
+    return (buf[y * 50 + x / 8] >> (7 - x % 8)) & 1;
+}
+
+/* A value too long for its row, such as a zone the web UI chose, is shortened: the label keeps its
+ * place and a gap stays between the two (M3b review). */
+static void test_a_long_value_leaves_the_label_alone(void)
+{
+    static uint8_t short_value[sizeof(s_fb_buf)];
+    int row = draw_time_section("Europe/Prague");
+    memcpy(short_value, s_fb_buf, sizeof(s_fb_buf));
+    TEST_ASSERT_EQUAL_INT(row, draw_time_section("America/Argentina/ComodRivadavia"));
+    int y0 = 36 + row * 34, y1 = y0 + 31; /* ROW_Y0 and ROW_H in ui_menu_draw.c */
+    int label_end = 14 + gfx_text_width(&gfx_font_sans_20, ui_menu_label(UI_MI_TIME_ZONE, lang_get("en")));
+    for (int y = y0; y <= y1; y++) {
+        for (int x = 0; x <= label_end; x++) {
+            TEST_ASSERT_EQUAL_MESSAGE(black(short_value, x, y), black(s_fb_buf, x, y), "the label changed");
+        }
+        for (int x = label_end + 2; x < label_end + 12; x++) {
+            TEST_ASSERT_FALSE_MESSAGE(black(s_fb_buf, x, y), "the value runs into the label");
+        }
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -250,5 +306,6 @@ int main(void)
     RUN_TEST(test_hidden_items_are_skipped_and_info_does_nothing);
     RUN_TEST(test_the_wifi_section_asks_before_it_forgets_anything);
     RUN_TEST(test_info_shows_the_network_addresses);
+    RUN_TEST(test_a_long_value_leaves_the_label_alone);
     return UNITY_END();
 }

@@ -6,6 +6,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "pcf85063.h"
+#include "timekeeping_sync.h"
 
 static const char *TAG = "timekeeping";
 
@@ -18,13 +19,17 @@ esp_err_t timekeeping_init(const char *tz_posix)
     return ESP_OK;
 }
 
-esp_err_t timekeeping_load_from_rtc(void)
+esp_err_t timekeeping_load_from_rtc(bool at_edge)
 {
     time_t utc;
     bool valid;
     ESP_RETURN_ON_ERROR(pcf85063_read(&utc, &valid), TAG, "RTC read");
-    struct timeval tv = { .tv_sec = utc };
-    settimeofday(&tv, NULL);
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    if (timekeeping_rtc_resync(now.tv_sec, utc, at_edge)) {
+        struct timeval tv = { .tv_sec = utc };
+        settimeofday(&tv, NULL);
+    }
     s_valid = valid;
     return ESP_OK;
 }

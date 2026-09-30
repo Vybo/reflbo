@@ -226,10 +226,10 @@ int64_t app_uptime_ms(void)
 }
 
 /* A scheduled wake: the RTC alarm, its backup, a cycle switch or a seconds tick. `force` also
- * samples and renders. */
-static void on_tick(bool force)
+ * samples and renders; `rtc_edge`: the RTC's minute alarm, as its second began. */
+static void on_tick(bool force, bool rtc_edge)
 {
-    esp_err_t err = timekeeping_load_from_rtc();
+    esp_err_t err = timekeeping_load_from_rtc(rtc_edge);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RTC read: %s", esp_err_to_name(err));
     }
@@ -254,7 +254,7 @@ void app_clock_moved(int64_t delta_s)
     sensors_shift_time(delta_s); /* the battery history keeps its spacing on the new clock */
     app_state()->sched_checked = time(NULL); /* entries the jump skipped don't run late */
     app_state()->cycle_at = 0; /* the next tick starts the cycle interval again, rather than switching at once */
-    on_tick(true); /* show the new time now, not at the next slot */
+    on_tick(true, false); /* show the new time now, not at the next slot */
 }
 
 static const char *preset_name(void)
@@ -337,7 +337,7 @@ static void night_peek(board_button_t button)
     }
     s_peek_until_ms = app_uptime_ms() + PEEK_MS;
     power_hold_awake_ms(PEEK_MS);
-    on_tick(true);
+    on_tick(true, false);
 }
 
 /* If the clock moved back (`rtc set`, later SNTP), the pending alarm is further off than the next
@@ -347,7 +347,7 @@ static void check_clock_jump(void)
 {
     if (s_next_alarm != 0 && app_ui_next_wake(time(NULL)).alarm < s_next_alarm) {
         ESP_LOGW(TAG, "clock moved back; scheduling again");
-        on_tick(true);
+        on_tick(true, false);
     }
 }
 
@@ -362,7 +362,7 @@ static void handle_event(const app_event_t *ev)
 {
     switch (ev->type) {
     case EV_RTC_ALARM:
-        on_tick(false);
+        on_tick(false, true);
         break;
     case EV_BUTTON:
         handle_button(ev->button.button, ev->button.gesture);
@@ -388,13 +388,13 @@ static void handle_wake(power_wake_t wake)
 {
     switch (wake) {
     case POWER_WAKE_RTC:
-        on_tick(false);
+        on_tick(false, true);
         break;
     case POWER_WAKE_TIMER: /* a cycle switch or seconds tick, or the alarm's backup */
         if (time(NULL) >= s_next_alarm + BACKUP_S) {
             ESP_LOGW(TAG, "RTC alarm missed; backup wake");
         }
-        on_tick(false);
+        on_tick(false, false);
         break;
     case POWER_WAKE_KEY:
     case POWER_WAKE_BOOT:
@@ -558,7 +558,7 @@ static esp_err_t boot(void)
     ESP_RETURN_ON_ERROR(board_init(wake == POWER_WAKE_COLD), TAG, "board");
     ESP_RETURN_ON_ERROR(pcf85063_init(board_i2c()), TAG, "RTC");
     ESP_RETURN_ON_ERROR(timekeeping_init(app_settings()->tz_posix), TAG, "time zone");
-    err = timekeeping_load_from_rtc();
+    err = timekeeping_load_from_rtc(wake == POWER_WAKE_RTC);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RTC read: %s", esp_err_to_name(err));
     }
@@ -601,7 +601,7 @@ static esp_err_t boot(void)
         } else if (button_wake) {
             board_buttons_woke(woke_by);
         }
-        on_tick(!warm || app_state()->critical);
+        on_tick(!warm || app_state()->critical, wake == POWER_WAKE_RTC);
     }
     s_rendered = true;
     if (resume_config) {
@@ -706,9 +706,9 @@ static void app_task(void *arg)
             handle_event(&ev);
         } else if (err == ESP_OK && time(NULL) >= s_next_alarm + BACKUP_S) {
             ESP_LOGW(TAG, "RTC alarm missed; backup tick");
-            on_tick(false);
+            on_tick(false, false);
         } else if (err == ESP_OK && time(NULL) >= s_wake_at) {
-            on_tick(false); /* a cycle switch or seconds tick */
+            on_tick(false, false); /* a cycle switch or seconds tick */
         }
     }
 }

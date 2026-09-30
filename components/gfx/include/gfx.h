@@ -65,6 +65,16 @@ void gfx_bitmap(gfx_fb_t *fb, int x, int y, const gfx_bitmap_t *bm, gfx_color_t 
 size_t gfx_pbm_size(const gfx_fb_t *fb);
 size_t gfx_pbm_encode(const gfx_fb_t *fb, uint8_t *out, size_t out_size); /* 0 if out_size is too small */
 
+/* 1-bit BMP of the framebuffer, for browsers (the web UI's preview and screenshot). */
+size_t gfx_bmp_size(const gfx_fb_t *fb);
+size_t gfx_bmp_encode(const gfx_fb_t *fb, uint8_t *out, size_t out_size); /* 0 if out_size is too small */
+
+/* `text` as a QR code (ECC medium, versions up to 10), with its 4-module quiet zone, `scale`
+ * pixels per module, its top-left corner at (x, y). Returns its side in pixels, or 0 if the text
+ * doesn't fit. Not reentrant: one encoding buffer is shared. */
+int gfx_qr(gfx_fb_t *fb, int x, int y, int scale, const char *text);
+int gfx_qr_side(const char *text, int scale); /* what gfx_qr() would draw; 0 if it doesn't fit */
+
 
 typedef enum {
     GFX_ALIGN_LEFT,

@@ -33,9 +33,11 @@ target_compile_options(util PRIVATE ${REFLBO_WARNINGS})
 
 # gfx: every source in the component, generated fonts and icons included.
 file(GLOB GFX_SOURCES CONFIGURE_DEPENDS
-     ${REPO_ROOT}/components/gfx/*.c ${REPO_ROOT}/components/gfx/fonts/*.c ${REPO_ROOT}/components/gfx/icons/*.c)
+     ${REPO_ROOT}/components/gfx/*.c ${REPO_ROOT}/components/gfx/fonts/*.c ${REPO_ROOT}/components/gfx/icons/*.c
+     ${REPO_ROOT}/components/gfx/qrcodegen/*.c)
 add_library(gfx STATIC ${GFX_SOURCES})
-target_include_directories(gfx PUBLIC ${REPO_ROOT}/components/gfx/include)
+target_include_directories(gfx PUBLIC ${REPO_ROOT}/components/gfx/include
+                           PRIVATE ${REPO_ROOT}/components/gfx/qrcodegen)
 target_compile_options(gfx PRIVATE ${REFLBO_WARNINGS})
 
 # st7305: only the pure-C frame conversion builds on the host.
@@ -128,6 +130,7 @@ reflbo_host_test(test_util_ticks util)
 reflbo_host_test(test_gfx gfx)
 reflbo_host_test(test_gfx_text gfx)
 reflbo_host_test(test_gfx_fonts gfx)
+reflbo_host_test(test_gfx_bmp_qr gfx)
 reflbo_host_test(test_st7305_frame st7305_frame)
 reflbo_host_test(test_util_snapshot util)
 reflbo_host_test(test_util_time util)

@@ -54,6 +54,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D15 | Accepted M3 proposals (owner, 2026-09-28): the LPM refresh rate as a display setting (§4.2); a preset schedule whose entries can also start a timed night sleep (§5.4, §9.1); extra local fields (§5.1); a Czech language pack with name days and public holidays (§5.8) | The Night layout stays deferred (§19). The owner asked to measure what night sleep saves |
 | D16 | Owner, 2026-09-29: the `cs` pack ships the public holidays but no name-day calendar until a source with a clean licence turns up (§5.8, §20). A button still held when the board goes to sleep is left out of that sleep's wake sources (§9.2) | The best name-day list found (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA). A stuck KEY or BOOT would otherwise wake the board again and again |
 | D17 | Owner, 2026-09-29 (M3b render review): the menu leaves out Display ▸ Contrast for now, and the temperature offset steps by 0.1 °C (§5.7) | No contrast levels besides the factory sequence's (D12) have been checked on the panel |
+| D18 | Owner, 2026-09-30 (M4 planning): the web UI gets a password instead of the admin PIN, chosen on the first visit over the device's own AP and needed on every visit after (§10.4); web UI translations stay deferred; M4 runs as one plan; the snapshot header gets no ELF hash | A PIN guards little that a password doesn't; every firmware change resets the chip, and only deep-sleep wakes read the snapshot |
 
 ### 1.3 Out of scope for v1
 
@@ -411,7 +412,7 @@ The `diag` console command `btn` injects the same gestures. Holding BOOT at powe
 Presets    ▸ Active preset · Auto-cycle on/off · Interval (10 s … 1 h) · Schedule on/off
 Alarms     ▸ Alarm 1–8: on/off · Time · Days · Sound · Volume        (M7)
 Radio      ▸ Play/stop · Station · Volume                            (M7)
-Wi-Fi      ▸ Config mode · Forget networks
+Wi-Fi      ▸ Config mode · Forget networks · Reset web password
 Sync       ▸ Sync now · Schedule (times / interval / always / manual) · Times or interval
 Time       ▸ Set date and time · 24-hour clock · Time zone (short list)
 Display    ▸ Contrast · Update interval (1–15 min) · Refresh rate (0.25–8 Hz)
@@ -627,7 +628,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 ### 10.2 Config mode
 
 - **Entry.** BOOT long (3 s) on the dashboard, the menu, or first run.
-- **Connecting.** With saved networks, it joins as a station and shows the LAN URL and IP. If that fails or no network is saved, it starts the AP and captive portal. While the owner tests a new network from the web UI it runs AP and STA together.
+- **Connecting.** With saved networks, it joins as a station and shows the LAN URL and IP. If that fails or no network is saved, it starts the AP and captive portal. While the owner tests a new network from the web UI it runs AP and STA together. While no web password is set, it runs the AP as well, because only a phone on the AP may choose the password (§10.4).
 - **Exit.** BOOT long, "Done" in the web UI, or 10 min without HTTP requests. Wi-Fi then switches off.
 
 ### 10.3 Web UI and REST API
@@ -660,7 +661,11 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 - Secrets are write-only and never logged.
 - The JSON content-type check blocks cross-site form posts.
 - OTA images are checked for project name, chip and version before the device switches to them.
-- An admin PIN is a deferred proposal (§19).
+- **Web UI password** (D18).
+  - The first visit asks for a new password, and only a client on the device's AP may set it; every visit after needs it.
+  - It is kept as a salted hash in NVS `secrets`, is never returned or logged, and a factory reset erases it.
+  - A login starts a session that ends with config mode.
+  - Menu ▸ Wi-Fi ▸ Reset web password clears it, for when it is forgotten.
 
 ### 10.5 OTA
 
@@ -810,7 +815,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 |---|---|
 | `sys` | Device id, AP password, schema version, idle strategy override (`idle`) |
 | `wifi` | Saved networks (SSIDs and passwords), fast-connect cache |
-| `secrets` | MQTT password; future tokens |
+| `secrets` | MQTT password; the web UI password's salted hash (D18); future tokens |
 | `ctr` | Counters: boots, sync statistics |
 
 ### 14.3 LittleFS layout
@@ -963,7 +968,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M0 | GitHub Actions CI (firmware build and host tests) |
 | M1 | ~~Portrait orientation~~ (declined 2026-09-25, D13) |
 | M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
-| M4 | Web UI admin PIN; web UI translations |
+| M4 | Accepted (D18): a web UI password, instead of the admin PIN. Still deferred: web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
 | M6 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
 | M7 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
@@ -1003,3 +1008,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r10 | 2026-09-29 | Owner decisions (D16): the `cs` pack ships the public holidays only for now (§5.8, §20); a held button is left out of the wake sources (§9.2) |
 | r11 | 2026-09-29 | M3b as built. The menu without Contrast and with the offset steps (D17, §5.7), and the menu's gesture timings (§5.6). Toasts and the critical screen (§5.5), the critical hysteresis and the humidity clamp (§8). The schedule's order and validation (§5.4), and night sleep (§9.1). Panel sleep and wake with NRDSLP (§4.2). The fallback toast, the kept backup and the nesting limit (§14.3, §5.4), and factory reset (§14.4). The `night`, `schedule` and `panel sleep\|wake` commands, and `--list` for the renderers (§15, §17). The sensor TTL (§5.1) and a critical-battery risk (§20) |
 | r12 | 2026-09-29 | M3b review: a held button no longer keeps the board awake, and an ignored press's release is debounced (§9.2); the critical sleep wakes on a held KEY's release and stays awake while a PC is attached (§8); schedule entries at a night's end run, and none run after a long gap or on the critical screen (§5.4); the date-time editor starts in 2026 (§5.7) |
+| r13 | 2026-09-30 | M4 scope (D18): a web UI password instead of the admin PIN (§10.2, §10.4, §14.2, §19), with Menu ▸ Wi-Fi ▸ Reset web password (§5.7); one M4 plan; no ELF hash in the snapshot |

@@ -80,6 +80,13 @@ add_library(netmgr_logic STATIC ${REPO_ROOT}/components/netmgr/netmgr_dns.c
 target_include_directories(netmgr_logic PUBLIC ${REPO_ROOT}/components/netmgr/include)
 target_compile_options(netmgr_logic PRIVATE ${REFLBO_WARNINGS})
 
+# webui: the password record, the sessions and the HTTP helpers build on the host.
+add_library(webui_logic STATIC ${REPO_ROOT}/components/webui/webui_auth.c
+            ${REPO_ROOT}/components/webui/webui_http.c)
+target_include_directories(webui_logic PUBLIC ${REPO_ROOT}/components/webui/include)
+target_compile_options(webui_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(webui_logic PUBLIC util)
+
 # power: only the sleep policy builds on the host.
 add_library(power_logic STATIC ${REPO_ROOT}/components/power/power_policy.c)
 target_include_directories(power_logic PUBLIC ${REPO_ROOT}/components/power/include)
@@ -155,6 +162,8 @@ reflbo_host_test(test_power_policy power_logic)
 reflbo_host_test(test_netmgr_dns netmgr_logic)
 reflbo_host_test(test_netmgr_list netmgr_logic)
 reflbo_host_test(test_netmgr_scan netmgr_logic)
+reflbo_host_test(test_webui_auth webui_logic)
+reflbo_host_test(test_webui_http webui_logic)
 reflbo_host_test(test_lang locale)
 reflbo_host_test(test_lang_glyphs locale gfx)
 reflbo_host_test(test_datastore datastore)

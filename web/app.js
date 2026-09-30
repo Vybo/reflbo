@@ -548,6 +548,18 @@ async function presetsPage() {
   preview(ed);
 }
 
+/* The preview, with each slot's name at its top right corner, as the slot fields below call them
+ * (the renderer puts captions top left). */
+function previewBox(ed, layout) {
+  const pct = (v, of) => `${+(100 * v / of).toFixed(3)}%`;
+  return h('div', { class: 'preview' }, ed.img, layout.slots.map((slot) => {
+    const tag = h('span', { class: 'slot-tag', text: slot.id });
+    tag.style.left = pct(slot.x + slot.w, catalogue.width);
+    tag.style.top = pct(slot.y, catalogue.height);
+    return tag;
+  }));
+}
+
 function layoutOf(id) {
   return catalogue.layouts.find((l) => l.id === id) || catalogue.layouts[0];
 }
@@ -594,6 +606,7 @@ function renderPresets(ed) {
       const copy = JSON.parse(JSON.stringify(p));
       copy.name = `${p.name} copy`.slice(0, 23);
       copy.id = uniqueId(doc, copy.name);
+      copy.in_cycle = true; /* a new preset shows up on KEY, whatever it was copied from */
       doc.presets.splice(ed.sel + 1, 0, copy);
       ed.sel++;
       changed(ed, true);
@@ -641,7 +654,7 @@ function renderPresets(ed) {
       o.status_battery = ['percent', 'voltage', 'days'].filter((k) => battery.has(k));
       changed(ed, false);
     } }), text);
-  const editCard = card(`Edit ${p.name}`, ed.img, ed.previewNote,
+  const editCard = card(`Edit ${p.name}`, previewBox(ed, layoutOf(p.layout)), ed.previewNote,
     field('Name', name), field('Layout', layout), slots,
     field('Time format', clock), check('seconds', 'Show seconds'),
     o.seconds ? h('p', { class: 'bad small', text: 'Seconds wake the device every second: the battery lasts far less.' }) : null,
@@ -711,7 +724,10 @@ function renderPresets(ed) {
       toast('Presets saved');
       renderPresets(ed);
     }), 'primary'),
-    button('Undo changes', () => presetsPage().catch(() => {}))));
+    button('Undo changes', () => {
+      if (!confirm('Drop the changes that aren\'t saved?')) return; /* the bar floats over other buttons */
+      presetsPage().catch(() => {});
+    })));
   ed.saveBar.hidden = !ed.dirty;
   ed.saveBar.style.position = 'sticky';
   ed.saveBar.style.bottom = '8px';

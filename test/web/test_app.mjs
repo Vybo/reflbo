@@ -73,7 +73,7 @@ function device(routes) {
 }
 
 /* Loads app.js with the device answering `routes`. */
-async function load(routes = {}) {
+async function load(routes = {}, opts = {}) {
   const calls = [], blobs = [], byId = {};
   const document = {
     getElementById: (id) => (byId[id] ||= new FakeElement('div')),
@@ -97,7 +97,7 @@ async function load(routes = {}) {
   const ctx = vm.createContext({
     document, Node: FakeNode, Blob, TextEncoder, Intl, URL: url, console,
     fetch: (path, init) => { calls.push({ path, init }); return answer(path, init); },
-    setTimeout: () => 0, clearTimeout() {}, confirm: () => true,
+    setTimeout: () => 0, clearTimeout() {}, confirm: opts.confirm || (() => true),
     location: { hash: '', reload() {} }, window: { scrollTo() {}, scrollY: 0 }, ZONES: {},
   });
   vm.runInContext(fs.readFileSync(APP_JS, 'utf8'), ctx, { filename: 'app.js' });
@@ -147,4 +147,65 @@ test('Factory reset erases and says so', async () => {
   await buttonNamed(main, 'Factory reset…').click();
   assert.equal(calls.at(-1).path, '/api/factory-reset');
   assert.match(text(main), /Erased/);
+});
+
+/* ---- the preset editor ---- */
+
+const CATALOGUE = {
+  width: 400, height: 300, status_h: 20,
+  layouts: [{ id: 'classic', slots: [
+    { id: 'main', x: 0, y: 21, w: 400, h: 150, size: 'XL', kinds: ['time'] },
+    { id: 's1', x: 0, y: 172, w: 200, h: 128, size: 'S', kinds: ['number'] },
+  ] }],
+};
+const FIELDS = { fields: [{ id: 'time.clock', kind: 'time', name: 'Time', value: '12:15' },
+                          { id: 'env.temp', kind: 'number', name: 'Temperature', value: '23.7 °C' }] };
+const preset = (id, name, inCycle) => ({ id, name, layout: 'classic', in_cycle: inCycle,
+                                         slots: { main: 'time.clock', s1: 'env.temp' }, options: {} });
+
+/* A device with presets: Home in the cycle, Weather out of it; PUTs are kept in `saved`. */
+function presetDevice(saved) {
+  const doc = { schema: 1, active: 'weather', presets: [preset('home', 'Home', true), preset('weather', 'Weather', false)],
+                cycle: { enabled: false, interval_s: 60 }, schedule: { enabled: false, entries: [] } };
+  return {
+    'GET /api/layouts': () => reply(200, CATALOGUE),
+    'GET /api/presets': () => reply(200, JSON.parse(JSON.stringify(doc))),
+    'GET /api/fields': () => reply(200, FIELDS),
+    'POST /api/preview.bmp': () => reply(200, 'BM', 'image/bmp'),
+    'PUT /api/presets': (init) => { saved.push(JSON.parse(init.body)); return reply(200, JSON.parse(init.body)); },
+  };
+}
+
+test('a new preset joins the cycle, even as a copy of one outside it', async () => {
+  const saved = [];
+  const { ctx, main } = await load(presetDevice(saved));
+  await ctx.presetsPage(); /* Weather, the active one, is selected */
+  await buttonNamed(main, 'New preset').click();
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  const added = saved.at(-1).presets.find((p) => p.name.startsWith('Weather copy'));
+  assert.ok(added, 'the copy was saved');
+  assert.equal(added.in_cycle, true);
+});
+
+test('Undo changes asks before it drops the edits', async () => {
+  const saved = [];
+  let asked = 0;
+  const { ctx, calls, main } = await load(presetDevice(saved), { confirm: () => { asked++; return false; } });
+  await ctx.presetsPage();
+  await buttonNamed(main, 'New preset').click();
+  const before = calls.filter((c) => c.path === '/api/presets').length;
+  await buttonNamed(main, 'Undo changes').click();
+  await settle();
+  assert.equal(asked, 1);
+  assert.equal(calls.filter((c) => c.path === '/api/presets').length, before, 'nothing reloaded');
+  assert.match(text(main), /Weather copy/);
+});
+
+test('the preview names each slot where the layout puts it', async () => {
+  const { ctx, main } = await load(presetDevice([]));
+  await ctx.presetsPage();
+  const tags = below(main).filter((e) => e.className.split(' ').includes('slot-tag'));
+  assert.deepEqual(tags.map(text), ['main', 's1']);
+  assert.deepEqual(tags.map((e) => [e.style.left, e.style.top]), [['100%', '7%'], ['50%', '57.333%']]); /* top right */
 });

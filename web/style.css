@@ -98,6 +98,11 @@ a { color: var(--accent); }
   display: block; width: 100%; max-width: 400px; aspect-ratio: 4 / 3;
   image-rendering: pixelated; border: 1px solid var(--line); border-radius: 4px; background: #fff;
 }
+.preview { position: relative; width: 100%; max-width: 400px; }
+.slot-tag {
+  position: absolute; transform: translateX(calc(-100% - 3px)); margin-top: 3px; padding: 0 4px; border-radius: 3px;
+  font: 600 11px/16px system-ui, sans-serif; color: #fff; background: rgba(20, 90, 160, .85); pointer-events: none;
+}
 .slots { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .slot label { margin: 0 0 4px; font-weight: 400; color: var(--muted); }
 .days { display: flex; gap: 2px; flex-wrap: wrap; }

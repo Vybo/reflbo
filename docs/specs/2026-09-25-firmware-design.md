@@ -55,6 +55,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D16 | Owner, 2026-09-29: the `cs` pack ships the public holidays but no name-day calendar until a source with a clean licence turns up (§5.8, §20). A button still held when the board goes to sleep is left out of that sleep's wake sources (§9.2) | The best name-day list found (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA). A stuck KEY or BOOT would otherwise wake the board again and again |
 | D17 | Owner, 2026-09-29 (M3b render review): the menu leaves out Display ▸ Contrast for now, and the temperature offset steps by 0.1 °C (§5.7) | No contrast levels besides the factory sequence's (D12) have been checked on the panel |
 | D18 | Owner, 2026-09-30 (M4 planning): the web UI gets a password instead of the admin PIN, chosen on the first visit over the device's own AP and needed on every visit after (§10.4); web UI translations stay deferred; M4 runs as one plan; the snapshot header gets no ELF hash | A PIN guards little that a password doesn't; every firmware change resets the chip, and only deep-sleep wakes read the snapshot |
+| D19 | Owner, 2026-09-30 (M4 spike review): the first-run screen appears when `settings.json` is missing at boot (§5.5); the status bar's Wi-Fi state moves to M5 and M6 (§5.2); a restart from the web UI returns in config mode (§10.2); the web UI sets a lost clock from the phone, can change the password and log out, and gets a Device page (§10.3, §10.4); the temperature offset defaults to −2.0 °C (§8) | In M4 Wi-Fi runs only in config mode, which has its own screen. The board warms the SHTC3 by about 2 °C at all times; the user trims the rest |
 
 ### 1.3 Out of scope for v1
 
@@ -287,7 +288,7 @@ Every layout has a status bar (top 20 px):
 - Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale.
 - Middle: a small clock, if the preset sets `status_clock`. It is meant for data-first presets (owner request, 2026-09-28).
 - Right: the charging bolt and the battery icon, with the parts `status_battery` lists: level %, voltage, days left. The default is the level.
-- Later: Wi-Fi and sync state (M4, M5) and the next alarm (M7).
+- Later: the sync state (M5), the Wi-Fi state (M5 and M6, the first times Wi-Fi runs under the dashboard, D19) and the next alarm (M7).
 
 | Layout | Slots |
 |---|---|
@@ -377,7 +378,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 | Dashboard | The active preset |
 | Menu | §5.7 |
 | Config mode | Wi-Fi state; URL (`http://reflbo-XXXX.local`) and IP; a QR code to join the AP or open the URL; time left before timeout |
-| First run | "Hold BOOT 3 s to set up Wi-Fi · Hold KEY for menu", plus the clock if the time is valid |
+| First run | "Hold BOOT 3 s to set up Wi-Fi · Hold KEY for menu · Press KEY to continue", plus the clock if the time is valid. Shown at boot when `settings.json` doesn't exist: a new board, or after a factory reset (D19). Whichever button leads on saves the settings, so it doesn't come back |
 | Alarm ringing | Large time, the alarm label, button hints |
 | Radio | Station, ICY title, volume, a battery warning when on battery |
 | Critical battery | A large empty battery, "Battery empty" and "Please charge me", with the time and date it was drawn. Nothing else updates |
@@ -400,7 +401,8 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 | Dashboard | Next preset | Auto-cycle on/off | Open menu | Refresh sensors | Config mode (3 s) |
 | Menu: browsing | Next item | — | Select / enter | Back | Exit menu |
 | Menu: editing a value | + | — | Confirm | − | Cancel |
-| Config mode | Toggle QR (join AP / open URL) | — | — | — | Exit config mode |
+| First run | Dashboard | — | Open menu | — | Config mode (3 s) |
+| Config mode | Toggle QR (join AP / open URL) | — | — | — | Exit config mode (1 s) |
 | Alarm ringing | Snooze | Snooze | Stop | Snooze | Stop |
 | Radio | Volume + | Next station | Open menu | Volume − | Stop radio |
 
@@ -486,7 +488,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
 - Sampled every 5 min (configurable 1–30 min) and on BOOT short. The sensor is sent to sleep after each reading.
 - Low-power measurement mode (about 0.8 ms instead of about 12 ms) is used if M2 shows its accuracy is good enough.
-- Temperature and humidity offsets are settings. The humidity with its offset stays within 0–100 %. Defaults come from an M2/M5 comparison with a reference thermometer.
+- Temperature and humidity offsets are settings. The humidity with its offset stays within 0–100 %. The temperature offset defaults to −2.0 °C: the board warms the sensor by about 2 °C at all times (owner, 2026-09-30, D19). The user trims it against a reference thermometer in the menu or the web UI.
 - Readings are taken right after wake, before Wi-Fi or the CPU warm the board.
 
 **Battery gauge**
@@ -630,11 +632,14 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 - **Entry.** BOOT long (3 s) on the dashboard, the menu, or first run.
 - **Connecting.** With saved networks, it joins as a station and shows the LAN URL and IP. If that fails or no network is saved, it starts the AP and captive portal. While the owner tests a new network from the web UI it runs AP and STA together. While no web password is set, it runs the AP as well, because only a phone on the AP may choose the password (§10.4).
 - **Exit.** BOOT long, "Done" in the web UI, or 10 min without HTTP requests. Wi-Fi then switches off.
+- **Restarts.** A restart the web UI asks for (a firmware update, Restart) comes back in config mode, so the page finds the device again; so does the image a rollback returns to (§10.5, D19).
 
 ### 10.3 Web UI and REST API
 
 - **Tech.** Plain HTML/CSS/JS, mobile-first. The files are gzipped and **embedded in the app image**, so OTA updates them and flashing never touches user data.
-- **Pages.** Status, Wi-Fi, Location & time, Presets (editor with live preview), Sync, MQTT/HA, Alarms, Radio, Firmware, Backup.
+- **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), MQTT/HA (M6), Alarms and Radio (M7) join later.
+  - Status sets the device's clock from the phone at once when the device has lost the time (D9, D19).
+  - Device holds the menu's language, units, sensor offsets, sensor interval, update interval and refresh rate (D19).
 - **API.** JSON. Mutating requests must send `Content-Type: application/json`.
 
 | Method and path | Purpose |
@@ -666,6 +671,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - It is kept as a salted hash in NVS `secrets`, is never returned or logged, and a factory reset erases it.
   - A login starts a session that ends with config mode.
   - Menu ▸ Wi-Fi ▸ Reset web password clears it, for when it is forgotten.
+  - The page can also change it, given the current one, and log out (D19).
 
 ### 10.5 OTA
 
@@ -968,7 +974,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M0 | GitHub Actions CI (firmware build and host tests) |
 | M1 | ~~Portrait orientation~~ (declined 2026-09-25, D13) |
 | M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
-| M4 | Accepted (D18): a web UI password, instead of the admin PIN. Still deferred: web UI translations |
+| M4 | Accepted (D18): a web UI password, instead of the admin PIN. Accepted (D19): config mode after a web restart, the clock set from the phone when lost, changing the password and logging out, a Device page. Still deferred: web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
 | M6 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
 | M7 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
@@ -1009,3 +1015,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r11 | 2026-09-29 | M3b as built. The menu without Contrast and with the offset steps (D17, §5.7), and the menu's gesture timings (§5.6). Toasts and the critical screen (§5.5), the critical hysteresis and the humidity clamp (§8). The schedule's order and validation (§5.4), and night sleep (§9.1). Panel sleep and wake with NRDSLP (§4.2). The fallback toast, the kept backup and the nesting limit (§14.3, §5.4), and factory reset (§14.4). The `night`, `schedule` and `panel sleep\|wake` commands, and `--list` for the renderers (§15, §17). The sensor TTL (§5.1) and a critical-battery risk (§20) |
 | r12 | 2026-09-29 | M3b review: a held button no longer keeps the board awake, and an ignored press's release is debounced (§9.2); the critical sleep wakes on a held KEY's release and stays awake while a PC is attached (§8); schedule entries at a night's end run, and none run after a long gap or on the critical screen (§5.4); the date-time editor starts in 2026 (§5.7) |
 | r13 | 2026-09-30 | M4 scope (D18): a web UI password instead of the admin PIN (§10.2, §10.4, §14.2, §19), with Menu ▸ Wi-Fi ▸ Reset web password (§5.7); one M4 plan; no ELF hash in the snapshot |
+| r14 | 2026-09-30 | M4 spike review (D19): when the first-run screen appears, and its buttons (§5.5, §5.6); the status bar's Wi-Fi state moves to M5 and M6 (§5.2); web restarts return in config mode (§10.2); the M4 pages, with Device, and the clock set from the phone (§10.3); changing the web password and logging out (§10.4); the −2.0 °C default temperature offset (§8); accepted extras (§19) |

@@ -128,9 +128,16 @@ static void put(cJSON *obj, const char *key, cJSON *value)
     }
 }
 
+/* The file a save or patch merges into: NULL for none, or one nested past the cap, which the loader
+ * rejects too and whose parse could overrun the app task's stack. */
+static cJSON *parse_base(const char *base_json)
+{
+    return base_json != NULL && util_json_depth(base_json) <= SETTINGS_JSON_MAX_DEPTH ? cJSON_Parse(base_json) : NULL;
+}
+
 size_t settings_to_json(const settings_t *s, const char *base_json, char *out, size_t size)
 {
-    cJSON *root = base_json != NULL ? cJSON_Parse(base_json) : NULL;
+    cJSON *root = parse_base(base_json);
     if (!cJSON_IsObject(root)) {
         cJSON_Delete(root);
         root = cJSON_CreateObject();
@@ -184,7 +191,7 @@ size_t settings_patch(const char *base_json, const char *patch, char *out, size_
         fail(err, err_size, "the patch must be a JSON object");
         return 0;
     }
-    cJSON *root = base_json != NULL ? cJSON_Parse(base_json) : NULL;
+    cJSON *root = parse_base(base_json);
     if (!cJSON_IsObject(root)) { /* no file yet, or one the loader rejected */
         cJSON_Delete(root);
         root = cJSON_CreateObject();

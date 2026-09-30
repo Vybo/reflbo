@@ -19,6 +19,21 @@ void setUp(void)
 
 void tearDown(void) {}
 
+/* "<prefix>" + `levels` brackets opened and closed + "}": a document nested past the cap. */
+static const char *nested(const char *prefix, int levels)
+{
+    static char text[256];
+    size_t n = (size_t)snprintf(text, sizeof(text), "%s", prefix);
+    for (int i = 0; i < levels; i++) {
+        text[n++] = '[';
+    }
+    for (int i = 0; i < levels; i++) {
+        text[n++] = ']';
+    }
+    snprintf(text + n, sizeof(text) - n, "}");
+    return text;
+}
+
 static void test_the_spec_sketch_parses(void)
 {
     const char *json =
@@ -162,19 +177,26 @@ static void test_a_patch_must_be_an_object_that_keeps_the_schema(void)
     TEST_ASSERT_EQUAL_STRING("schema must be 1", s_err);
     TEST_ASSERT_EQUAL_UINT(0, settings_patch("{\"schema\": 1}", "{\"schema\": null}", s_json, sizeof(s_json), s_err,
                                              sizeof(s_err)));
-    static char deep[128];
-    size_t n = (size_t)snprintf(deep, sizeof(deep), "{\"x\": ");
-    for (int i = 0; i < 20; i++) {
-        deep[n++] = '[';
-    }
-    for (int i = 0; i < 20; i++) {
-        deep[n++] = ']';
-    }
-    snprintf(deep + n, sizeof(deep) - n, "}");
-    TEST_ASSERT_EQUAL_UINT(0, settings_patch("{\"schema\": 1}", deep, s_json, sizeof(s_json), s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT(0, settings_patch("{\"schema\": 1}", nested("{\"x\": ", 20), s_json, sizeof(s_json), s_err,
+                                             sizeof(s_err)));
     TEST_ASSERT_NOT_NULL(strstr(s_err, "nested"));
     TEST_ASSERT_EQUAL_UINT(0, settings_patch("{\"schema\": 1}", "{\"language\": \"cs\"}", s_json, 8, s_err,
                                              sizeof(s_err))); /* no room */
+}
+
+/* A file nested past the cap is no base for the save and patch paths either: the loader rejects
+ * it, and cJSON's recursion could overrun the app task's stack (M3b review). */
+static void test_a_base_nested_too_deep_is_not_parsed(void)
+{
+    const char *base = nested("{\"schema\": 1, \"junk\": ", 20);
+    settings_t s = s_defaults;
+    TEST_ASSERT_TRUE(settings_to_json(&s, base, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NULL(strstr(s_json, "junk"));
+    TEST_ASSERT_TRUE(settings_from_json(s_json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_MEMORY(&s, &s_out, sizeof(s));
+    TEST_ASSERT_TRUE_MESSAGE(settings_patch(base, "{\"language\": \"cs\"}", s_json, sizeof(s_json), s_err,
+                                            sizeof(s_err)) > 0, s_err);
+    TEST_ASSERT_EQUAL_STRING("{\"schema\":1,\"language\":\"cs\"}", s_json);
 }
 
 int main(void)
@@ -191,5 +213,6 @@ int main(void)
     RUN_TEST(test_a_patch_changes_only_what_it_names);
     RUN_TEST(test_a_patch_follows_json_merge_patch);
     RUN_TEST(test_a_patch_must_be_an_object_that_keeps_the_schema);
+    RUN_TEST(test_a_base_nested_too_deep_is_not_parsed);
     return UNITY_END();
 }

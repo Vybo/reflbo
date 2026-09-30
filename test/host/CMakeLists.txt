@@ -74,9 +74,11 @@ target_include_directories(timekeeping_logic PUBLIC ${REPO_ROOT}/components/time
 target_compile_options(timekeeping_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(timekeeping_logic PUBLIC util)
 
-# netmgr: the captive DNS reply, the saved-network list and the scan choices build on the host.
+# netmgr: the captive DNS reply, the saved-network list, the scan choices and the link events build
+# on the host.
 add_library(netmgr_logic STATIC ${REPO_ROOT}/components/netmgr/netmgr_dns.c
-            ${REPO_ROOT}/components/netmgr/netmgr_list.c ${REPO_ROOT}/components/netmgr/netmgr_scan.c)
+            ${REPO_ROOT}/components/netmgr/netmgr_list.c ${REPO_ROOT}/components/netmgr/netmgr_scan.c
+            ${REPO_ROOT}/components/netmgr/netmgr_link.c)
 target_include_directories(netmgr_logic PUBLIC ${REPO_ROOT}/components/netmgr/include)
 target_compile_options(netmgr_logic PRIVATE ${REFLBO_WARNINGS})
 
@@ -162,6 +164,7 @@ reflbo_host_test(test_power_policy power_logic)
 reflbo_host_test(test_netmgr_dns netmgr_logic)
 reflbo_host_test(test_netmgr_list netmgr_logic)
 reflbo_host_test(test_netmgr_scan netmgr_logic)
+reflbo_host_test(test_netmgr_link netmgr_logic)
 reflbo_host_test(test_webui_auth webui_logic)
 reflbo_host_test(test_webui_http webui_logic)
 reflbo_host_test(test_lang locale)

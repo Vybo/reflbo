@@ -17,9 +17,12 @@
 #include "lwip/sockets.h"
 #include "mdns.h"
 #include "netmgr_dns.h"
+#include "netmgr_link.h"
 #include "nvs.h"
 
 static const char *TAG = "netmgr";
+
+_Static_assert(NETMGR_REASON_ASSOC_LEAVE == WIFI_REASON_ASSOC_LEAVE, "netmgr_link.h mirrors the driver");
 
 #define TASK_STACK      6144
 #define TASK_PRIORITY   4 /* below the app (5) and the buttons (6) */
@@ -193,15 +196,22 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        s_reason = ((wifi_event_sta_disconnected_t *)data)->reason;
-        xEventGroupSetBits(s_events, EV_FAILED);
-        if (!s_joining && s_status.state == NETMGR_STATION) { /* the network went away: keep trying it */
-            ESP_LOGW(TAG, "lost \"%s\" (reason %u); trying again", s_status.ssid, s_reason);
+        uint8_t reason = ((wifi_event_sta_disconnected_t *)data)->reason;
+        switch (netmgr_disconnected(reason, s_joining, s_status.state == NETMGR_STATION)) {
+        case NETMGR_DISC_FAILED:
+            s_reason = reason;
+            xEventGroupSetBits(s_events, EV_FAILED);
+            break;
+        case NETMGR_DISC_RECONNECT: /* the network went away: keep trying it */
+            ESP_LOGW(TAG, "lost \"%s\" (reason %u); trying again", s_status.ssid, reason);
             lock();
             s_status.ip[0] = '\0';
             unlock();
             esp_wifi_connect();
             notify();
+            break;
+        case NETMGR_DISC_IGNORE: /* the old link join() dropped, maybe late */
+            break;
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *e = data;
@@ -406,8 +416,9 @@ static netmgr_test_t join(const char *ssid, const char *pass, const uint8_t *bss
     return r;
 }
 
-/* Joined network `index` of the list: remember where, and show it. */
-static void joined(int index, bool ap_on)
+/* Joined saved network `ssid`: remember where, and show it. The list may have lost it meanwhile (a
+ * forget from the web UI during the join), which leaves the list alone. */
+static void joined(const char *ssid, bool ap_on)
 {
     wifi_ap_record_t info;
     uint8_t bssid[6] = { 0 }, channel = 0;
@@ -418,9 +429,9 @@ static void joined(int index, bool ap_on)
         rssi = info.rssi;
     }
     lock();
-    strcpy(s_status.ssid, s_list.nets[index].ssid);
+    snprintf(s_status.ssid, sizeof(s_status.ssid), "%s", ssid);
     s_status.rssi = rssi;
-    netmgr_list_succeeded(&s_list, index, bssid, channel);
+    netmgr_list_succeeded(&s_list, netmgr_list_find(&s_list, ssid), bssid, channel);
     unlock();
     save_list();
     mdns_up();
@@ -444,10 +455,7 @@ static bool join_saved(bool ap_on)
             r = join(n->ssid, n->pass, NULL, 0); /* the router may have moved */
         }
         if (r == NETMGR_TEST_OK) {
-            lock();
-            int index = netmgr_list_find(&s_list, n->ssid);
-            unlock();
-            joined(index, ap_on);
+            joined(n->ssid, ap_on);
             ok = true;
         } else {
             ESP_LOGI(TAG, "\"%s\": %s", n->ssid, netmgr_test_name(r));
@@ -537,7 +545,7 @@ static netmgr_test_t do_test(const char *ssid, const char *pass)
         lock();
         netmgr_list_add(&s_list, ssid, pass);
         unlock();
-        joined(0, true);
+        joined(ssid, true);
         return r;
     }
     ESP_LOGI(TAG, "test \"%s\": %s", ssid, netmgr_test_name(r));

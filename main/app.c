@@ -17,11 +17,14 @@
 #include "esp_check.h"
 #include "esp_core_dump.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "power.h"
 #include "pcf85063.h"
@@ -29,6 +32,7 @@
 #include "st7305.h"
 #include "sdkconfig.h"
 #include "sensors.h"
+#include "storage.h"
 #include "timekeeping.h"
 #include "ui_screens.h"
 #include "util_snapshot.h"
@@ -43,10 +47,13 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      3
+#define SNAP_VERSION      4
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */
+#define OTA_VERIFY_MS     60000 /* spec §10.5: a new image is valid after this long without a panic */
+#define RESTART_MS        1500  /* a restart's toast stays this long; it also lets a web reply go out */
+#define RESUME_MAGIC      0x72636667u /* "rcfg" */
 
 #if CONFIG_REFLBO_PANEL_INIT_XIAOZHI
 #define PANEL_VARIANT ST7305_VARIANT_XIAOZHI
@@ -88,10 +95,15 @@ typedef struct {
 _Static_assert(sizeof(app_snapshot_t) <= 4096, "the RTC-RAM snapshot is at most 4 KB (spec §6)");
 
 static RTC_DATA_ATTR app_snapshot_t s_snap;
+/* A restart the web UI asked for (an update, Reboot) comes back in config mode, so the page finds
+ * the device again. RTC_NOINIT survives a software reset; a power-on leaves garbage, hence the magic. */
+static RTC_NOINIT_ATTR uint32_t s_resume_config;
 static QueueHandle_t s_queue;
 static time_t s_next_alarm; /* the RTC alarm: the next minute slot */
 static time_t s_wake_at;    /* the earliest wake: the alarm, or a cycle switch or seconds tick before it */
 static int64_t s_peek_until_ms; /* night: the dashboard shows until then (app_uptime_ms) */
+static bool s_ota_pending;      /* this image came from an upload and is not yet marked valid */
+static bool s_rendered;         /* the first frame went out since boot */
 
 static void IRAM_ATTR on_rtc_int(void *arg)
 {
@@ -122,6 +134,47 @@ esp_err_t app_execute(void (*fn)(void *arg), void *arg)
     xSemaphoreTake(done, portMAX_DELAY);
     vSemaphoreDelete(done);
     return ESP_OK;
+}
+
+esp_err_t app_post(void (*fn)(void *arg), void *arg)
+{
+    app_event_t ev = { .type = EV_CALL, .call = { .fn = fn, .arg = arg, .done = NULL } };
+    return xQueueSend(s_queue, &ev, pdMS_TO_TICKS(100)) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+void app_restart(lang_str_t message, bool config_after)
+{
+    s_resume_config = config_after ? RESUME_MAGIC : 0;
+    app_menu_close();
+    app_ui_toast(lang_str(lang_get(app_settings()->language), message));
+    vTaskDelay(pdMS_TO_TICKS(RESTART_MS));
+    esp_restart();
+}
+
+void app_factory_reset(void)
+{
+    app_menu_close();
+    app_ui_toast(lang_str(lang_get(app_settings()->language), LS_T_RESETTING));
+    esp_err_t err = storage_erase();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "erasing storage: %s", esp_err_to_name(err));
+    }
+    static const char *const k_namespaces[] = { "wifi", "secrets", "ctr" };
+    for (size_t i = 0; i < sizeof(k_namespaces) / sizeof(k_namespaces[0]); i++) {
+        nvs_handle_t nvs;
+        if (nvs_open(k_namespaces[i], NVS_READONLY, &nvs) != ESP_OK) {
+            continue; /* never written: nothing to erase */
+        }
+        nvs_close(nvs);
+        if (nvs_open(k_namespaces[i], NVS_READWRITE, &nvs) == ESP_OK) {
+            nvs_erase_all(nvs);
+            nvs_commit(nvs);
+            nvs_close(nvs);
+        }
+    }
+    ESP_LOGW(TAG, "factory reset done; restarting");
+    vTaskDelay(pdMS_TO_TICKS(RESTART_MS));
+    esp_restart();
 }
 
 static void schedule_next(void)
@@ -200,9 +253,24 @@ static void handle_button(board_button_t button, gesture_t gesture)
         bool held = gesture == GESTURE_LONG;
         app_menu_key(button == BOARD_BUTTON_KEY ? (held ? UI_MENU_KEY_SELECT : UI_MENU_KEY_NEXT)
                                                 : (held ? UI_MENU_KEY_EXIT : UI_MENU_KEY_BACK));
+    } else if (app_config_active()) { /* spec §5.6 */
+        if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT) {
+            app_config_toggle_qr();
+        } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
+            app_config_exit();
+        }
     } else if (app_state()->critical) {
         app_ui_sample(time(NULL)); /* only a recovered battery leaves this screen (spec §8) */
         app_ui_render();
+    } else if (app_ui_first_run()) { /* spec §5.5: KEY leads on to the dashboard or the menu */
+        if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
+            app_config_enter();
+        } else if (button == BOARD_BUTTON_KEY && (gesture == GESTURE_SHORT || gesture == GESTURE_LONG)) {
+            app_ui_end_first_run();
+            if (gesture == GESTURE_LONG) {
+                app_menu_open();
+            }
+        }
     } else if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT) {
         app_ui_select(ui_presets_next(app_presets()), true);
         snprintf(text, sizeof(text), "%s: %s", lang_str(lang, LS_T_PRESET), preset_name());
@@ -216,9 +284,8 @@ static void handle_button(board_button_t button, gesture_t gesture)
         app_ui_sample(time(NULL));
         app_ui_render();
         ESP_LOGI(TAG, "BOOT short: sensors refreshed");
-    } else {
-        ESP_LOGI(TAG, "%s %s is not bound yet (config mode comes in M4)", board_button_name(button),
-                 board_gesture_name(gesture));
+    } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
+        app_config_enter(); /* 3 s on the dashboard (spec §5.6) */
     }
     schedule_next();
 }
@@ -280,7 +347,9 @@ static void handle_event(const app_event_t *ev)
         bool was_valid = timekeeping_valid();
         int64_t before = now_ms();
         ev->call.fn(ev->call.arg);
-        xSemaphoreGive(ev->call.done);
+        if (ev->call.done != NULL) {
+            xSemaphoreGive(ev->call.done);
+        }
         int64_t moved = now_ms() - before;
         if (timekeeping_valid() != was_valid || moved < 0 || moved > 2000) {
             app_clock_moved(moved / 1000); /* `rtc set` and friends */
@@ -439,6 +508,16 @@ static esp_err_t boot(void)
 {
     esp_err_t err = power_init();
     power_wake_t wake = power_boot_wake();
+    bool resume_config = wake == POWER_WAKE_COLD && s_resume_config == RESUME_MAGIC;
+    esp_ota_img_states_t ota = ESP_OTA_IMG_UNDEFINED;
+    s_ota_pending = esp_ota_get_state_partition(esp_ota_get_running_partition(), &ota) == ESP_OK &&
+                    ota == ESP_OTA_IMG_PENDING_VERIFY;
+    if (!s_ota_pending) {
+        /* Once: a crash in config mode must not bring it back forever. A new image keeps the flag
+         * until it is valid, so that after a rollback the old one comes back in config mode too
+         * and the web UI can tell. */
+        s_resume_config = 0;
+    }
     if (!routine_wake(wake)) {
         come_alive();
     }
@@ -500,8 +579,31 @@ static esp_err_t boot(void)
         }
         on_tick(!warm || app_state()->critical);
     }
+    s_rendered = true;
+    if (resume_config) {
+        ESP_LOGI(TAG, "restarted from the web UI: config mode again");
+        app_config_enter();
+    }
+    if (s_ota_pending) { /* spec §10.5: awake, without deep sleep, until it has proved itself */
+        ESP_LOGW(TAG, "new firmware: valid after %d s without a panic", OTA_VERIFY_MS / 1000);
+    }
     ESP_LOGI(TAG, "reflbo ready (%s wake%s)", power_wake_name(wake), warm ? ", warm" : "");
     return ESP_OK;
+}
+
+/* Spec §10.5: the panel came up and drew, and a minute passed without a panic. */
+static void check_ota(void)
+{
+    if (s_ota_pending && s_rendered && app_uptime_ms() >= OTA_VERIFY_MS) {
+        esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+        s_ota_pending = false;
+        s_resume_config = 0;
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "new firmware marked valid");
+        } else {
+            ESP_LOGE(TAG, "marking the firmware valid: %s", esp_err_to_name(err));
+        }
+    }
 }
 
 static void app_task(void *arg)
@@ -515,13 +617,18 @@ static void app_task(void *arg)
         power_hold_awake_ms(GRACE_MS);
     }
     for (;;) {
-        bool pending = uxQueueMessagesWaiting(s_queue) > 0 || board_buttons_busy();
+        /* Config mode and a new image waiting to prove itself keep the chip awake: sleep would
+         * drop Wi-Fi, and a deep-sleep wake would roll the image back (spec §10.5). */
+        bool pending = uxQueueMessagesWaiting(s_queue) > 0 || board_buttons_busy() || app_config_active() ||
+                       s_ota_pending;
         if (err == ESP_OK) {
             check_clock_jump();
+            check_ota();
             int64_t mono = app_uptime_ms();
             if (app_menu_is_open() && mono >= app_menu_deadline_ms()) {
                 app_menu_close(); /* 60 s without input (spec §5.7) */
             }
+            app_config_tick();
             app_ui_toast_expire();
             bool busy = pending || app_menu_is_open() || app_ui_toast_active();
             if (!busy && app_ui_night() && mono >= s_peek_until_ms) {
@@ -553,7 +660,8 @@ static void app_task(void *arg)
             wait_ms = due_ms < wait_ms ? due_ms : wait_ms;
             int64_t mono = app_uptime_ms();
             const int64_t deadlines[] = { app_menu_deadline_ms(), app_ui_toast_until_ms(),
-                                          app_ui_night() ? s_peek_until_ms : 0 };
+                                          app_ui_night() ? s_peek_until_ms : 0, app_config_redraw_ms(),
+                                          s_ota_pending ? OTA_VERIFY_MS : 0 };
             for (size_t i = 0; i < sizeof(deadlines) / sizeof(deadlines[0]); i++) {
                 if (deadlines[i] != 0 && deadlines[i] - mono < wait_ms) {
                     wait_ms = deadlines[i] - mono;

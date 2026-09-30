@@ -11,7 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lang.h"
-#include "nvs.h"
+#include "netmgr.h"
 #include "power.h"
 #include "st7305.h"
 #include "storage.h"
@@ -56,7 +56,7 @@ static const char *s_zone_names[ZONES_MAX];
 static const char *s_language_names[LANGUAGE_COUNT];
 static char s_rate_text[RATE_COUNT][12];
 static const char *s_rates[RATE_COUNT];
-static char s_info[5][80];
+static char s_info[7][80];
 
 static const lang_t *lang(void)
 {
@@ -197,47 +197,19 @@ static void build_model(void)
     char mb[12];
     lang_format_decimal(l, (long)(esp_get_free_heap_size() / (1024 * 1024 / 10)), 1, mb, sizeof(mb));
     snprintf(s_info[4], sizeof(s_info[4]), "%s MB", mb);
+    netmgr_status_t net = { 0 };
+    if (app_config_active()) {
+        netmgr_status(&net); /* Wi-Fi is off otherwise */
+    }
+    snprintf(s_info[5], sizeof(s_info[5]), "%s",
+             net.ip[0] ? net.ip : net.state == NETMGR_AP ? NETMGR_AP_IP : "\xE2\x80\x94");
+    snprintf(s_info[6], sizeof(s_info[6]), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4],
+             mac[5]);
     const ui_menu_item_t info_items[] = { UI_MI_INFO_BATTERY, UI_MI_INFO_FIRMWARE, UI_MI_INFO_DEVICE,
-                                          UI_MI_INFO_UPTIME, UI_MI_INFO_MEMORY };
-    for (int i = 0; i < 5; i++) {
+                                          UI_MI_INFO_UPTIME, UI_MI_INFO_MEMORY, UI_MI_INFO_IP, UI_MI_INFO_MAC };
+    for (int i = 0; i < 7; i++) {
         m->info[info_items[i]] = s_info[i];
     }
-}
-
-/* Shows `message` over the dashboard for a moment, then restarts the chip. */
-static void restart_after(lang_str_t message)
-{
-    app_menu_close();
-    app_ui_toast(lang_str(lang(), message));
-    vTaskDelay(pdMS_TO_TICKS(1500));
-    esp_restart();
-}
-
-/* Spec §14.4: erases storage and the NVS namespaces wifi, secrets and ctr; keeps sys. */
-static void factory_reset(void)
-{
-    app_menu_close();
-    app_ui_toast(lang_str(lang(), LS_T_RESETTING));
-    esp_err_t err = storage_erase();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "erasing storage: %s", esp_err_to_name(err));
-    }
-    static const char *const k_namespaces[] = { "wifi", "secrets", "ctr" };
-    for (size_t i = 0; i < sizeof(k_namespaces) / sizeof(k_namespaces[0]); i++) {
-        nvs_handle_t nvs;
-        if (nvs_open(k_namespaces[i], NVS_READONLY, &nvs) != ESP_OK) {
-            continue; /* never written: nothing to erase */
-        }
-        nvs_close(nvs);
-        if (nvs_open(k_namespaces[i], NVS_READWRITE, &nvs) == ESP_OK) {
-            nvs_erase_all(nvs);
-            nvs_commit(nvs);
-            nvs_close(nvs);
-        }
-    }
-    ESP_LOGW(TAG, "factory reset done; restarting");
-    vTaskDelay(pdMS_TO_TICKS(1500));
-    esp_restart();
 }
 
 static void set_zone(int index)
@@ -328,10 +300,30 @@ static void apply(const ui_menu_intent_t *in)
         break;
     }
     case UI_MENU_ACTION:
-        if (in->item == UI_MI_REBOOT) {
-            restart_after(LS_T_REBOOTING);
-        } else if (in->item == UI_MI_FACTORY_RESET) {
-            factory_reset();
+        switch (in->item) {
+        case UI_MI_CONFIG_MODE:
+            app_config_enter(); /* closes the menu */
+            return;
+        case UI_MI_FORGET_NETWORKS:
+            if (app_net_init() == ESP_OK && netmgr_forget_all() == ESP_OK) {
+                app_menu_close();
+                app_ui_toast(lang_str(lang(), LS_T_NETWORKS_FORGOTTEN));
+            }
+            return;
+        case UI_MI_RESET_PASSWORD:
+            if (webui_reset_password() == ESP_OK) {
+                app_menu_close();
+                app_ui_toast(lang_str(lang(), LS_T_PASSWORD_CLEARED));
+            }
+            return;
+        case UI_MI_REBOOT:
+            app_restart(LS_T_REBOOTING, false);
+            break;
+        case UI_MI_FACTORY_RESET:
+            app_factory_reset();
+            break;
+        default:
+            break;
         }
         break;
     case UI_MENU_CLOSE:

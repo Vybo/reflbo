@@ -8,6 +8,7 @@
 #include "esp_console.h"
 #include "esp_log.h"
 #include "lang.h"
+#include "netmgr.h"
 #include "ui_fields.h"
 #include "ui_layout.h"
 
@@ -248,6 +249,50 @@ static int cmd_schedule(int argc, char **argv)
     return diag_on_owner(schedule_body, argc, argv);
 }
 
+/* `wifi status | scan` (spec §15). netmgr is thread-safe: this runs on the console task, so a
+ * scan doesn't hold up the app task. */
+static int cmd_wifi(int argc, char **argv)
+{
+    static const char *const k_usage = "wifi status | wifi scan  (Wi-Fi is on in config mode: `btn boot long`)";
+    if (app_net_init() != ESP_OK) {
+        printf("wifi: the Wi-Fi manager didn't start\n");
+        return 1;
+    }
+    if (argc == 2 && strcmp(argv[1], "status") == 0) {
+        static netmgr_status_t st;
+        static netmgr_list_t saved;
+        static const char *const k_states[] = { "off", "joining", "on a network", "AP only" };
+        netmgr_status(&st);
+        netmgr_networks(&saved);
+        printf("state %s%s\n", k_states[st.state], st.ap_on && st.state != NETMGR_AP ? ", AP too" : "");
+        if (st.state == NETMGR_STATION) {
+            printf("network \"%s\", %s, %d dBm\n", st.ssid, st.ip[0] ? st.ip : "no address yet", st.rssi);
+        }
+        if (st.ap_on) {
+            printf("AP %s, %u client(s)\n", st.ap_ssid, st.ap_clients);
+        }
+        printf("host %s.local\n", st.host);
+        printf("%d saved network(s)%s", saved.count, saved.count ? ":" : "");
+        for (int i = 0; i < saved.count; i++) {
+            printf(" \"%s\"", saved.nets[i].ssid);
+        }
+        printf("\n");
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "scan") == 0) {
+        static netmgr_ap_t aps[NETMGR_SCAN_MAX];
+        int n = netmgr_scan(aps, NETMGR_SCAN_MAX);
+        if (n == 0) {
+            printf("wifi: nothing found; Wi-Fi is on only in config mode\n");
+        }
+        for (int i = 0; i < n; i++) {
+            printf("%4d dBm %s %s\n", aps[i].rssi, aps[i].open ? "open" : "WPA ", aps[i].ssid);
+        }
+        return 0;
+    }
+    return usage(k_usage);
+}
+
 void app_register_commands(void)
 {
     const esp_console_cmd_t cmds[] = {
@@ -256,6 +301,7 @@ void app_register_commands(void)
         { .command = "night", .help = "night <minutes>: night sleep now (spec §9.1)", .func = &cmd_night },
         { .command = "schedule", .help = "schedule list | on | off | clear | add <HH:MM> preset <id> [days] | "
                                          "add <HH:MM> night <HH:MM> [days]", .func = &cmd_schedule },
+        { .command = "wifi", .help = "wifi status | scan", .func = &cmd_wifi },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_err_t err = esp_console_cmd_register(&cmds[i]);

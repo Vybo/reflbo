@@ -12,13 +12,30 @@ menu "reflbo"
         help
             The name shown for REFLBO_TZ; settings.json keeps both (spec §7).
 
+    config REFLBO_LOCATION_NAME
+        string "Location name"
+        default "Brno"
+        help
+            Default location (spec §1): its name, shown in the web UI. settings.json overrides it.
+
+    config REFLBO_LOCATION_LAT_E4
+        int "Location latitude (1e-4 degrees, north positive)"
+        range -900000 900000
+        default 491951
+
+    config REFLBO_LOCATION_LON_E4
+        int "Location longitude (1e-4 degrees, east positive)"
+        range -1800000 1800000
+        default 166068
+
     config REFLBO_TEMP_OFFSET_C10
         int "SHTC3 temperature offset (0.1 °C)"
         range -100 100
-        default 0
+        default -20
         help
-            Added to every reading; the board warms the sensor (AGENTS.md gotcha 10). Calibrate
-            against a reference thermometer (spec §8).
+            Added to every reading. The board warms the sensor by about 2 °C at all times
+            (AGENTS.md gotcha 10; the owner's measurement, 2026-09-30), so the default is -2.0 °C.
+            Trim it against a reference thermometer in the menu or the web UI (spec §8).
 
     config REFLBO_HUM_OFFSET_PCT10
         int "SHTC3 humidity offset (0.1 %RH)"

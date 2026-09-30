@@ -14,6 +14,8 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_MEMTEST=n
+# Large static scratch buffers (EXT_RAM_BSS_ATTR) go to PSRAM: Wi-Fi needs the internal RAM (M4)
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
 # Console and logs on the USB-Serial-JTAG port
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
@@ -38,3 +40,13 @@ CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 # once it knows the board stays awake, so INFO stays compiled in.
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
+
+# OTA with rollback (spec §10.5): an uploaded image boots as "pending" and must mark itself valid,
+# or the bootloader goes back to the previous one at the next reset.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Web configurator (spec §10.3): phone browsers send more than the default 512 bytes of headers,
+# and open several connections at once. The server takes 7 sockets plus 3 of its own, the captive
+# DNS one more: the default 10 sockets run out, and accept() fails with ENFILE.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_LWIP_MAX_SOCKETS=16

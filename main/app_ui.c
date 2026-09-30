@@ -3,6 +3,7 @@
 
 #include "app_internal.h"
 #include "display.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "lang.h"
 #include "power.h"
@@ -20,8 +21,9 @@
 static const char *TAG = "app_ui";
 
 static app_ui_state_t s;
-static char s_file[UI_PRESETS_JSON_MAX];
-static char s_settings_base[2048]; /* settings.json as read: keys this firmware doesn't know stay */
+/* The config files' text: scratch buffers in PSRAM (AGENTS.md §8). */
+EXT_RAM_BSS_ATTR static char s_file[UI_PRESETS_JSON_MAX];
+EXT_RAM_BSS_ATTR static char s_settings_base[2048]; /* settings.json as read: unknown keys stay */
 static char s_err[96];
 static char s_toast[64];
 static int64_t s_toast_until_ms;
@@ -36,7 +38,10 @@ static void default_settings(settings_t *out)
         .hum_offset_pct100 = CONFIG_REFLBO_HUM_OFFSET_PCT10 * 10,
         .display_every_min = CONFIG_REFLBO_DISPLAY_UPDATE_MIN,
         .lpm_quarter_hz = 4, /* 1 Hz (D12) */
+        .lat_e4 = CONFIG_REFLBO_LOCATION_LAT_E4,
+        .lon_e4 = CONFIG_REFLBO_LOCATION_LON_E4,
     };
+    snprintf(out->place, sizeof(out->place), "%s", CONFIG_REFLBO_LOCATION_NAME);
     snprintf(out->tz_posix, sizeof(out->tz_posix), "%s", CONFIG_REFLBO_TZ);
     snprintf(out->tz_iana, sizeof(out->tz_iana), "%s", CONFIG_REFLBO_TZ_NAME);
 }
@@ -69,19 +74,20 @@ static bool parse_presets(const char *text, void *ctx)
     return ok;
 }
 
-/* True if the file had to fall back to the defaults (it existed but nothing in it parsed). */
-static bool load_one(const char *path, char *buf, size_t buf_size, storage_parse_t parse, void *target, size_t size,
-                     const void *defaults)
+/* ESP_OK, ESP_ERR_NOT_FOUND (no file yet), or ESP_ERR_INVALID_RESPONSE: it existed, but nothing
+ * in it parsed, so the defaults are in use. */
+static esp_err_t load_one(const char *path, char *buf, size_t buf_size, storage_parse_t parse, void *target,
+                          size_t size, const void *defaults)
 {
     bool from_backup = false;
     esp_err_t err = storage_load(path, buf, buf_size, parse, target, &from_backup);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "%s loaded%s", path, from_backup ? " from the backup" : "");
-        return false;
+        return ESP_OK;
     }
     memcpy(target, defaults, size); /* a failed parse may have left it half-written */
     ESP_LOGI(TAG, "%s: %s; using defaults", path, err == ESP_ERR_NOT_FOUND ? "not there yet" : "invalid");
-    return err != ESP_ERR_NOT_FOUND;
+    return err == ESP_ERR_NOT_FOUND ? err : ESP_ERR_INVALID_RESPONSE;
 }
 
 void app_ui_load(void)
@@ -99,14 +105,15 @@ void app_ui_load(void)
         ESP_LOGE(TAG, "storage: %s; settings and presets use their defaults", esp_err_to_name(err));
         return;
     }
-    bool fell_back = load_one(STORAGE_SETTINGS_PATH, s_settings_base, sizeof(s_settings_base), parse_settings,
-                              &s.settings, sizeof(s.settings), &settings_defaults);
-    if (fell_back) {
+    esp_err_t settings = load_one(STORAGE_SETTINGS_PATH, s_settings_base, sizeof(s_settings_base), parse_settings,
+                                  &s.settings, sizeof(s.settings), &settings_defaults);
+    if (settings != ESP_OK) {
         s_settings_base[0] = '\0'; /* nothing worth keeping in it */
     }
-    fell_back |= load_one(STORAGE_PRESETS_PATH, s_file, sizeof(s_file), parse_presets, &s.presets, sizeof(s.presets),
-                          &presets_defaults);
-    if (fell_back) { /* spec §14.3: say so */
+    s.first_run = settings == ESP_ERR_NOT_FOUND; /* a new board, or a factory reset (spec §5.5) */
+    esp_err_t presets = load_one(STORAGE_PRESETS_PATH, s_file, sizeof(s_file), parse_presets, &s.presets,
+                                 sizeof(s.presets), &presets_defaults);
+    if (settings == ESP_ERR_INVALID_RESPONSE || presets == ESP_ERR_INVALID_RESPONSE) { /* spec §14.3: say so */
         app_ui_toast(lang_str(lang_get(s.settings.language), LS_T_DEFAULTS));
     }
 }
@@ -196,6 +203,10 @@ void app_ui_render(void)
     app_ui_context(&ctx);
     if (s.critical) {
         ui_draw_critical(fb, &ctx);
+    } else if (app_config_active()) {
+        app_config_draw(fb, ctx.lang);
+    } else if (s.first_run) {
+        ui_draw_first_run(fb, &ctx);
     } else {
         ui_draw_dashboard(fb, &ctx, &s.presets.presets[s.presets.active]);
     }
@@ -260,6 +271,10 @@ void app_ui_sample(time_t now)
     } else {
         ESP_LOGW(TAG, "SHTC3: %s; keeping the last reading", esp_err_to_name(err));
     }
+    if (app_config_active()) { /* spec §8: the battery only while idle; the radio's load pulls VBAT down */
+        ds_take_changes(&s.ds);
+        return;
+    }
     err = sensors_sample_battery(now);
     if (err == ESP_OK) {
         sensors_battery_t bat = sensors_battery(now);
@@ -321,7 +336,7 @@ esp_err_t app_ui_save_settings(void)
             s_settings_base[0] = '\0';
         }
     }
-    static char out[sizeof(s_settings_base)];
+    EXT_RAM_BSS_ATTR static char out[sizeof(s_settings_base)];
     size_t n = settings_to_json(&s.settings, s_settings_base[0] ? s_settings_base : NULL, out, sizeof(out));
     if (n == 0) {
         ESP_LOGE(TAG, "settings.json does not fit %u bytes", (unsigned)sizeof(out));
@@ -460,4 +475,85 @@ sched_wake_t app_ui_next_wake(time_t now)
         .schedule_at = schedule_runs() ? ui_schedule_next(&s.presets.schedule, now, &index) : 0,
     };
     return scheduler_next_wake(&in);
+}
+
+bool app_ui_first_run(void)
+{
+    return s.first_run;
+}
+
+void app_ui_end_first_run(void)
+{
+    if (!s.first_run) {
+        return;
+    }
+    s.first_run = false;
+    app_ui_save_settings(); /* the file now exists, so the first run doesn't come back */
+    app_ui_render();
+}
+
+size_t app_ui_settings_json(char *out, size_t size)
+{
+    return settings_to_json(&s.settings, s_settings_base[0] ? s_settings_base : NULL, out, size);
+}
+
+bool app_ui_check_settings(const char *json, char *err, size_t err_size)
+{
+    static settings_t parsed;
+    return settings_from_json(json, &s.settings, &parsed, err, err_size);
+}
+
+/* The new settings take effect everywhere: time zone, offsets, panel rate, slots and the text. */
+static void settings_changed(void)
+{
+    app_ui_apply_settings();
+    app_ui_sample(time(NULL));
+    app_clock_moved(0); /* new slots or a new zone: schedule again, and redraw */
+}
+
+esp_err_t app_ui_replace_settings(const char *json, char *err, size_t err_size)
+{
+    static settings_t parsed;
+    if (!settings_from_json(json, &s.settings, &parsed, err, err_size)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t n = strlen(json);
+    if (n >= sizeof(s_settings_base)) {
+        snprintf(err, err_size, "settings.json is larger than %u bytes", (unsigned)sizeof(s_settings_base) - 1);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    s.settings = parsed;
+    memcpy(s_settings_base, json, n + 1); /* keys this firmware doesn't know stay, as in the file */
+    esp_err_t e = app_ui_save_settings();
+    settings_changed();
+    return e;
+}
+
+esp_err_t app_ui_patch_settings(const char *patch, char *err, size_t err_size)
+{
+    EXT_RAM_BSS_ATTR static char merged[sizeof(s_settings_base)];
+    EXT_RAM_BSS_ATTR static char base[sizeof(s_settings_base)];
+    if (app_ui_settings_json(base, sizeof(base)) == 0 ||
+        settings_patch(base, patch, merged, sizeof(merged), err, err_size) == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return app_ui_replace_settings(merged, err, err_size);
+}
+
+esp_err_t app_ui_replace_presets(const ui_presets_t *presets)
+{
+    s.presets = *presets;
+    s.cycle_at = 0;              /* the next tick starts the cycle interval */
+    s.sched_checked = time(NULL); /* entries don't run late for a new schedule */
+    esp_err_t err = app_ui_save_presets();
+    app_ui_render();
+    return err;
+}
+
+void app_ui_set_zone(const char *iana, const char *posix)
+{
+    snprintf(s.settings.tz_iana, sizeof(s.settings.tz_iana), "%s", iana);
+    snprintf(s.settings.tz_posix, sizeof(s.settings.tz_posix), "%s", posix);
+    app_ui_save_settings();
+    settings_changed();
 }

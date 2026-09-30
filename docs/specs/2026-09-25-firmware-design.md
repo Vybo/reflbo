@@ -438,6 +438,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 - As built (M4):
   - Wi-Fi ▸ Config mode starts config mode at once. Forget networks and Reset web password ask first, like Factory reset, and end with a toast.
   - Info shows IP and MAC as two rows. The IP shows only while Wi-Fi is on, otherwise a dash.
+  - A value too long for its row, such as a zone the web UI set, is cut with "…". A short label keeps its width; a long one gets half the row.
 - The full time zone picker is in the web UI.
 
 ### 5.8 Language packs
@@ -630,7 +631,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - IP 192.168.4.1; at most 2 clients.
   - Captive DNS answers every name with the AP IP, and OS connectivity-probe URLs redirect to `/`. DHCP offers `http://192.168.4.1/` as the captive portal (RFC 8910).
   - The station shares the radio, so the AP must follow a network the station joins onto its channel, which drops the AP's clients. The AP therefore starts on the channel of the strongest saved network in sight, else of the strongest network, else 1: trying the likely network doesn't move it.
-- **Testing a network** (web UI). A scan comes first: a network out of reach is reported at once and never takes the AP off its channel. The device then joins by BSSID and channel, beside the AP. On success the network is saved first in the list and the device stays on it; on failure it returns to the network it was on. The test runs in the background, and the page polls for the result, as the phone may drop off the AP for a moment.
+- **Testing a network** (web UI). A scan comes first: a network out of reach is reported at once and never takes the AP off its channel. The device then joins by BSSID and channel, beside the AP. On success the network is saved first in the list and the device stays on it; on failure it returns to the network it was on. The test runs in the background, and the page polls for the result, as the phone may drop off the AP for a moment. Leaving the old network for the test never counts as the new one failing, however late its event comes.
 
 ### 10.2 Config mode
 
@@ -638,9 +639,9 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 - **Connecting.** With saved networks, it joins as a station and shows the LAN URL and IP. If that fails or no network is saved, it starts the AP and captive portal. While the owner tests a new network from the web UI it runs AP and STA together. While no web password is set, it runs the AP as well, because only a phone on the AP may choose the password (§10.4).
 - **Exit.** BOOT long, "Done" in the web UI, or 10 min without HTTP requests. Wi-Fi then switches off.
   - Only requests for the device's own pages and API count: a joined phone's connectivity probes would otherwise keep config mode on for good.
-  - A critical battery (§8) ends it too.
+  - It doesn't watch the battery: no samples are taken while it runs (below), so a critical battery can't end it, and the idle timeout bounds it.
 - **While it runs.** The board stays awake, as neither sleep keeps Wi-Fi, and the panel is in HPM. The screen shows the state, a QR code and the minutes left; KEY switches the QR code (§5.6). No battery samples are taken, as the radio's load pulls VBAT down (§8).
-- **Restarts.** A restart the web UI asks for (a firmware update, Restart) comes back in config mode, so the page finds the device again; so does the image a rollback returns to (§10.5, D19).
+- **Restarts.** A restart the web UI asks for (a firmware update, Restart) comes back in config mode, so the page finds the device again; so does the image a rollback returns to (§10.5, D19). The flag is in NVS (`sys/resume_cfg`): another image lays out RTC RAM differently.
 
 ### 10.3 Web UI and REST API
 
@@ -648,7 +649,9 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 - **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), MQTT/HA (M6), Alarms and Radio (M7) join later.
   - Status sets the device's clock from the phone at once when the device has lost the time (D9, D19).
   - Device holds the menu's language, units, sensor offsets, sensor interval, update interval and refresh rate (D19).
-- **API.** JSON. Mutating requests must send `Content-Type: application/json`.
+- **API.** JSON. Mutating requests must send `Content-Type: application/json`, those without a body too.
+  - The server reads each body once, before any route and any login: at most 16 KB (413), nested at most 18 levels, a backup bundle's depth (400).
+  - A client that sends nothing for 15 s gets 408, and the connection closes, so one phone that vanishes mid-request can't stop the server.
 
 | Method and path | Purpose |
 |---|---|
@@ -678,17 +681,17 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 - **Web UI password** (D18).
   - The first visit asks for a new password, and only a client on the device's AP may set it; every visit after needs it.
   - It is kept as a salted hash in NVS `secrets`, is never returned or logged, and a factory reset erases it. The record is `pbkdf2-sha256$10000$<salt>$<hash>` with a 16-byte random salt; a login takes about 2 s on the chip. 8–64 characters.
-  - A login starts a session that ends with config mode: at most 4, each a random 128-bit token in a cookie that is `HttpOnly` and `SameSite=Strict`.
+  - A login starts a session that ends with config mode: at most 4, each a random 128-bit token in a cookie that is `HttpOnly` and `SameSite=Strict`. Phones also send cookies other gadgets set for 192.168.4.1, so the server takes 2 KB of request headers.
   - After 5 wrong passwords, logins wait 60 s.
   - Menu ▸ Wi-Fi ▸ Reset web password clears it, for when it is forgotten.
   - The page can also change it, given the current one, and log out (D19).
 
 ### 10.5 OTA
 
-- Two app slots with rollback. A new image marks itself valid only after panel init, a first render, and 60 s without a panic. Otherwise the bootloader rolls back at the next reset.
+- Two app slots with rollback. A new image marks itself valid only after panel init, a first render, and 60 s without a panic. Otherwise the bootloader rolls back at the next reset. An image that fails to start rolls back at once.
   - Until then the board doesn't deep-sleep: a deep-sleep wake is a reset, which would roll the image back.
   - The upload streams into the other slot. Its header must name this project and chip, and the image's own checksum and hash must pass.
-  - Measured at M4: 1.3 MB in 11–15 s over the AP. A test build that crashed after 25 s rolled back to the previous image, which returned in config mode (§10.2) and reported it.
+  - Measured at M4: 1.3 MB in 11–15 s over the AP. A test build that crashed after 25 s rolled back to the previous image, which returned in config mode (§10.2) and reported it. After the M4 review, a test build that failed to start was back on the previous image within 6 s, in config mode.
 - Sources: upload through the web UI (M4). A file on microSD is an M8 candidate.
 
 ## 11. Weather and astro
@@ -832,7 +835,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 | Namespace | Contents |
 |---|---|
-| `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`) |
+| `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`), come back in config mode after a web restart (`resume_cfg`, §10.2) |
 | `wifi` | Saved networks with their passwords and fast-connect cache (`nets`, one versioned blob) |
 | `secrets` | MQTT password; the web UI password's salted hash (`web_pass`, D18); future tokens |
 | `ctr` | Counters: boots, sync statistics |
@@ -1031,3 +1034,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r13 | 2026-09-30 | M4 scope (D18): a web UI password instead of the admin PIN (§10.2, §10.4, §14.2, §19), with Menu ▸ Wi-Fi ▸ Reset web password (§5.7); one M4 plan; no ELF hash in the snapshot |
 | r14 | 2026-09-30 | M4 spike review (D19): when the first-run screen appears, and its buttons (§5.5, §5.6); the status bar's Wi-Fi state moves to M5 and M6 (§5.2); web restarts return in config mode (§10.2); the M4 pages, with Device, and the clock set from the phone (§10.3); changing the web password and logging out (§10.4); the −2.0 °C default temperature offset (§8); accepted extras (§19) |
 | r15 | 2026-09-30 | M4 as built: the components (§3.1); the menu's Wi-Fi section and Info rows (§5.7); the AP's channel, testing a network, and the portal address (§10.1); what ends config mode and what runs meanwhile (§10.2); the API (§10.3); the password record, sessions and login throttle (§10.4); OTA checks and measurements (§10.5); NVS keys (§14.2); `location.*` and the merge patch (§14.3); the backup bundle (§14.4); `wifi` (§15); the new host tests (§17) |
+| r16 | 2026-09-30 | M4 review: long menu values are cut (§5.7); leaving a network for a test is never its failure (§10.1); config mode doesn't watch the battery, and the resume flag is in NVS (§10.2, §14.2); bodies are read once, nested at most 18 levels, and a stalled client gets 408 (§10.3); 2 KB of headers for other gadgets' cookies (§10.4); an image that fails to start rolls back at once (§10.5) |

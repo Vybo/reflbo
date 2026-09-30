@@ -29,7 +29,7 @@ Guiding principles:
 
 ## 2. Status and roadmap
 
-- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 runs as two plans. M3a is done: LittleFS config files, the datastore with the extra fields, the English pack, four layouts with widgets and a status bar, and presets that KEY switches and auto-cycles and that survive a reboot. M3b is done: the on-device menu with settings editing, toasts and the critical-battery screen, the preset schedule with timed night sleep, and the Czech pack with its public holidays. On 2026-09-30 the owner checked preset switching, a held KEY and BOOT, the menu buttons and timeout, and the Czech panel. Two owner checks wait for a later session at the owner's request: the night-sleep current (D15) and the night peek, which needs a night started from the console (`night <minutes>`) or from a schedule, which the web UI now edits. M4 is built: the Wi-Fi manager with the device's own network and captive portal, config mode with its QR screen, the web configurator with its API and a live preset preview, setting the time from a phone, and firmware updates with rollback. M4 is done once the owner has set up Wi-Fi from a phone and updated the firmware from the page (Owner acceptance in the M4 plan).
+- **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 runs as two plans. M3a is done: LittleFS config files, the datastore with the extra fields, the English pack, four layouts with widgets and a status bar, and presets that KEY switches and auto-cycles and that survive a reboot. M3b is done: the on-device menu with settings editing, toasts and the critical-battery screen, the preset schedule with timed night sleep, and the Czech pack with its public holidays. On 2026-09-30 the owner checked preset switching, a held KEY and BOOT, the menu buttons and timeout, and the Czech panel. Two owner checks wait for a later session at the owner's request: the night-sleep current (D15) and the night peek, which needs a night started from the console (`night <minutes>`) or from a schedule, which the web UI now edits. M4 is built: the Wi-Fi manager with the device's own network and captive portal, config mode with its QR screen, the web configurator with its API and a live preset preview, setting the time from a phone, and firmware updates with rollback. M4 is done once the owner has set up Wi-Fi from a phone and updated the firmware from the page (Owner acceptance in the M4 plan). The M4 review's fixes are in (spec r16).
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
 - **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-30-m4-wifi-and-web.md`](docs/plans/2026-09-30-m4-wifi-and-web.md).
 - **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees.
@@ -139,7 +139,9 @@ Numbering follows the schematic. Check the silkscreen before wiring.
 25. **lwIP has 10 sockets by default: too few for a browser.** The web server takes 7 plus 3 of its own, the captive DNS 1, and a browser opens several connections at once. At M4 `accept()` then failed with errno 23 (ENFILE) and Chrome showed an empty response. `CONFIG_LWIP_MAX_SOCKETS=16`.
 26. **The AP shares the radio with the station, and their channel.** Joining a network on another channel moves the AP there and drops the phones on it; calling `esp_wifi_set_config(WIFI_IF_AP, …)` on a running AP drops them too (seen at M4). So netmgr starts the AP on the channel of the network the owner will likely pick (spec §10.1), leaves a running AP alone, and scans before a test, so a network out of reach never moves it.
 27. **A phone on the AP keeps probing for the internet** (`captive.apple.com`, `connectivitycheck.gstatic.com`), and the captive DNS sends those probes to the device. Counting them as use kept config mode on for good; only the device's own pages and API count.
-28. **A firmware image uploaded over OTA stays pending until it marks itself valid**, and any reset while it is pending rolls it back. A deep-sleep wake is a reset, so the board doesn't deep-sleep until the image is valid (spec §10.5).
+28. **A firmware image uploaded over OTA stays pending until it marks itself valid**, and any reset while it is pending rolls it back. A deep-sleep wake is a reset, so the board doesn't deep-sleep until the image is valid (spec §10.5). A pending image that fails to start rolls back at once (`POWER_PLAN_ROLLBACK`): it holds the board awake itself, so the reset would never come.
+29. **RTC RAM addresses move between images.** `.rtc_noinit` follows `.rtc.data` and `.rtc.bss`, so an image with 32 more bytes of RTC data read the old image's resume flag 32 bytes off (0x500007b0 against 0x500007d0, seen at M4) and lost it. RTC RAM carries state within one image, through deep sleep; whatever must survive an update or a rollback goes in NVS, such as `sys/resume_cfg`.
+30. **A stack overflow corrupts memory without a clean crash.** No end-of-stack watchpoint is set, and FreeRTOS checks a task's stack only at a context switch. At M4 a JSON body nested 1000 levels deep sent cJSON's recursion past the web server's 8 KB stack, and the next `xSemaphoreTake` asserted on the corrupted auth mutex (`queue.c:1713`). Check `util_json_depth()` before parsing anything from outside.
 
 Datasheets: [ST7305](https://files.waveshare.com/wiki/common/ST_7305_V0_2.pdf) · [ES8311](https://files.waveshare.com/wiki/common/ES8311.DS.pdf) · [PCF85063](https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf) · [SHTC3](https://files.waveshare.com/wiki/common/SHTC3_Datasheet.pdf) · [ESP32-S3](https://documentation.espressif.com/esp32-s3_datasheet_en.pdf)
 
@@ -189,7 +191,7 @@ The spec has the full design. This section keeps the essentials at hand.
 | Audio | `esp_codec_dev` (ES8311/ES7210) and the Espressif audio decoder |
 | OTA | Two app slots with rollback |
 
-Partition table: spec §14.1. Key `sdkconfig.defaults`: 16 MB QIO flash; octal PSRAM at 80 MHz with `CONFIG_SPIRAM_MEMTEST=n`; console on USB-Serial-JTAG; custom partition table; `CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP`; bootloader and app logs at warning level (the app raises its logs to info once the board stays awake); core dumps without the boot-time check and logs; `tasks` statistics; app rollback; 16 lwIP sockets and 1 KB request headers for the web server (gotcha 25); large static buffers in PSRAM (`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` with `EXT_RAM_BSS_ATTR`). Automatic light sleep (`CONFIG_PM_ENABLE`) is not used (D14).
+Partition table: spec §14.1. Key `sdkconfig.defaults`: 16 MB QIO flash; octal PSRAM at 80 MHz with `CONFIG_SPIRAM_MEMTEST=n`; console on USB-Serial-JTAG; custom partition table; `CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP`; bootloader and app logs at warning level (the app raises its logs to info once the board stays awake); core dumps without the boot-time check and logs; `tasks` statistics; app rollback; 16 lwIP sockets and 2 KB request headers for the web server (gotcha 25; other gadgets' cookies for 192.168.4.1 come along); large static buffers in PSRAM (`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` with `EXT_RAM_BSS_ATTR`). Automatic light sleep (`CONFIG_PM_ENABLE`) is not used (D14).
 
 ### 5.2 Components *(planned layout)*
 
@@ -222,6 +224,7 @@ web/             web UI sources, embedded into the app image
 tools/           host helpers: idf wrapper, log capture, screenshot, render, font/image generators
 tools/tests/     unit tests for the host tools (run by ctest)
 test/host/       host unit tests, fixtures, golden images
+test/web/        tests of the page script against a fake device (Node, no packages; run by ctest)
 docs/            specs, plans, power measurements
 ```
 
@@ -285,6 +288,7 @@ cmake -S test/host -B build-host-asan -G Ninja -DREFLBO_SANITIZE=ON && cmake --b
 tools/gen_fonts.sh                          # regenerate components/gfx/fonts (needs uv; versions in tools/requirements.txt)
 tools/gen_icons.sh                          # regenerate components/gfx/icons from assets/icons (needs uv)
 python3 tools/render.py                     # host renderings to captures/render/*.png (after the host build)
+node --test test/web/test_app.mjs           # the page script against a fake device; ctest runs it when node is found
 ```
 
 - `tools/idf.sh` refuses commands that talk to the board (`flash`, `erase-*`, `monitor`, …) unless the port is given with `-p` or `ESPPORT`. Otherwise idf.py would probe every serial port and use the first ESP chip that answers.
@@ -304,14 +308,16 @@ python3 tools/render.py                     # host renderings to captures/render
   - Log in with `curl -c jar -H 'Content-Type: application/json' -d '{"password":"…"}' http://192.168.4.1/api/auth/login` and pass `-b jar` to the other calls. `--data-binary @build/reflbo.bin` with `Content-Type: application/octet-stream` on `/api/ota` updates the firmware.
   - Afterwards run `networksetup -removepreferredwirelessnetwork en0 reflbo-XXXX`, and clear any web password a check set (Menu ▸ Wi-Fi ▸ Reset web password), so the owner's first visit chooses theirs.
   - Headless Chrome with `--remote-debugging-port=9222` is an argent Chromium target. Its `--screenshot` renders at least 500 px wide, Chrome's smallest window. A key press of Enter sent over CDP doesn't submit a form: tap the button.
-- The Bash tool runs zsh: a variable holding several flags isn't split into words, and a word that starts with `=` is looked up as a command. Write flags out.
+  - Buttons that ask first (Forget, Factory reset) open a native `confirm()`, which blocks a page driven over CDP. Replace `window.confirm` with `debugger-evaluate` before tapping one, and never tap Factory reset without the owner's agreement.
+  - A web restart or update sets NVS `sys/resume_cfg`, and the next image comes back in config mode. After a USB flash in the middle of such a check, the board can come up in config mode by itself; `btn boot long` would then switch it off.
+- The Bash tool runs zsh: a variable holding several flags isn't split into words, and a word that starts with `=` is looked up as a command. Write flags out. `path` is zsh's array twin of `PATH`: a loop variable named `path` breaks every command after it.
 
 ## 7. Verification
 
 Use the cheapest level that proves the change. Any UI change needs at least level 3.
 
 1. **Build**: `idf.py build` passes with no new warnings.
-2. **Host**: unit tests and golden render tests in `test/host/`. Look at the rendered PNGs.
+2. **Host**: unit tests and golden render tests in `test/host/`, and the page script's tests in `test/web/`. Look at the rendered PNGs.
 3. **Device**: flash, capture the boot log, exercise the change through the console, then take a screenshot and look at it.
 4. **Owner**: only for physical facts, such as panel orientation and contrast, audio, how the buttons behave, and current draw. Give an exact checklist with expected results.
 

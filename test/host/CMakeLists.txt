@@ -50,6 +50,12 @@ add_library(scheduler STATIC ${REPO_ROOT}/components/scheduler/scheduler.c)
 target_include_directories(scheduler PUBLIC ${REPO_ROOT}/components/scheduler/include)
 target_compile_options(scheduler PRIVATE ${REFLBO_WARNINGS})
 
+# astro: pure C.
+add_library(astro STATIC ${REPO_ROOT}/components/astro/astro.c)
+target_include_directories(astro PUBLIC ${REPO_ROOT}/components/astro/include)
+target_compile_options(astro PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(astro PUBLIC m)
+
 # board: only the pure gesture recogniser builds on the host.
 add_library(board_logic STATIC ${REPO_ROOT}/components/board/gesture.c)
 target_include_directories(board_logic PUBLIC ${REPO_ROOT}/components/board/include)
@@ -163,6 +169,7 @@ reflbo_host_test(test_util_calendar util)
 reflbo_host_test(test_util_json util)
 reflbo_host_test(test_util_sha256 util)
 reflbo_host_test(test_scheduler scheduler)
+reflbo_host_test(test_astro astro)
 reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)

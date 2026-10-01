@@ -395,6 +395,22 @@ static void test_no_forecast_yet_syncs_at_once_unless_a_sync_failed(void)
     TEST_ASSERT_EQUAL_INT64(oct2(5, 30), due.at);
 }
 
+static void test_always_brings_wifi_back_at_once_unless_a_sync_failed(void)
+{
+    sync_schedule_t s = { .mode = SYNC_MODE_ALWAYS };
+    sync_history_t h = { 0 };
+    sync_due_t due = sync_next_due_needing(&s, &h, oct1(20, 7), false, SYNC_NEED_WIFI); /* a night ended */
+    TEST_ASSERT_EQUAL_INT64(oct1(20, 7), due.at);
+    TEST_ASSERT_FALSE(due.retry);
+    sync_history_record(&h, due, false, oct1(20, 8)); /* the router is off: the retries, not every tick */
+    due = sync_next_due_needing(&s, &h, oct1(20, 9), false, SYNC_NEED_WIFI);
+    TEST_ASSERT_EQUAL_INT64(oct1(20, 23), due.at);
+    TEST_ASSERT_TRUE(due.retry);
+    h.retries = SYNC_RETRY_COUNT; /* after the third: the hourly refresh */
+    due = sync_next_due_needing(&s, &h, oct1(20, 9), false, SYNC_NEED_WIFI);
+    TEST_ASSERT_EQUAL_INT64(oct1(21, 0), due.at);
+}
+
 static void test_a_step_gets_its_limit_or_what_is_left_of_the_sync(void)
 {
     int64_t deadline = (int64_t)SYNC_RADIO_MAX_MS * 1000; /* the sync started at 0 */
@@ -436,6 +452,7 @@ int main(void)
     RUN_TEST(test_an_overdue_retry_is_due_now);
     RUN_TEST(test_a_lost_clock_syncs_at_once_then_waits_between_tries);
     RUN_TEST(test_no_forecast_yet_syncs_at_once_unless_a_sync_failed);
+    RUN_TEST(test_always_brings_wifi_back_at_once_unless_a_sync_failed);
     RUN_TEST(test_a_step_gets_its_limit_or_what_is_left_of_the_sync);
     RUN_TEST(test_a_failure_after_now_counts_from_now);
     RUN_TEST(test_the_history_records_success_and_failures);

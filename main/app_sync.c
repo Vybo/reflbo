@@ -25,6 +25,7 @@ static bool s_manual;           /* the running sync was asked for: it ends with 
 static sync_due_t s_started_by; /* what started the running sync ({0, false} on demand) */
 
 static bool always_wanted(time_t now);
+static bool wifi_off(void);
 
 static app_sync_state_t *st(void)
 {
@@ -73,20 +74,15 @@ void app_sync_schedule(void)
     if (!networks_saved()) {
         st()->due = (sync_due_t){ 0 }; /* nothing to join: no sync wakes the board */
     } else {
-        /* spec §3.3, §7: a lost time at once, then with the retries' pauses; the first forecast at once */
-        sync_need_t need = !timekeeping_valid()         ? SYNC_NEED_TIME
-                           : ds_weather(app_ds()) == NULL ? SYNC_NEED_FORECAST
-                                                          : SYNC_NEED_NOTHING;
+        /* spec §3.3, §7: a lost time at once, then with the retries' pauses; `always` mode's Wi-Fi and
+         * the first forecast at once, unless a sync failed since */
+        sync_need_t need = !timekeeping_valid()                           ? SYNC_NEED_TIME
+                           : always_wanted(now) && !s_active && wifi_off() ? SYNC_NEED_WIFI
+                           : ds_weather(app_ds()) == NULL                  ? SYNC_NEED_FORECAST
+                                                                           : SYNC_NEED_NOTHING;
         st()->due = sync_next_due_needing(&s, &st()->history, now, low_battery(), need);
         if (st()->due.at > now && st()->due.at % 60 != 0) {
             st()->due.at += 60 - st()->due.at % 60; /* minute wakes use the RTC alarm (spec §9.2) */
-        }
-    }
-    if (always_wanted(now) && !s_active && st()->due.at != 0) {
-        netmgr_status_t ns;
-        netmgr_status(&ns); /* networks_saved() started netmgr */
-        if (ns.state == NETMGR_OFF && !st()->due.retry) {
-            st()->due = (sync_due_t){ .at = now }; /* sync mode `always`: Wi-Fi up now, not at the next hour */
         }
     }
     if (st()->due.at != 0) {
@@ -118,6 +114,17 @@ bool app_sync_failed(void)
         }
     }
     return false;
+}
+
+/* Wi-Fi is off: netmgr isn't up yet (a routine wake), or it says so. */
+static bool wifi_off(void)
+{
+    if (!app_net_ready()) {
+        return true;
+    }
+    netmgr_status_t ns;
+    netmgr_status(&ns);
+    return ns.state == NETMGR_OFF;
 }
 
 /* Sync mode `always` wants Wi-Fi now: on, unless quiet hours (D25) or a night (spec §9.1), which
@@ -289,6 +296,10 @@ void app_sync_tick(void)
         return; /* nothing may drain the battery, and the night runs nothing (spec §9.1) */
     }
     sync_due_t due = st()->due;
+    if (!s_active && due.at > now && st()->history.failed_at == 0 && always_wanted(now) && wifi_off()) {
+        app_sync_schedule(); /* a night ended in sync mode `always`: Wi-Fi back at once, not at the hour */
+        due = st()->due;
+    }
     if (due.at == 0 || now < due.at || s_active) {
         return;
     }

@@ -49,13 +49,15 @@ sync_due_t sync_next_due(const sync_schedule_t *s, const sync_history_t *h, time
 typedef enum {
     SYNC_NEED_NOTHING,  /* the schedule decides */
     SYNC_NEED_FORECAST, /* no forecast yet: a network was just saved, or the first boot */
+    SYNC_NEED_WIFI,     /* sync mode `always` wants Wi-Fi, and it is off: a night or quiet hours ended */
     SYNC_NEED_TIME,     /* the clock is lost (D9) */
 } sync_need_t;
 
 /* sync_next_due() for a device that lacks what a sync brings. SYNC_NEED_TIME: at `now`, or after a
  * failure at the next retry, 15, 30 then 60 min on and every 60 min after the third, whatever the
- * schedule, quiet hours or the battery, as a lost clock knows none of them. SYNC_NEED_FORECAST: at
- * `now`, unless a sync failed since (the retries and the schedule take over) or in `manual` mode. */
+ * schedule, quiet hours or the battery, as a lost clock knows none of them. SYNC_NEED_FORECAST and
+ * SYNC_NEED_WIFI: at `now`, unless a sync failed since (the retries and the schedule take over, so a
+ * router that is off isn't tried every minute) or in `manual` mode. */
 sync_due_t sync_next_due_needing(const sync_schedule_t *s, const sync_history_t *h, time_t now, bool low_battery,
                                  sync_need_t need);
 

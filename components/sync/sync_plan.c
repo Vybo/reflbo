@@ -137,7 +137,7 @@ sync_due_t sync_next_due_needing(const sync_schedule_t *s, const sync_history_t 
         time_t retry = base + (time_t)k_retry_min[step] * 60;
         return (sync_due_t){ .at = retry < now ? now : retry, .retry = true };
     }
-    if (need == SYNC_NEED_FORECAST && s->mode != SYNC_MODE_MANUAL && h->failed_at == 0) {
+    if ((need == SYNC_NEED_FORECAST || need == SYNC_NEED_WIFI) && s->mode != SYNC_MODE_MANUAL && h->failed_at == 0) {
         return (sync_due_t){ .at = now };
     }
     return sync_next_due(s, h, now, low_battery);

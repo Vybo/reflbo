@@ -61,6 +61,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D22 | Owner, 2026-10-01 (ADS-B radar proposal, §19.1): adsb.fi is the only source; the radar runs only in sync mode `always` (D11), with no time-boxed sessions and no separate switch; the map is centred on a point and zoomed from the web UI, with towns and airports built in | Still a proposal for after M5 (D10). One always-on Wi-Fi mode serves both the radar and the LAN configurator (§10.4) |
 | D23 | Owner, 2026-10-01 (weather radar, §19.2): ČHMÚ by default, with RainViewer outside its coverage; both a full-screen radar layout and a slot widget; aircraft stay a separate view, never over the rain; the radar never turns Wi-Fi on itself: it takes a frame with each normal sync, and every 5 minutes in sync mode `always`; both radars join the roadmap | M7 follows M6, which brings sync mode `always`; Audio and microSD move to M8 and M9 |
 | D24 | Owner, 2026-10-01: the radars come sooner. Sync mode `always` moves from the MQTT milestone into M5, the radars follow as M6, and MQTT and Home Assistant become M7 | Nothing in the radars needs MQTT; `always` belongs with the sync framework anyway |
+| D25 | Owner, 2026-10-01 (M5 planning): M5 also brings quiet hours (§9.3), air quality and pollen from Open-Meteo (§5.1, §11) and the RTC trim against NTP (§7); a static IP stays deferred; M5 runs as one plan; review minors are fixed where M5 touches their code | The RTC loses about 3.4 s a day (`AGENTS.md` gotcha 7); one trim step is 4.34 ppm, 0.37 s a day |
 
 ### 1.3 Out of scope for v1
 
@@ -74,7 +75,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 
 | Term | Meaning | Frequency | Radio |
 |---|---|---|---|
-| **Sync** | A network session: Wi-Fi on → time (NTP) → weather → MQTT → Wi-Fi off | Configurable schedule (§9.3); default once a day at 05:30 | Yes |
+| **Sync** | A network session: Wi-Fi on → time (NTP) → weather and air quality → MQTT (M7) → Wi-Fi off | Configurable schedule (§9.3); default once a day at 05:30 | Yes |
 | **Display update** | Redraw from local data (RTC time, the latest readings, stored weather and MQTT values) and push to the panel | Configurable (§9.2); default every minute | No |
 | **Sensor sample** | A reading from the SHTC3 and the battery gauge | Every 5 min (configurable) | No |
 | **Wake** | The CPU leaving sleep for any of the above, or for a button, an alarm or a timeout | — | — |
@@ -280,20 +281,27 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 | `bat.days` | number, days | Level ÷ the discharge rate over up to the last 24 h | Missing unless discharging, with at least 6 h of history |
 | `date.nameday` | text | The language pack's name-day calendar | Valid whenever the time is valid; empty for packs without one |
 | `date.holiday` | text | The language pack's public holidays | Same; empty on ordinary days |
+| `aq.index` | level: the European air quality index and its band | Air quality data (§11), the hour now | As `wx.now` |
+| `aq.pm25`, `aq.pm10` | number, µg/m³ | Air quality data, the hour now | Same |
+| `pollen.top` | pollen: the type with the highest level today, and that level | Air quality data, today's peaks | Same; missing outside Europe and out of season |
+| `pollen.alder`, `pollen.birch`, `pollen.grass`, `pollen.mugwort`, `pollen.olive`, `pollen.ragweed` | pollen: today's peak in grains/m³, and its level | Same | Same |
 | `mqtt.<key>` | number or text, with unit and label | MQTT mapping (§12.5) | Configured TTL; default twice the expected sync interval (§9.3) |
 
-`env.temp` and `env.hum` carry a trend: the change over the last hour. Widgets show ↑ or ↓ when it exceeds 0.5 °C or 3 %. The extra fields (from `env.dew` to `date.holiday`) are the accepted M3 proposals (D15).
+`env.temp` and `env.hum` carry a trend: the change over the last hour. Widgets show ↑ or ↓ when it exceeds 0.5 °C or 3 %. The extra fields (from `env.dew` to `date.holiday`) are the accepted M3 proposals (D15); the air quality and pollen fields are an accepted M5 proposal (D25).
 
-`wx.now` uses the `current` block while it is at most 60 minutes old. After that it uses the hourly forecast entry for the current local hour. This keeps "now" meaningful between syncs, even with a once-a-day schedule.
+`wx.now` uses the `current` block while it is at most 60 minutes old. After that it uses the hourly forecast entry for the current local hour. This keeps "now" meaningful between syncs, even with a once-a-day schedule. `aq.*` take the hourly entry for the current hour in the same way. Pollen forecasts are read by the day, so `pollen.*` show today's peak.
+
+- **Air quality bands** (Open-Meteo's `european_aqi`, the EEA's bands): 0–20 good, 20–40 fair, 40–60 moderate, 60–80 poor, 80–100 very poor, above 100 extremely poor.
+- **Pollen levels** from the clinical thresholds CAMS uses (EAACI, checked 2026-10-01): below 1 grain/m³ none; then low; moderate from the season threshold; high from the peak threshold. Alder, birch, olive and mugwort: 10 and 100. Grass and ragweed: 3 and 50. `pollen.top` compares the types by level, then by concentration as a share of the type's peak threshold.
 
 ### 5.2 Layouts (v1)
 
 Every layout has a status bar (top 20 px):
 
-- Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale. After either, a globe while a phone is logged in to the web UI (D20).
+- Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale. After either, a globe while a phone is logged in to the web UI (D20). Then the sync state (M5): a sync mark while a sync runs, or a crossed-out cloud while the last scheduled sync failed, until one succeeds. In sync mode `always`, the Wi-Fi state follows: a Wi-Fi mark while on the network, a crossed-out one while rejoining it (D19).
 - Middle: a small clock, if the preset sets `status_clock`. It is meant for data-first presets (owner request, 2026-09-28).
 - Right: the charging bolt and the battery icon, with the parts `status_battery` lists: level %, voltage, days left. The default is the level.
-- Later: the sync state (M5), the Wi-Fi state (M5 and later, the first times Wi-Fi runs under the dashboard, D19) and the next alarm (M8).
+- Later: the next alarm (M8).
 
 | Layout | Slots |
 |---|---|
@@ -342,7 +350,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 }
 ```
 
-- **Built-in defaults.** Home (Classic), Indoor (Grid, with the status clock), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. Weather stays out of the cycle until M5 brings weather data. There can be at most 16 presets.
+- **Built-in defaults.** Home (Classic), Indoor (Grid, with the status clock), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. The built-in Weather preset joins the cycle from M5, which brings its data; a `presets.json` saved earlier keeps its own choice. There can be at most 16 presets.
 - **Options.** `clock_24h` overrides the time setting when present. `status_clock` and `status_battery` shape the status bar (§5.2).
 - **Validation.** A file with a structural error is rejected as a whole, and the error names it. Structural errors:
   - not JSON, or another schema;
@@ -420,7 +428,7 @@ Presets    ▸ Active preset · Auto-cycle on/off · Interval (10 s … 1 h) · 
 Alarms     ▸ Alarm 1–8: on/off · Time · Days · Sound · Volume        (M8)
 Radio      ▸ Play/stop · Station · Volume                            (M8)
 Wi-Fi      ▸ Config mode · Forget networks · Reset web password
-Sync       ▸ Sync now · Schedule (times / interval / always / manual) · Times or interval
+Sync       ▸ Sync now · Schedule (times / interval / always / manual) · Interval · Quiet hours on/off
 Time       ▸ Set date and time · 24-hour clock · Time zone (short list)
 Display    ▸ Contrast · Update interval (1–15 min) · Refresh rate (0.25–8 Hz)
 Sensors    ▸ Temperature offset · Humidity offset · Units (°C/°F)
@@ -432,6 +440,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 - Items for features that don't exist yet (Wi-Fi before M4, Sync before M5, Alarms and Radio before M8) are hidden, not shown disabled.
 - Schedule entries are edited in the web UI (M4); until then `presets.json` or the console sets them.
 - Display ▸ Contrast is hidden for now (D17). Last sync result joins Info with M5.
+- Sync (M5): Interval shows in `interval` mode only. The times of the `times` mode and the span of the quiet hours are set in the web UI; the menu's Quiet hours switches them on and off.
 - As built (M3b):
   - A toggle flips at once. A choice or a number is edited in place and saved with KEY long.
   - The temperature offset steps by 0.1 °C (±10 °C, D17), the humidity offset by 0.5 % (±20 %).
@@ -471,6 +480,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - today's `env.temp_min` and `env.temp_max`, restarted at local midnight;
   - the trends: the change since the newest reading that is 60–90 min old, from a 16-point history spaced at least 5 min apart.
 - **Weather storage.** Kept compact: 72 hourly entries (int16 temperature ×10, uint8 code, uint8 precipitation %) and 3 daily entries.
+- **Air quality storage** (D25): 72 hourly entries (uint8 index, PM2.5 and PM10 in whole µg/m³, capped at 255), and each pollen type's peak for 3 days (uint16 grains/m³). Weather and air quality together add about 600 bytes to the snapshot.
 - **API.** Setters and getters, a freshness check (missing, fresh, stale) and a change mask. The app task owns the datastore (`AGENTS.md` §5.3). Other tasks reach it through events, and console commands through the app's executor, so it needs no mutex.
 - **Snapshot.** The datastore is plain data inside the app's RTC-RAM snapshot (magic, version, CRC32, at most 4 KB in total), sealed before every deep sleep. From M5 it is also written to `/state/datastore.bin` after every sync, so data survives a power-off and reappears marked as stale.
 
@@ -480,7 +490,16 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - The running clock keeps its fraction of a second while it agrees with the RTC within a second; setting it to the RTC's whole second at every read lost each read's latency, and a seconds display skipped a second now and then. The RTC's minute alarm fires as the RTC's second begins, so that wake takes the phase.
   - Seconds keep the panel refresh rate the user picked (D20); a user who sees them stutter raises it.
 - The time zone is a POSIX TZ string in the settings (default `CET-1CEST,M3.5.0,M10.5.0/3`), stored alongside its IANA name for display. The web UI maps IANA names to POSIX strings.
-- SNTP runs during each sync (servers `cz.pool.ntp.org` and `pool.ntp.org`, 5 s timeout) and writes the result to the RTC.
+- SNTP runs during each sync (servers `time.ntp`, default `cz.pool.ntp.org` and `pool.ntp.org`, 5 s timeout) and writes the result to the RTC.
+  - **To the millisecond.** The STOP bit holds the RTC's prescaler while the time is written, and is released 0.5078 s before the next whole second: the first tick comes 0.507813–0.507935 s after the release (datasheet §8.2.1.2), so the RTC's seconds begin with the true ones.
+  - Any other clock set goes through `app_clock_moved()`, as the menu's does: it shifts the battery history, restarts the schedule checks and the cycle interval, and renders.
+- **RTC trim** (D25). The crystal runs slow: about 3.4 s a day (40 ppm) at M2, as the board loads it with more than its rated capacitance (`AGENTS.md` gotcha 7).
+  - The Offset register (02h) corrects it. MODE 0 corrects once every two hours, 4.34 ppm a step, from −64 to +63; a positive value slows the clock. The correction comes in 1⁄32 s pulses, so the RTC's error swings by up to the step count × 1⁄32 s within each two hours.
+  - At each SNTP sync the RTC's error is read to the millisecond, by watching for its next second. Divided by the time since the last set to the millisecond, it is the drift; the crystal's own error is the drift plus 4.34 ppm × the offset in effect, and the new offset is that error ÷ 4.34 ppm, rounded.
+  - Only after at least 20 h, so the swing above weighs little: ±0.14 s over a day is ±1.6 ppm, against a step of 4.34 ppm.
+  - A manual set (menu, `rtc set`, phone) is only good to a second, so the next SNTP sync sets the RTC without measuring; so does a sync after the oscillator stopped.
+  - Kept in NVS `sys` (`rtc_trim`: the offset, when the RTC was last set to the millisecond, the last drift), as it belongs to the board: a factory reset keeps it. It is written to the chip at every boot, as the chip loses it with its power (D9).
+  - Cost: nothing while idle (the correction runs inside the RTC); up to 1 s of I²C reads per sync.
 - Manual set: the date/time editor in the menu, or "set time from phone" in the web UI (sends the epoch and time zone).
 - RTC configuration: CLKOUT is disabled (`COF = 111`) to save current. The RTC alarm serves the wake scheduler (§9.2). User alarms are evaluated in firmware.
 - **Without a backup cell (the current state, D9).**
@@ -579,7 +598,7 @@ The sync schedule (`settings.sync`) is fully configurable from the menu and the 
 |---|---|---|
 | `times` (default) | Sync at fixed local times | 1–8 times of day; default `05:30` |
 | `interval` | Sync every N minutes, aligned to the clock | N = 15–1440 |
-| `always` | Wi-Fi stays up (from M5, D24), and MQTT with it (from M7). Weather refreshes every 60 min, the weather radar every 5 min (M6). State is published on change (at most every 30 s) and every 5 min. Commands and MQTT fields apply at once. Meant for USB power; not auto-detected | — |
+| `always` | Wi-Fi stays up (from M5, D24), and MQTT with it (from M7). Weather and air quality refresh every 60 min, the weather radar every 5 min (M6). State is published on change (at most every 30 s) and every 5 min. Commands and MQTT fields apply at once. Meant for USB power; not auto-detected | — |
 | `manual` | Sync only on demand | — |
 
 - The UI offers shortcuts: *Battery saver* = `times ["05:30"]`, *Balanced* = `interval 60`, *Always connected* = `always`.
@@ -590,23 +609,34 @@ The sync schedule (`settings.sync`) is fully configurable from the menu and the 
   |---|---|
   | `times` | Largest gap between consecutive times (24 h for a single time) |
   | `interval` | N |
-  | `always` | 10 min |
+  | `always` | 60 min for weather and air quality; 10 min for MQTT (M7) |
   | `manual` | None: data never expires and only shows its age |
 
-Sequence. The steps are independent and each has a timeout. The radio may be on for at most 45 s in total.
+- **Quiet hours** (D25). `sync.quiet` sets a span of local time, such as 23:00–06:00, in which no sync starts by itself. Off by default.
+  - A scheduled time, an interval slot or a retry that falls inside moves to the span's end, so one sync runs as it ends and the morning starts with fresh data.
+  - In `always` mode Wi-Fi goes off at the span's start, so the board sleeps as usual, and comes back at its end.
+  - A sync on demand still runs, and so does the sync at boot that fetches a lost time, as the hour isn't known then.
+  - The span may cross midnight; a span of no minutes counts as off. The web UI says when a sync time falls inside it.
+- **In config mode** a sync that comes due runs over config mode's station, if it has one, and leaves Wi-Fi on; on the AP alone it waits until config mode ends. Leaving config mode in `always` mode keeps Wi-Fi and the web UI on.
+- **In `always` mode** the board stays awake, as neither sleep keeps Wi-Fi (D14), and netmgr keeps rejoining a network it lost. The web UI is reachable on the LAN (§10.4). A critical battery turns Wi-Fi off, as it ends config mode (§8).
+- **Results.** Each step's result and the sync's time are kept until the next sync, also through deep sleep. Info ▸ Last sync result shows the time and the first step that failed; the web UI's Sync page shows every step.
+- **Power** (measured at M5, §9.4): a sync wakes the radio for some seconds at about 100 mA; `always` keeps the chip awake with Wi-Fi in modem sleep, tens of mA.
 
-1. **Wi-Fi connect.** Saved networks, trying the cached BSSID and channel first.
-2. **SNTP.** 5 s.
+Sequence. The steps are independent and each has a timeout. The radio may be on for at most 45 s in total. The sync runs in its own task; the app task applies its results (§3.2).
+
+1. **Wi-Fi connect.** Saved networks, trying the cached BSSID and channel first. A sync never starts the AP.
+2. **SNTP.** 5 s. Sets the RTC to the millisecond and trims it (§7).
 3. **Weather.** 10 s.
-4. **MQTT.** 15 s.
+4. **Air quality** (D25). 10 s.
+5. **MQTT** (M7). 15 s.
    1. Connect with a persistent session.
    2. Subscribe to field and command topics.
    3. Collect retained and queued messages until 1 s passes with none, or until every mapped topic has arrived.
    4. Publish state, plus discovery if the config or firmware changed.
    5. Disconnect.
-5. **Finish.** Wi-Fi off. Persist the datastore snapshot. Record each step's result (shown in Info and the web UI).
+6. **Finish.** Wi-Fi off, unless config mode or `always` mode keeps it. Persist the datastore snapshot. Record each step's result (shown in Info and the web UI).
 
-On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync. At low battery there are no retries.
+A sync fails when any step fails. On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync. At low battery there are no retries.
 
 ### 9.4 Power budget and measurement
 
@@ -643,7 +673,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 ### 10.1 Wi-Fi manager
 
 - **Saved networks.** Up to 5 SSID/password pairs in NVS. They are tried in order of last success, 8 s per attempt.
-- **Fast connect.** BSSID and channel are cached in NVS; RTC RAM joins with the M5 sync. A try with the cached BSSID that fails is repeated with a scan, as the router may have moved.
+- **Fast connect.** BSSID and channel are cached in NVS, written only when they change, so frequent syncs don't wear the flash. A try with the cached BSSID that fails is repeated with a scan, as the router may have moved.
 - **Hostname.** mDNS `reflbo-XXXX.local`, advertising `_http._tcp`.
 - **AP.**
   - SSID `reflbo-XXXX`, WPA2-PSK with a random 10-character password generated at first boot and kept in NVS.
@@ -656,7 +686,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 
 - **Entry.** BOOT long (3 s) on the dashboard, the menu, or first run.
 - **Connecting.** With saved networks, it joins as a station and shows the LAN URL and IP. If that fails or no network is saved, it starts the AP and captive portal. While the owner tests a new network from the web UI it runs AP and STA together. While no web password is set, it runs the AP as well, because only a phone on the AP may choose the password (§10.4).
-- **Exit.** BOOT long, "Done" in the web UI, or 10 min without HTTP requests. Wi-Fi then switches off.
+- **Exit.** BOOT long, "Done" in the web UI, or 10 min without HTTP requests. Wi-Fi then switches off, unless sync mode `always` keeps it on the network (§9.3).
   - Only requests for the device's own pages and API count: a joined phone's connectivity probes would otherwise keep config mode on for good.
   - A critical battery (§8) ends it too; battery samples go on while it runs (D20).
 - **While it runs.** The board stays awake, as neither sleep keeps Wi-Fi, and the panel is in HPM. The screen shows the state, a QR code and the minutes left; KEY switches the QR code (§5.6).
@@ -670,6 +700,8 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Status sets the device's clock from the phone at once when the device has lost the time (D9, D19).
   - Device holds the menu's language, units, sensor offsets, sensor interval, update interval and refresh rate (D19), and the battery calibration (§8).
   - Presets: the preview names each slot at its corner as the slot fields call it; a new preset joins the cycle; "Undo changes" asks first, as the save bar can float over other buttons (D20).
+  - Sync (M5): the mode with its shortcuts, the times or the interval, the quiet hours (D25), "Sync now" with its progress, the last sync's steps, the next sync, and the RTC's trim and drift (§7).
+  - Location & time (M5): a place search through `/api/geocode`, which fills in the name, latitude and longitude.
 - **API.** JSON. Mutating requests must send `Content-Type: application/json`, those without a body too.
   - The server reads each body once, before any route and any login: at most 16 KB (413), nested at most 18 levels, a backup bundle's depth (400).
   - A client that sends nothing for 15 s gets 408, and the connection closes, so one phone that vanishes mid-request can't stop the server.
@@ -677,7 +709,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 | Method and path | Purpose |
 |---|---|
 | `GET /api/auth` · `POST /api/auth/setup` · `POST /api/auth/login` · `POST /api/auth/logout` · `POST /api/auth/password` | The web password (§10.4): whether one is set and the session is valid; choosing it (over the AP only); logging in and out; changing it. The only routes open without a session |
-| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; the last sync steps join with M5 |
+| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; from M5 the sync (running, the last one's steps, the next one) and the RTC trim |
 | `GET/PATCH /api/settings` | Non-secret settings; secrets are accepted on write and never returned |
 | `GET /api/wifi/scan` · `GET/POST/DELETE /api/wifi/networks` | Wi-Fi setup. A POST starts a test and answers 202 at once; GET reports its result with the saved names, never their passwords. `"test": false` saves without trying |
 | `GET /api/layouts` · `GET /api/fields` | Slot definitions; the field catalogue with current values |
@@ -686,8 +718,8 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 | `GET /api/screenshot.bmp` | The current frame |
 | `POST /api/time` | Set time from the phone (epoch, IANA zone, POSIX TZ) |
 | `POST /api/battery/learn` | `{"start": true}` learns the battery curve from the next full discharge, `{"stop": true}` ends it (D21); `GET /api/status` reports its state and hours |
-| `GET /api/geocode?q=` | Proxy for the Open-Meteo geocoding search (station mode only; manual lat/lon always works) (M5) |
-| `POST /api/sync` | Sync now (M5) |
+| `GET /api/geocode?q=` | Proxy for the Open-Meteo geocoding search (M5): up to 5 places with name, region, country, latitude and longitude. Needs the device on a network (503 otherwise); manual latitude and longitude always work |
+| `POST /api/sync` | Sync now (M5): 202 once it starts; 409 while one runs, or with no saved network |
 | `GET/PUT /api/alarms` · `GET/PUT /api/stations` · `POST /api/radio/play` · `POST /api/radio/stop` | Audio (M8) |
 | `POST /api/ota` · `GET /api/ota/status` | Firmware upload, as `application/octet-stream`; the running version, its slot, whether it is still pending, and the slot of an update that was rolled back |
 | `GET /api/backup` · `POST /api/restore` | Settings bundle without secrets |
@@ -696,6 +728,8 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 ### 10.4 Security
 
 - The configurator is reachable only in config mode, or on the LAN in `always` sync mode.
+  - On the LAN (M5) it answers only requests that name the device: its address, `reflbo-XXXX`, `reflbo-XXXX.local`, or `reflbo-XXXX` under a router's domain (`reflbo-XXXX.fritz.box`). Any other name gets 421, so a page from elsewhere can't reach the API by pointing its own domain at the device (DNS rebinding).
+  - A client counts as on the AP when it reached the AP's own address, 192.168.4.1, not when its own address merely looks like the AP's subnet, which a LAN may share.
 - The AP uses WPA2.
 - Secrets are write-only and never logged.
 - The JSON content-type check blocks cross-site form posts.
@@ -704,6 +738,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - The first visit asks for a new password, and only a client on the device's AP may set it; every visit after needs it.
   - It is kept as a salted hash in NVS `secrets`, is never returned or logged, and a factory reset erases it. The record is `pbkdf2-sha256$10000$<salt>$<hash>` with a 16-byte random salt; a login takes about 2 s on the chip. 8–64 characters.
   - A login starts a session that ends with config mode: at most 4, each a random 128-bit token in a cookie that is `HttpOnly` and `SameSite=Strict`. Phones also send cookies other gadgets set for 192.168.4.1, so the server takes 2 KB of request headers.
+  - In sync mode `always` (M5), where the web UI stays up, a session also ends after 1 h without a request.
   - After 5 wrong passwords, logins wait 60 s.
   - Menu ▸ Wi-Fi ▸ Reset web password clears it, for when it is forgotten.
   - The page can also change it, given the current one, and log out (D19).
@@ -716,9 +751,9 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Measured at M4: 1.3 MB in 11–15 s over the AP. A test build that crashed after 25 s rolled back to the previous image, which returned in config mode (§10.2) and reported it. After the M4 review, a test build that failed to start was back on the previous image within 6 s, in config mode.
 - Sources: upload through the web UI (M4). A file on microSD is an M9 candidate.
 
-## 11. Weather and astro
+## 11. Weather, air quality and astro
 
-**Request** (once per sync, about 2.6 KB of JSON for 3 days; checked against the live API on 2026-09-25):
+**Weather request** (once per sync, about 2.6 KB of JSON for 3 days; checked against the live API on 2026-09-25 and 2026-10-01):
 
 ```
 GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>
@@ -732,7 +767,20 @@ GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>
 - WMO weather codes map to an icon and a language-pack string: clear, mainly clear, partly cloudy, overcast, fog, drizzle, rain, freezing rain, snow, showers, snow showers, thunderstorm.
 - Parser tests on the host use recorded fixtures (`test/host/fixtures/open-meteo/*.json`).
 - A provider interface allows other weather services later.
-- **Astro.** Sunrise, sunset and day length use the NOAA solar algorithm at the configured location. They work offline. Host tests compare them with the sunrise/sunset values in the Open-Meteo fixtures (±2 min).
+
+**Air quality request** (D25; once per sync, about 3.3 KB of JSON; checked against the live API on 2026-10-01):
+
+```
+GET https://air-quality-api.open-meteo.com/v1/air-quality?latitude=<lat>&longitude=<lon>
+  &hourly=european_aqi,pm2_5,pm10,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,olive_pollen,ragweed_pollen
+  &timezone=auto&timeformat=unixtime&forecast_days=3
+```
+
+- CAMS data: the index and particles worldwide; pollen only in Europe and in its season. Values the API sends as `null` stay missing.
+- A second HTTPS request per sync: one more TLS handshake, under a second of radio (measured at M5).
+- The bands and levels are in §5.1; Open-Meteo's terms are the same as for the forecast (§20).
+
+- **Astro.** Sunrise, sunset and day length use the NOAA solar algorithm at the configured location. They work offline. Host tests compare them with the sunrise/sunset values in the Open-Meteo fixtures (±2 min). On a polar day or night the field shows that instead of times.
 
 ## 12. MQTT and Home Assistant
 
@@ -857,7 +905,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 | Namespace | Contents |
 |---|---|
-| `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`), come back in config mode after a web restart (`resume_cfg`, §10.2) |
+| `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`), come back in config mode after a web restart (`resume_cfg`, §10.2), the RTC trim (`rtc_trim`, §7) |
 | `wifi` | Saved networks with their passwords and fast-connect cache (`nets`, one versioned blob) |
 | `secrets` | MQTT password; the web UI password's salted hash (`web_pass`, D18); future tokens |
 | `ctr` | Counters: boots, sync statistics |
@@ -891,7 +939,8 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
   "time": { "tz_iana": "Europe/Prague", "tz_posix": "CET-1CEST,M3.5.0,M10.5.0/3",
             "clock_24h": true, "ntp": ["cz.pool.ntp.org", "pool.ntp.org"] },
   "units": { "temp": "C" },
-  "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60 },
+  "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60,
+            "quiet": { "enabled": false, "from": "23:00", "to": "06:00" } },
   "sensors": { "interval_min": 5, "temp_offset_c": 0.0, "hum_offset_pct": 0.0 },
   "display": { "contrast": "default", "update_min": 1, "lpm_hz": 1 },
   "battery": { "level_from": "curve", "empty_v": 3.27, "full_v": 4.2 },
@@ -902,7 +951,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 Once a discharge is learned, `battery` also holds `learned_mv` (21 voltages, 0 % to 100 %) and `learned_at` (UTC seconds), and `level_from` can be `learned` (D21).
 
-M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
+M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). M5 adds `time.ntp` (1–2 host names) and `sync.*`: `times` keeps 1–8 valid `HH:MM` times, sorted and without repeats, falling back to `["05:30"]`; `interval_min` is clamped to 15–1440. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
 
 ### 14.4 Backup, restore, factory reset
 
@@ -931,7 +980,7 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 | `schedule list` · `schedule on\|off\|clear` · `schedule add <HH:MM> preset <id> [days]` · `schedule add <HH:MM> night <HH:MM> [days]` | The preset schedule (§5.4); `days` is the Mon–Sun mask, default 127 |
 | `night <minutes>` | Night sleep now (§9.1), for measuring; the console drops until it ends |
 | `wifi status` · `wifi scan` | Wi-Fi: the state, network, address, AP clients and saved names; the networks in sight while Wi-Fi is on (config mode) |
-| `sync now` | Run a sync |
+| `sync now` · `sync status` | Run a sync; the running or last sync's steps and the next one (M5). `rtc get` also prints the trim and the last drift (§7) |
 | `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging: sleeps, wake causes, and per-cycle awake and slept times; `sleep test` forces sleep cycles while tethered |
 | `audio tone <Hz> <ms>` | Audio check (M8) |
 
@@ -977,7 +1026,8 @@ pyserial comes from the ESP-IDF Python environment. The generators run through `
   - Gesture recogniser: timelines of button events.
   - Battery curve and charging inference.
   - astro: against fixture sunrise/sunset values.
-  - Weather parser: against fixtures.
+  - Weather and air quality parsers: against fixtures.
+  - Sync planning: the next sync in each mode, the quiet hours, the retries, the expected interval; the RTC trim's arithmetic.
   - Preset and settings JSON: validation and migrations.
   - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
   - MQTT payload builders: golden JSON.
@@ -1004,7 +1054,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M2 | `st7305` warm init for deep-sleep wakes (moved from M1), `board` (I²C, buttons, gestures), `rtc`, `sensors` (SHTC3, battery), `timekeeping` (RTC → system time; manual set through the console), Classic clock screen, `power` with both idle strategies, `scheduler` minute wakes | Screen values match the console (3); owner measures deep vs light sleep with the USB meter; the idle strategy is chosen and recorded (4) |
 | M3 | Two plans. **M3a:** `storage` (LittleFS config files), `datastore` with the extra fields, `locale` (en), fonts and icons, 4 layouts, widgets, status bar, presets JSON and defaults, cycling. **M3b:** menu v1, special screens, settings, schedule and night sleep, the LPM rate setting, the `cs` pack | Owner reviews golden renders (2); presets switch with KEY/`btn` and survive a reboot (3); owner measures night sleep (4); owner reviews the Czech renders (2) |
 | M4 | `netmgr` (STA/AP, captive portal, mDNS), config screen with QR, `webui` and REST API, preset editor with preview, set time from phone, OTA with rollback | Owner sets up Wi-Fi from a phone in AP mode (4); the preview matches a device screenshot (3); OTA upload and rollback work (3) |
-| M5 | SNTP → RTC, `weather`, `astro`, `sync` with the configurable schedule and backoff, sync mode `always` (D24), weather widgets, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); sync energy, `always`'s cost and the daily average are measured and `docs/power.md` is updated (4) |
+| M5 | One plan (D25): SNTP → RTC with the trim (D25), `weather` with air quality and pollen (D25), `astro`, `sync` with the configurable schedule, quiet hours (D25) and backoff, sync mode `always` with the web UI on the LAN (D24), the weather and air quality widgets, the status bar's sync and Wi-Fi state, the Sync page and the place search, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); the owner reviews the new widgets' goldens (2); the RTC trim brings the drift under 1 s a day (3); sync energy, `always`'s cost and the daily average are measured and `docs/power.md` is updated (4) |
 | M6 | Radar views (D22, D23, D24; §19.1, §19.2): one web-Mercator map renderer (centre and zoom from the web UI, built-in borders, towns and airports); the weather radar (ČHMÚ, RainViewer outside its coverage; a full-screen layout and a slot widget; a frame at each sync, every 5 min in sync mode `always`); the ADS-B flight radar (adsb.fi; its own view; sync mode `always` only) | Goldens of both radars (2); a ČHMÚ frame renders after a sync (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
 | M7 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
 | M8 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
@@ -1018,7 +1068,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M1 | ~~Portrait orientation~~ (declined 2026-09-25, D13) |
 | M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
 | M4 | Accepted (D18): a web UI password, instead of the admin PIN. Accepted (D19): config mode after a web restart, the clock set from the phone when lost, changing the password and logging out, a Device page. Still deferred: web UI translations |
-| M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
+| M5 | Accepted (D25): quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration. Still deferred: static IP |
 | M6 | Accepted (D22, D23, D24): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b |
 | M7 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
 | M8 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
@@ -1095,7 +1145,8 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | USB meters are inaccurate below 1 mA | Long mAh windows; note the limits in `docs/power.md` |
 | SHTC3 self-heating | Offset calibration; sample right after wake |
 | `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M8; pick another decoder if needed |
-| Open-Meteo's free tier is for non-commercial use | Low request rate (daily sync); the provider can be swapped |
+| Open-Meteo's free tier is for non-commercial use; it covers the forecast, air quality and geocoding APIs alike | Low request rate (two requests per sync); the provider can be swapped |
+| The RTC trim's measurement rides on the RTC's own correction swing, up to ±0.14 s within two hours at today's offset | It waits for at least 20 h between sets (±1.6 ppm against a step of 4.34 ppm); a trim one step off still leaves under 0.4 s a day |
 | The Czech name-day calendar needs a source whose licence allows redistribution in this repository | Checked 2026-09-29: the best list (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA); others were incomplete, broken or unlicensed. Deferred (D16): `cs` ships the holidays only until a clean source turns up |
 | The critical-battery path has not met a really low battery: its thresholds are host-tested and its screen is a golden, but its KEY-only sleep has not run on the board | Watch the first time the board runs flat on battery (M5 power work) |
 | No RTC backup cell (D9): the time is lost at every PWR-off | Sync at boot when Wi-Fi is configured, otherwise a "Set time" prompt; the owner may fit an ML1220 (§7) |
@@ -1130,3 +1181,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r22 | 2026-10-01 | Weather radar proposal: ČHMÚ and RainViewer, a map shared with the ADS-B radar, three owner questions (§19, §19.2) |
 | r23 | 2026-10-01 | Both radars join the roadmap as M7 (D23): the milestone table (§18), the weather radar's answers and power (§19.2), the flight radar's slot (§19.1); Audio becomes M8 and microSD M9 (§5.2, §5.7, §9.4, §10.3, §10.5, §13, §14, §15, §19, §20) |
 | r24 | 2026-10-01 | D24: sync mode `always` moves into M5, the radars become M6 and MQTT/HA M7 (§5.1, §5.2, §9.4, §10.3, §18, §19) |
+| r25 | 2026-10-01 | M5 scope (D25): air quality and pollen fields with their bands and levels (§5.1, §6, §11); the status bar's sync and Wi-Fi state (§5.2); the Weather preset in the cycle (§5.4); the menu's Sync section (§5.7); SNTP to the millisecond and the RTC trim (§7, §14.2, §20); quiet hours, config mode and `always` mode in the sync, its steps and results (§9.3, §10.2); fast connect without RTC RAM (§10.1); the Sync page, the place search and their API (§10.3); the web UI on the LAN (§10.4); `time.ntp` and `sync.*` (§14.3); `sync status` (§15); the tests (§17); the M5 row (§18, §19) |

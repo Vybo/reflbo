@@ -56,6 +56,13 @@ target_include_directories(astro PUBLIC ${REPO_ROOT}/components/astro/include)
 target_compile_options(astro PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(astro PUBLIC m)
 
+# png: the reader is pure C; on the host it inflates through zlib, on the device through the ROM's tinfl.
+find_package(ZLIB REQUIRED)
+add_library(png STATIC ${REPO_ROOT}/components/png/png.c png_inflate_zlib.c)
+target_include_directories(png PUBLIC ${REPO_ROOT}/components/png/include)
+target_compile_options(png PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(png PUBLIC util PRIVATE ZLIB::ZLIB)
+
 # sync: the planner (modes, quiet hours, retries) and the SNTP packets build on the host; the task does not.
 add_library(sync_logic STATIC ${REPO_ROOT}/components/sync/sync_plan.c ${REPO_ROOT}/components/sync/sync_ntp.c)
 target_include_directories(sync_logic PUBLIC ${REPO_ROOT}/components/sync/include)
@@ -179,6 +186,8 @@ reflbo_host_test(test_util_sha256 util)
 reflbo_host_test(test_scheduler scheduler)
 reflbo_host_test(test_astro astro)
 reflbo_host_test(test_sync_plan sync_logic)
+reflbo_host_test(test_png png ZLIB::ZLIB)
+target_compile_definitions(test_png PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/png")
 reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)

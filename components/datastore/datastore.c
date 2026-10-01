@@ -179,6 +179,16 @@ int ds_hour_index(uint32_t hour0, time_t t)
     return i < DS_WX_HOURS ? (int)i : -1;
 }
 
+int ds_rain_index(uint32_t t0, time_t t)
+{
+    if (t0 == 0 || t <= (time_t)t0 - DS_RAIN_STEP_S) {
+        return -1;
+    }
+    /* entry i holds the quarter hour (t0 + 900 (i - 1), t0 + 900 i] */
+    time_t i = (t - (time_t)t0 + DS_RAIN_STEP_S - 1) / DS_RAIN_STEP_S;
+    return i < DS_RAIN_STEPS ? (int)i : -1;
+}
+
 static ds_freshness_t forecast_freshness(const ds_t *ds, uint32_t fetched, uint32_t hour0, time_t now)
 {
     if (fetched == 0 || ds_hour_index(hour0, now) < 0) {

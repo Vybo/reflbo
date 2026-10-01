@@ -143,6 +143,69 @@ static void test_the_hourly_strip_starts_at_the_next_hour_every_two_hours(void)
     TEST_ASSERT_EQUAL_STRING("Sun", v.series[2].label);
 }
 
+static void test_rain_in_the_next_two_hours_says_when(void)
+{
+    ui_context_t ctx = fixture_context();
+    fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    ui_value_t v;
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+    TEST_ASSERT_EQUAL(UI_FK_SERIES, v.kind);
+    TEST_ASSERT_EQUAL_INT(UI_RAIN_STEPS, v.series_count);
+    TEST_ASSERT_EQUAL_STRING("Rain from 21:45", v.text); /* 20:48 now: the fifth quarter hour */
+    TEST_ASSERT_EQUAL_STRING("", v.extra);
+    TEST_ASSERT_EQUAL_UINT8(0, v.rain_mm10[0]); /* 20:45-21:00, Open-Meteo's entry at 21:00 */
+    TEST_ASSERT_EQUAL_UINT8(2, v.rain_mm10[4]); /* 21:45-22:00 */
+    TEST_ASSERT_EQUAL_UINT8(40, v.rain_prob[4]);
+    ctx.clock_24h = false;
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL_STRING("Rain from 9:45 PM", v.text);
+
+    fixture_rain_now(&s_fix_ds);
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL_STRING("Rain now", v.text);
+    TEST_ASSERT_EQUAL_STRING("1.2 mm/h", v.extra); /* 0.3 mm in the quarter hour */
+    ctx.lang = lang_get("cs");
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL_STRING("Prší", v.text);
+    TEST_ASSERT_EQUAL_STRING("1,2 mm/h", v.extra);
+
+    fixture_rain_dry(&s_fix_ds);
+    ctx.lang = lang_get("en");
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL_STRING("Dry for 2 h", v.text);
+}
+
+static void test_rain_needs_its_two_hours_stored_and_ages_like_the_forecast(void)
+{
+    ui_context_t ctx = fixture_context();
+    fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    ui_value_t v;
+    ctx.now = (time_t)ds_weather(&s_fix_ds)->rain.t0 + 23 * 3600; /* four quarter hours left */
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state);
+    ctx.now = (time_t)ds_weather(&s_fix_ds)->rain.t0 + 22 * 3600; /* just the two hours */
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+
+    ctx = fixture_context();
+    fixture_forecast(&s_fix_ds, FIX_NOW - 3 * 3600);
+    ds_set_forecast_ttl(&s_fix_ds, 2 * 3600); /* an interval sync of an hour that missed two */
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL(UI_VALUE_STALE, v.state);
+    TEST_ASSERT_EQUAL_UINT32(3 * 3600, v.age_s);
+
+    ds_weather_t w = *ds_weather(&s_fix_ds);
+    memset(w.rain.mm10, DS_RAIN_NONE, sizeof(w.rain.mm10)); /* Open-Meteo sent nulls: no data, not a dry spell */
+    ds_set_weather(&s_fix_ds, &w);
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state);
+    w.rain.t0 = 0; /* a forecast from before M6 */
+    ds_set_weather(&s_fix_ds, &w);
+    ui_resolve(&ctx, UI_FIELD_WX_RAIN2H, &v);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state);
+}
+
 static void test_a_forecast_older_than_its_ttl_is_stale(void)
 {
     fixture_forecast(&s_fix_ds, FIX_NOW - 30 * 3600);
@@ -236,6 +299,8 @@ int main(void)
     RUN_TEST(test_english_has_no_name_days_or_holidays_and_weather_waits_for_a_sync);
     RUN_TEST(test_the_weather_now_and_today_come_from_the_forecast);
     RUN_TEST(test_the_hourly_strip_starts_at_the_next_hour_every_two_hours);
+    RUN_TEST(test_rain_in_the_next_two_hours_says_when);
+    RUN_TEST(test_rain_needs_its_two_hours_stored_and_ages_like_the_forecast);
     RUN_TEST(test_a_forecast_older_than_its_ttl_is_stale);
     RUN_TEST(test_the_sun_rises_and_sets_over_brno);
     RUN_TEST(test_air_quality_and_pollen_name_their_band_and_level);

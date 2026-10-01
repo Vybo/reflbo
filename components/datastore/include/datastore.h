@@ -73,6 +73,18 @@ typedef struct {
     uint8_t precip; /* the day's highest precipitation probability, % */
 } ds_wx_day_t;
 
+/* Rain in quarter hours (spec §6, §11.4, D27): Open-Meteo's `minutely_15`, 24 h from the fetch. */
+#define DS_RAIN_STEPS 96
+#define DS_RAIN_STEP_S 900
+#define DS_RAIN_NONE 0xFF /* a missing amount or probability; amounts are capped at 254 (25.4 mm) */
+
+typedef struct {
+    uint32_t t0;                 /* UTC of mm10[0], on a quarter hour; 0 = none came */
+    uint8_t mm10[DS_RAIN_STEPS]; /* precipitation in the quarter hour up to t0 + 900 i, 0.1 mm (Open-Meteo sums
+                                  * the 15 minutes before each time) */
+    uint8_t prob[DS_RAIN_STEPS]; /* its probability, % */
+} ds_rain_t;
+
 typedef struct {
     uint32_t fetched; /* UTC seconds; 0 = never */
     uint32_t now_time; /* the `current` block: when it was valid (UTC) */
@@ -83,6 +95,7 @@ typedef struct {
     ds_wx_hour_t hours[DS_WX_HOURS];
     int32_t day0_local; /* days[0] as days since 1970-01-01, the location's local date */
     ds_wx_day_t days[DS_WX_DAYS];
+    ds_rain_t rain; /* M6 */
 } ds_weather_t;
 
 typedef enum {
@@ -167,5 +180,8 @@ ds_freshness_t ds_weather_freshness(const ds_t *ds, time_t now);
 ds_freshness_t ds_air_freshness(const ds_t *ds, time_t now);
 /* The hourly entry that holds `t`, from `hour0`: 0..DS_WX_HOURS-1, or -1 outside them (or hour0 0). */
 int ds_hour_index(uint32_t hour0, time_t t);
+/* The entry whose quarter hour holds `t`, the one that ends at or after it: 0..DS_RAIN_STEPS-1, or -1
+ * outside them (or t0 0). */
+int ds_rain_index(uint32_t t0, time_t t);
 /* False before the first fetch, or when neither the current block nor this hour's entry exists. */
 bool ds_weather_now(const ds_t *ds, time_t now, ds_wx_now_t *out);

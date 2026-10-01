@@ -29,6 +29,7 @@ size_t weather_forecast_url(char *out, size_t size, int32_t lat_e4, int32_t lon_
                                "&hourly=temperature_2m,weather_code,precipitation_probability"
                                "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
                                "precipitation_probability_max,sunrise,sunset"
+                               "&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=96"
                                "&timezone=auto&timeformat=unixtime&forecast_days=3",
                                lat, lon),
                       size);

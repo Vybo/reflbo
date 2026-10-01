@@ -142,3 +142,84 @@ uint32_t ds_take_changes(ds_t *ds)
     ds->changes = 0;
     return changes;
 }
+
+void ds_set_weather(ds_t *ds, const ds_weather_t *w)
+{
+    ds->weather = *w;
+    ds->changes |= DS_CHANGE_WEATHER;
+}
+
+void ds_set_air(ds_t *ds, const ds_air_t *a)
+{
+    ds->air = *a;
+    ds->changes |= DS_CHANGE_AIR;
+}
+
+void ds_set_forecast_ttl(ds_t *ds, uint32_t ttl_s)
+{
+    ds->forecast_ttl_s = ttl_s;
+}
+
+const ds_weather_t *ds_weather(const ds_t *ds)
+{
+    return ds->weather.fetched != 0 ? &ds->weather : NULL;
+}
+
+const ds_air_t *ds_air(const ds_t *ds)
+{
+    return ds->air.fetched != 0 ? &ds->air : NULL;
+}
+
+int ds_hour_index(uint32_t hour0, time_t t)
+{
+    if (hour0 == 0 || t < (time_t)hour0) {
+        return -1;
+    }
+    time_t i = (t - (time_t)hour0) / 3600;
+    return i < DS_WX_HOURS ? (int)i : -1;
+}
+
+static ds_freshness_t forecast_freshness(const ds_t *ds, uint32_t fetched, uint32_t hour0, time_t now)
+{
+    if (fetched == 0 || ds_hour_index(hour0, now) < 0) {
+        return DS_MISSING; /* never fetched, or past the forecast (spec §5.1) */
+    }
+    if (ds->forecast_ttl_s != 0 && now > (time_t)fetched && (uint32_t)(now - fetched) > ds->forecast_ttl_s) {
+        return DS_STALE;
+    }
+    return DS_FRESH;
+}
+
+ds_freshness_t ds_weather_freshness(const ds_t *ds, time_t now)
+{
+    return forecast_freshness(ds, ds->weather.fetched, ds->weather.hour0, now);
+}
+
+ds_freshness_t ds_air_freshness(const ds_t *ds, time_t now)
+{
+    return forecast_freshness(ds, ds->air.fetched, ds->air.hour0, now);
+}
+
+bool ds_weather_now(const ds_t *ds, time_t now, ds_wx_now_t *out)
+{
+    const ds_weather_t *w = ds_weather(ds);
+    if (w == NULL) {
+        return false;
+    }
+    int h = ds_hour_index(w->hour0, now);
+    uint8_t precip = h >= 0 ? w->hours[h].precip : DS_WX_NO_PCT;
+    bool current = w->now_time != 0 && w->now_temp_c10 != DS_WX_NO_TEMP && now >= (time_t)w->now_time &&
+                   now - (time_t)w->now_time <= 3600; /* spec §5.1: at most 60 minutes old */
+    if (current) {
+        *out = (ds_wx_now_t){ .temp_c10 = w->now_temp_c10, .feels_c10 = w->now_feels_c10,
+                              .wind_kmh10 = w->now_wind_kmh10, .code = w->now_code, .hum = w->now_hum,
+                              .precip = precip, .is_day = (int8_t)(w->now_is_day ? 1 : 0) };
+        return true;
+    }
+    if (h < 0 || w->hours[h].temp_c10 == DS_WX_NO_TEMP) {
+        return false;
+    }
+    *out = (ds_wx_now_t){ .temp_c10 = w->hours[h].temp_c10, .feels_c10 = DS_WX_NO_TEMP, .wind_kmh10 = DS_WX_NO_WIND,
+                          .code = w->hours[h].code, .hum = DS_WX_NO_PCT, .precip = precip, .is_day = -1 };
+    return true;
+}

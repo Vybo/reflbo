@@ -276,6 +276,9 @@ static void handle_button(board_button_t button, gesture_t gesture)
     }
     const lang_t *lang = lang_get(app_settings()->language);
     char text[64];
+    if (button != BOARD_BUTTON_BOOT || gesture != GESTURE_SHORT) {
+        app_radar_loop_stop(); /* spec §11.2: KEY short still switches the preset */
+    }
     if (app_menu_is_open()) {
         bool held = gesture == GESTURE_LONG;
         app_menu_key(button == BOARD_BUTTON_KEY ? (held ? UI_MENU_KEY_SELECT : UI_MENU_KEY_NEXT)
@@ -307,6 +310,9 @@ static void handle_button(board_button_t button, gesture_t gesture)
         app_ui_toast(lang_str(lang, app_presets()->cycle_enabled ? LS_T_CYCLE_ON : LS_T_CYCLE_OFF));
     } else if (button == BOARD_BUTTON_KEY && gesture == GESTURE_LONG) {
         app_menu_open();
+    } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_SHORT &&
+               app_presets()->presets[app_presets()->active].layout == UI_LAYOUT_RADAR && app_radar_loop_start()) {
+        ESP_LOGI(TAG, "BOOT short: the radar's loop"); /* D28 */
     } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_SHORT) {
         app_ui_sample(time(NULL));
         app_ui_render();
@@ -672,6 +678,7 @@ static void app_task(void *arg)
         /* Config mode and a new image waiting to prove itself keep the chip awake: sleep would
          * drop Wi-Fi, and a deep-sleep wake would roll the image back (spec §10.5). */
         bool pending = uxQueueMessagesWaiting(s_queue) > 0 || board_buttons_busy() || app_config_active() ||
+                       app_radar_loop_deadline_ms() != 0 ||
                        s_ota_pending || app_sync_active() || app_sync_holds_wifi() || /* neither sleep keeps Wi-Fi */
                        app_sync_wifi_pending();
         if (err == ESP_OK) {
@@ -684,6 +691,7 @@ static void app_task(void *arg)
             app_config_tick();
             app_sync_wifi_check();
             app_ui_toast_expire();
+            app_radar_loop_tick();
             bool busy = pending || app_menu_is_open() || app_ui_toast_active();
             if (!busy && app_ui_night() && mono >= s_peek_until_ms) {
                 enter_night_sleep(); /* returns only if it had to sleep light instead */
@@ -723,7 +731,7 @@ static void app_task(void *arg)
             int64_t mono = app_uptime_ms();
             const int64_t deadlines[] = { app_menu_deadline_ms(), app_ui_toast_until_ms(),
                                           app_ui_night() ? s_peek_until_ms : 0, app_config_redraw_ms(),
-                                          s_ota_pending ? OTA_VERIFY_MS : 0 };
+                                          s_ota_pending ? OTA_VERIFY_MS : 0, app_radar_loop_deadline_ms() };
             for (size_t i = 0; i < sizeof(deadlines) / sizeof(deadlines[0]); i++) {
                 if (deadlines[i] != 0 && deadlines[i] - mono < wait_ms) {
                     wait_ms = deadlines[i] - mono;

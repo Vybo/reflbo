@@ -5,6 +5,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "map_data.h"
+#include "st7305.h"
 #include "storage.h"
 #include "timekeeping.h"
 
@@ -16,6 +17,7 @@ static const char *TAG = "app_radar";
 #define FRAME_PATH "/fs/state/radar.bin"
 #define FRAME_FILE_MAX (RADAR_FILE_HEADER + 3 * 256 * 3 * 256 / 4) /* RainViewer's 3 x 3 tiles */
 #define SAVE_EVERY_S 1800 /* sync mode `always`: the file follows its new frames at most this often */
+#define LOOP_STEP_MS 333 /* the loop: about 3 frames a second (spec §11.2) */
 
 extern const uint8_t k_map_start[] asm("_binary_map_bin_start");
 extern const uint8_t k_map_end[] asm("_binary_map_bin_end");
@@ -28,6 +30,8 @@ static map_data_t s_map;
 static int s_map_state; /* 0 not opened yet, 1 open, -1 broken */
 static app_radar_status_t s_status;
 static ui_radar_t s_ui;
+static uint8_t s_loop_at, s_loop_count; /* the loop (D28): the frame shown of how many; 0 when it doesn't run */
+static int64_t s_loop_next_ms;          /* app_uptime_ms() of its next frame */
 
 static void ready(void)
 {
@@ -161,6 +165,7 @@ void app_radar_request(radar_fetch_req_t *out)
 
 void app_radar_apply(radar_fetch_result_t *res, uint8_t result, const char *detail)
 {
+    app_radar_loop_stop(); /* new frames move the old ones along */
     tidy();
     int added = 0;
     for (int i = 0; i < res->count; i++) {
@@ -227,12 +232,64 @@ const ui_radar_t *app_radar_ui(void)
 {
     tidy();
     const settings_t *set = app_settings();
+    bool loop = s_loop_count > 0 && s_loop_at < s_store.count;
     s_ui = (ui_radar_t){ .map = s_map_state > 0 ? &s_map : NULL, .home_lat_e4 = set->lat_e4,
-                         .home_lon_e4 = set->lon_e4, .frame = radar_store_newest(&s_store),
+                         .home_lon_e4 = set->lon_e4,
+                         .frame = loop ? &s_store.frames[s_loop_at] : radar_store_newest(&s_store),
+                         .loop_at = loop ? s_loop_at : 0, .loop_count = loop ? s_loop_count : 0,
                          .wx_lat_e4 = set->wx_lat_e4, .wx_lon_e4 = set->wx_lon_e4, .wx_zoom_q = set->wx_zoom_q,
                          .fl_lat_e4 = set->fl_lat_e4, .fl_lon_e4 = set->fl_lon_e4,
                          .fl_range_km = set->fl_range_km,
                          .fl_always = set->sync_mode == SETTINGS_SYNC_ALWAYS };
     app_flights_fill(&s_ui);
     return &s_ui;
+}
+
+bool app_radar_loop_start(void)
+{
+    tidy();
+    if (app_settings()->sync_mode != SETTINGS_SYNC_ALWAYS || s_store.count < 2) {
+        return false; /* outside sync mode `always` there is one frame (spec §11.2) */
+    }
+    s_loop_count = (uint8_t)s_store.count;
+    s_loop_at = 0;
+    esp_err_t err = st7305_set_mode(ST7305_MODE_HPM); /* each frame shows at once */
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "loop: HPM: %s", esp_err_to_name(err));
+    }
+    s_loop_next_ms = app_uptime_ms() + LOOP_STEP_MS;
+    ESP_LOGI(TAG, "loop: %u frames", s_loop_count);
+    app_ui_render();
+    return true;
+}
+
+void app_radar_loop_tick(void)
+{
+    if (s_loop_count == 0 || app_uptime_ms() < s_loop_next_ms) {
+        return;
+    }
+    if (++s_loop_at >= s_loop_count || s_loop_at >= s_store.count) {
+        app_radar_loop_stop(); /* it ends on the newest */
+        return;
+    }
+    s_loop_next_ms += LOOP_STEP_MS;
+    app_ui_render();
+}
+
+void app_radar_loop_stop(void)
+{
+    if (s_loop_count == 0) {
+        return;
+    }
+    s_loop_count = 0;
+    esp_err_t err = st7305_set_mode(ST7305_MODE_LPM);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "loop: LPM: %s", esp_err_to_name(err));
+    }
+    app_ui_render();
+}
+
+int64_t app_radar_loop_deadline_ms(void)
+{
+    return s_loop_count > 0 ? s_loop_next_ms : 0;
 }

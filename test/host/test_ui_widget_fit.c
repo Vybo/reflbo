@@ -80,6 +80,52 @@ static void test_a_12_hour_clock_fits_a_grid_cell(void)
     check_fits("grid_clock_12h", UI_LAYOUT_GRID, "g1");
 }
 
+/* The Weather preset after a sync, with today's high and low replaced (0.1 °C). */
+static void render_today(int max_c10, int min_c10)
+{
+    ui_context_t ctx;
+    ui_preset_t preset;
+    TEST_ASSERT_TRUE(fixture_dashboard("weather_now", &ctx, &preset));
+    ds_weather_t w = *ds_weather(&s_fix_ds);
+    w.days[0].max_c10 = (int16_t)max_c10;
+    w.days[0].min_c10 = (int16_t)min_c10;
+    ds_set_weather(&s_fix_ds, &w);
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    ui_draw_dashboard(&s_fb, &ctx, &preset);
+}
+
+static void grab_slot(ui_layout_id_t id, const char *slot, uint8_t *out)
+{
+    const ui_layout_t *layout = ui_layout(id);
+    gfx_rect_t r = layout->slots[ui_slot_by_name(layout, slot)].rect;
+    for (int y = 0; y < r.h; y++) {
+        for (int x = 0; x < r.w; x++) {
+            out[y * r.w + x] = (uint8_t)gfx_get_pixel(&s_fb, r.x + x, r.y + y);
+        }
+    }
+}
+
+/* Cut with an ellipsis ("23° / ..."), a two-digit low draws the same whatever it is. */
+static void check_low_shows(int max_c10, int low_a, int low_b)
+{
+    static uint8_t a[200 * 80], b[200 * 80]; /* the Weather layout's today slot */
+    char msg[48];
+    snprintf(msg, sizeof(msg), "high %d, lows %d and %d", max_c10, low_a, low_b);
+    render_today(max_c10, low_a);
+    check_fits("weather_now", UI_LAYOUT_WEATHER, "today");
+    grab_slot(UI_LAYOUT_WEATHER, "today", a);
+    render_today(max_c10, low_b);
+    check_fits("weather_now", UI_LAYOUT_WEATHER, "today");
+    grab_slot(UI_LAYOUT_WEATHER, "today", b);
+    TEST_ASSERT_FALSE_MESSAGE(memcmp(a, b, sizeof(a)) == 0, msg);
+}
+
+static void test_todays_two_digit_high_and_low_show_whole(void)
+{
+    check_low_shows(234, 132, 192);   /* 23° / 13°, the owner's first sync */
+    check_low_shows(-124, -186, -156); /* the widest in °C */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -87,5 +133,6 @@ int main(void)
     RUN_TEST(test_negative_temperatures_fit_the_grid);
     RUN_TEST(test_a_negative_temperature_fits_a_small_cell);
     RUN_TEST(test_a_12_hour_clock_fits_a_grid_cell);
+    RUN_TEST(test_todays_two_digit_high_and_low_show_whole);
     return UNITY_END();
 }

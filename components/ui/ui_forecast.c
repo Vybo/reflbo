@@ -564,8 +564,18 @@ static void draw_weather_day(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const u
     int x = r.x + 10;
     gfx_bitmap(fb, x, top + (body_h - 48) / 2, ui_sky_icon(v->sky, false, 48), GFX_BLACK);
     int tx = x + 48 + 12;
+    int room = r.x + r.w - 6 - tx;
+    /* "23° / 13°" is wider than "18° / 9°": the short form, then a smaller font, before an ellipsis */
+    const char *text = v->text;
+    if (gfx_text_width(vf, text) > room) {
+        text = v->short_text;
+        if (gfx_text_width(vf, text) > room) {
+            vf = &gfx_font_sans_bold_20;
+            text = gfx_text_width(vf, v->text) <= room ? v->text : v->short_text;
+        }
+    }
     char fit[24];
-    gfx_text_ellipsize(vf, v->text, r.x + r.w - 6 - tx, fit, sizeof(fit));
+    gfx_text_ellipsize(vf, text, room, fit, sizeof(fit));
     int base = top + body_h / 2 + (v->percent >= 0 ? 2 : ink_height(vf) / 2);
     gfx_text(fb, vf, tx, base, fit, GFX_BLACK);
     precip(fb, tx, base + 22, v->percent);

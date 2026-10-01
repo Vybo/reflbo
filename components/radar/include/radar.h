@@ -69,8 +69,11 @@ png_err_t radar_chmu_decode(const uint8_t *png, size_t len, const png_mem_t *mem
 
 #define RADAR_RV_INDEX_URL "https://api.rainviewer.com/public/weather-maps.json"
 #define RADAR_RV_MAX_ZOOM 7
+#define RADAR_RV_STEP_S 600 /* its frames come every 10 min */
 #define RADAR_RV_FRAMES 16
 #define RADAR_RV_TILES_MAX 3 /* a side: at most 3 x 3 tiles a view */
+#define RADAR_VIEW_W 400 /* the Radar layout's map, which holds any slot's: the view a fetch covers */
+#define RADAR_VIEW_H 279
 
 typedef struct {
     uint32_t time;
@@ -100,6 +103,21 @@ bool radar_rv_frame_alloc(radar_frame_t *f, const radar_rv_tiles_t *t, uint32_t 
 /* One tile's PNG into the frame at tile (x, y) of the world. */
 png_err_t radar_rv_decode_tile(const uint8_t *png, size_t len, const png_mem_t *mem, const radar_rv_tiles_t *t,
                                int x, int y, radar_frame_t *f);
+/* The frame has the rain for all of the view: ČHMÚ's for any (beyond its grid the edge shows),
+ * RainViewer's when it holds the tiles the view needs, at the view's tile zoom. */
+bool radar_frame_covers(const radar_frame_t *f, const map_view_t *v);
+
+/* A frame as /fs/state/radar.bin keeps it (spec §11.2, D28), so a power-off or a deep sleep keeps
+ * the latest: 48 bytes of header (magic "rfrm", version, source, size, time, georeference, the
+ * levels' length and CRC-32), then the levels. */
+#define RADAR_FILE_MAGIC 0x6d726672u
+#define RADAR_FILE_VERSION 1
+#define RADAR_FILE_HEADER 48
+size_t radar_frame_file_size(const radar_frame_t *f);
+/* The file's bytes; 0 if `size` is too small. */
+size_t radar_frame_to_file(const radar_frame_t *f, uint8_t *out, size_t size);
+/* A frame from them, its levels from `mem`; false, and out->levels NULL, for anything else. */
+bool radar_frame_from_file(const uint8_t *data, size_t len, const png_mem_t *mem, radar_frame_t *out);
 
 /* ---- drawing ---- */
 
@@ -131,3 +149,8 @@ bool radar_store_has(const radar_store_t *s, uint32_t time);
 /* The frame times of the hour before `newest` (in steps of `step_s`) not kept yet, newest first. */
 int radar_store_missing(const radar_store_t *s, uint32_t newest, uint32_t step_s, uint32_t *out, int max);
 void radar_store_clear(radar_store_t *s);
+/* Frees the oldest frames beyond `keep` (clamped to 1..RADAR_LOOP_FRAMES). */
+void radar_store_keep(radar_store_t *s, int keep);
+/* The frame times a fetch wants (spec §11.2): `newest` and the `want - 1` steps before it, newest
+ * first, less those in `have`; `want` is clamped to 1..RADAR_LOOP_FRAMES. Returns how many. */
+int radar_wanted(uint32_t newest, uint32_t step_s, int want, const uint32_t *have, int have_count, uint32_t *out);

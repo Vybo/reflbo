@@ -169,6 +169,7 @@ const lang_t lang_en = {
         [LS_SYNC_STEP_TIME] = "Time",
         [LS_SYNC_STEP_WEATHER] = "Weather",
         [LS_SYNC_STEP_AIR] = "Air quality",
+        [LS_SYNC_STEP_RADAR] = "Radar",
         [LS_SYNC_NEVER] = "Never",
         [LS_SYNC_RUNNING] = "Running",
         [LS_T_SYNC_STARTED] = "Syncing…",

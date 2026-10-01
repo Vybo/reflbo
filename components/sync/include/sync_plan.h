@@ -76,5 +76,9 @@ void sync_history_record(sync_history_t *h, sync_due_t due, bool ok, time_t ende
 uint32_t sync_expected_interval_s(const sync_schedule_t *s, time_t now);
 /* `always` mode wants Wi-Fi at `t`: on unless quiet hours; false in the other modes. */
 bool sync_wifi_wanted(const sync_schedule_t *s, time_t t);
+#define SYNC_RADAR_DELAY_S 60 /* a radar-only refresh waits this long after a frame's step */
+/* The next radar-only refresh strictly after `after` (spec §9.3), in sync mode `always`: a minute
+ * past each `step_s` of the clock, 300 s for ČHMÚ and 600 for RainViewer. */
+time_t sync_radar_next(time_t after, uint32_t step_s);
 /* Settings text: "HH:MM" <-> minutes after midnight; -1 for anything else. */
 int sync_parse_hhmm(const char *text);

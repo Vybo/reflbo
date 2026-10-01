@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "radar.h"
+#include "util_crc32.h"
 
 #define PI 3.14159265358979323846
 #define VIEW_W_MAX 1024 /* screen columns a render maps at most */
@@ -10,6 +11,70 @@
 static size_t grid_bytes(uint16_t w, uint16_t h)
 {
     return ((size_t)w * h + 3) / 4;
+}
+
+/* Little-endian fields at fixed offsets: the file reads the same on the host and the chip. */
+static void put32(uint8_t *p, uint32_t v)
+{
+    for (int i = 0; i < 4; i++) {
+        p[i] = (uint8_t)(v >> (8 * i));
+    }
+}
+
+static uint32_t get32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+size_t radar_frame_file_size(const radar_frame_t *f)
+{
+    return RADAR_FILE_HEADER + grid_bytes(f->w, f->h);
+}
+
+size_t radar_frame_to_file(const radar_frame_t *f, uint8_t *out, size_t size)
+{
+    size_t n = radar_frame_file_size(f), levels = n - RADAR_FILE_HEADER;
+    if (f->levels == NULL || size < n) {
+        return 0;
+    }
+    memset(out, 0, RADAR_FILE_HEADER);
+    put32(out, RADAR_FILE_MAGIC);
+    out[4] = RADAR_FILE_VERSION;
+    out[6] = f->source;
+    out[8] = (uint8_t)f->w;
+    out[9] = (uint8_t)(f->w >> 8);
+    out[10] = (uint8_t)f->h;
+    out[11] = (uint8_t)(f->h >> 8);
+    put32(out + 12, f->time);
+    memcpy(out + 16, &f->mx0, 8); /* IEEE 754 doubles, little-endian on both */
+    memcpy(out + 24, &f->my0, 8);
+    memcpy(out + 32, &f->scale, 8);
+    put32(out + 40, (uint32_t)levels);
+    put32(out + 44, util_crc32(0, f->levels, levels));
+    memcpy(out + RADAR_FILE_HEADER, f->levels, levels);
+    return n;
+}
+
+bool radar_frame_from_file(const uint8_t *data, size_t len, const png_mem_t *mem, radar_frame_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (len < RADAR_FILE_HEADER || get32(data) != RADAR_FILE_MAGIC || data[4] != RADAR_FILE_VERSION) {
+        return false;
+    }
+    uint16_t w = (uint16_t)(data[8] | data[9] << 8), h = (uint16_t)(data[10] | data[11] << 8);
+    size_t levels = get32(data + 40);
+    if (levels != grid_bytes(w, h) || len != RADAR_FILE_HEADER + levels ||
+        get32(data + 44) != util_crc32(0, data + RADAR_FILE_HEADER, levels) ||
+        !radar_frame_alloc(out, w, h, mem)) {
+        return false;
+    }
+    out->source = data[6];
+    out->time = get32(data + 12);
+    memcpy(&out->mx0, data + 16, 8);
+    memcpy(&out->my0, data + 24, 8);
+    memcpy(&out->scale, data + 32, 8);
+    memcpy(out->levels, data + RADAR_FILE_HEADER, levels);
+    return true;
 }
 
 bool radar_frame_alloc(radar_frame_t *f, uint16_t w, uint16_t h, const png_mem_t *mem)

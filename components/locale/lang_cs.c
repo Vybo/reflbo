@@ -209,6 +209,7 @@ const lang_t lang_cs = {
         [LS_SYNC_STEP_TIME] = "Čas",
         [LS_SYNC_STEP_WEATHER] = "Počasí",
         [LS_SYNC_STEP_AIR] = "Ovzduší",
+        [LS_SYNC_STEP_RADAR] = "Radar",
         [LS_SYNC_NEVER] = "Nikdy",
         [LS_SYNC_RUNNING] = "Probíhá",
         [LS_T_SYNC_STARTED] = "Synchronizuji…",

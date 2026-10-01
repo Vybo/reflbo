@@ -325,6 +325,16 @@ static void test_wifi_is_wanted_in_always_mode_outside_quiet_hours(void)
     TEST_ASSERT_FALSE(sync_wifi_wanted(&daily, oct1(12, 0)));
 }
 
+static void test_radar_refreshes_follow_the_frames(void)
+{
+    /* spec §9.3: ČHMÚ every 5 min, RainViewer every 10, a minute after each step for the frame to appear */
+    TEST_ASSERT_EQUAL_INT64(oct1(12, 1), sync_radar_next(oct1(12, 0), 300));
+    TEST_ASSERT_EQUAL_INT64(oct1(12, 6), sync_radar_next(oct1(12, 1), 300)); /* strictly after */
+    TEST_ASSERT_EQUAL_INT64(oct1(12, 6), sync_radar_next(oct1(12, 4) + 59, 300));
+    TEST_ASSERT_EQUAL_INT64(oct1(12, 11), sync_radar_next(oct1(12, 1), 600));
+    TEST_ASSERT_EQUAL_INT64(oct1(12, 1), sync_radar_next(oct1(11, 51) + 1, 600));
+}
+
 static void test_hhmm_text(void)
 {
     TEST_ASSERT_EQUAL_INT(330, sync_parse_hhmm("05:30"));
@@ -462,6 +472,7 @@ int main(void)
     RUN_TEST(test_quiet_hours_stretch_the_expected_interval);
     RUN_TEST(test_the_expected_interval_of_always_and_manual);
     RUN_TEST(test_wifi_is_wanted_in_always_mode_outside_quiet_hours);
+    RUN_TEST(test_radar_refreshes_follow_the_frames);
     RUN_TEST(test_hhmm_text);
     RUN_TEST(test_a_time_in_the_spring_forward_gap_runs_after_it);
     RUN_TEST(test_a_time_in_the_repeated_hour_runs_once);

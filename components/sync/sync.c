@@ -25,12 +25,14 @@ static const char *TAG = "sync";
 #define NTP_TIMEOUT_MS 5000 /* spec §9.3 */
 #define HTTP_TIMEOUT_MS 10000
 #define JOIN_MAX_MS 25000 /* three 8 s attempts; the rest of the 45 s is the steps' (spec §9.3) */
-#define BODY_MAX (12 * 1024) /* the largest reply, air quality, is about 4 KB */
+#define BODY_MAX (12 * 1024) /* the largest reply, the forecast, is about 5 KB */
+#define RADAR_STEP_MS 10000 /* spec §9.3 */
+#define REFRESH_MAX_MS 30000 /* a radar-only refresh, the last hour's 12 frames at most (D28) */
 
 static volatile bool s_running;
 static volatile uint8_t s_step = SYNC_STEP_COUNT;
 static sync_request_t s_req;
-static void (*s_done)(const sync_report_t *report);
+static void (*s_done)(sync_report_t *report);
 static sync_report_t s_report;
 static int64_t s_deadline_us; /* esp_timer: SYNC_RADIO_MAX_MS after the start */
 EXT_RAM_BSS_ATTR static char s_body[BODY_MAX];
@@ -152,14 +154,50 @@ static void step_air(void)
     }
 }
 
+static void step_radar(int max_ms)
+{
+    int budget = sync_budget_ms(esp_timer_get_time(), s_deadline_us, max_ms);
+    if (budget == 0) {
+        failed(SYNC_STEP_RADAR, "timeout");
+        return;
+    }
+    radar_fetch_req_t req = s_req.radar;
+    req.deadline_us = esp_timer_get_time() + (int64_t)budget * 1000;
+    if (s_report.result[SYNC_STEP_TIME] == SYNC_STEP_OK) { /* the app sets the clock only after the sync */
+        req.now = (uint32_t)((s_report.ntp_utc_us + esp_timer_get_time() - s_report.ntp_mono_us) / 1000000);
+    }
+    if (radar_fetch(&req, &s_report.radar) == ESP_OK) {
+        s_report.result[SYNC_STEP_RADAR] = SYNC_STEP_OK;
+    } else {
+        failed(SYNC_STEP_RADAR, s_report.radar.detail);
+    }
+}
+
+/* Sync mode `always`: the radar alone, on the network Wi-Fi is on already (D23: never joining). */
+static void refresh_task(int64_t start)
+{
+    s_deadline_us = start + (int64_t)REFRESH_MAX_MS * 1000;
+    netmgr_status_t ns;
+    netmgr_status(&ns);
+    if (ns.state != NETMGR_STATION || ns.ip[0] == '\0') {
+        failed(SYNC_STEP_WIFI, "not joined");
+        return;
+    }
+    s_report.result[SYNC_STEP_WIFI] = SYNC_STEP_OK;
+    s_step = SYNC_STEP_RADAR;
+    step_radar(REFRESH_MAX_MS);
+}
+
 static void sync_task(void *arg)
 {
     (void)arg;
     int64_t start = esp_timer_get_time();
     s_deadline_us = start + (int64_t)SYNC_RADIO_MAX_MS * 1000;
     s_step = SYNC_STEP_WIFI;
-    esp_err_t err = netmgr_join(JOIN_MAX_MS);
-    if (err == ESP_OK) {
+    esp_err_t err = s_req.radar_only ? ESP_OK : netmgr_join(JOIN_MAX_MS);
+    if (s_req.radar_only) {
+        refresh_task(start);
+    } else if (err == ESP_OK) {
         s_report.result[SYNC_STEP_WIFI] = SYNC_STEP_OK;
         s_step = SYNC_STEP_TIME; /* the steps are independent (spec §9.3): one failing skips nothing */
         step_time();
@@ -167,6 +205,8 @@ static void sync_task(void *arg)
         step_weather();
         s_step = SYNC_STEP_AIR;
         step_air();
+        s_step = SYNC_STEP_RADAR;
+        step_radar(RADAR_STEP_MS);
     } else {
         failed(SYNC_STEP_WIFI, err == ESP_ERR_NOT_FOUND       ? "no network saved"
                                : err == ESP_ERR_INVALID_STATE ? "Wi-Fi busy"
@@ -179,7 +219,7 @@ static void sync_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t sync_start(const sync_request_t *req, void (*done)(const sync_report_t *report))
+esp_err_t sync_start(const sync_request_t *req, void (*done)(sync_report_t *report))
 {
     if (s_running) {
         return ESP_ERR_INVALID_STATE;
@@ -187,7 +227,8 @@ esp_err_t sync_start(const sync_request_t *req, void (*done)(const sync_report_t
     s_running = true;
     s_req = *req;
     s_done = done;
-    memset(&s_report, 0, sizeof(s_report));
+    memset(&s_report, 0, sizeof(s_report)); /* the last report's frames were the app's */
+    s_report.radar_only = req->radar_only;
     BaseType_t ok = xTaskCreatePinnedToCore(sync_task, "sync", TASK_STACK, NULL, TASK_PRIORITY, NULL, 0);
     if (ok != pdPASS) {
         s_running = false;
@@ -208,6 +249,6 @@ sync_step_t sync_step(void)
 
 const char *sync_step_name(sync_step_t step)
 {
-    static const char *const k_names[SYNC_STEP_COUNT] = { "wifi", "time", "weather", "air" };
+    static const char *const k_names[SYNC_STEP_COUNT] = { "wifi", "time", "weather", "air", "radar" };
     return (unsigned)step < SYNC_STEP_COUNT ? k_names[step] : "";
 }

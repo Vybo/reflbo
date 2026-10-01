@@ -219,10 +219,11 @@ components/
   power/         power states, idle strategy, sleep entry
   netmgr/        Wi-Fi STA/AP, captive DNS, mDNS
   webui/         HTTP server, REST API, embedded web assets
+  fetch/         HTTPS GETs with the certificate bundle, one connection kept per host
   weather/       Open-Meteo URLs, parsers, bands and levels; the HTTPS fetch
   png/           PNG reader for the radar images: palette and RGBA, row by row   [host]
   map/           web-Mercator views; the built-in map (assets/map/map.bin) and its drawing   [host]
-  radar/         ČHMÚ's and RainViewer's frames: their decoding, store and drawing   [host]
+  radar/         ČHMÚ's and RainViewer's frames: their decoding, store and drawing [host]; their fetch
   adsb/          adsb.fi's aircraft on the Flights map, adsb.lol's routes and their cache   [host]
   ha_mqtt/       MQTT session, discovery, state, commands, field mappings   (planned)
   sync/          when syncs run and their retries, SNTP packets, the sync task

@@ -7,6 +7,7 @@
 #include "board_buttons.h"
 #include "datastore.h"
 #include "esp_err.h"
+#include "radar_fetch.h"
 #include "scheduler.h"
 #include "settings.h"
 #include "sync.h"
@@ -14,6 +15,7 @@
 #include "ui_fields.h"
 #include "ui_menu.h"
 #include "ui_preset.h"
+#include "ui_radar.h"
 #include "webui.h"
 
 /* The dashboard's state and behaviour (main/app_ui.c, main/app_menu.c). All of it belongs to the
@@ -125,7 +127,9 @@ void app_sync_schedule(void);    /* the next automatic sync, after a sync, a set
 time_t app_sync_due(void);       /* for the wake scheduler; 0 = none */
 void app_sync_tick(void);        /* starts a sync that is due; quiet hours in sync mode `always` */
 esp_err_t app_sync_now(void);    /* on demand: ESP_ERR_NOT_FOUND with no network saved */
-bool app_sync_active(void);      /* a sync runs */
+bool app_sync_active(void);      /* a sync or a radar-only refresh runs */
+bool app_sync_refreshing(void);  /* what runs is a radar-only refresh (spec §9.3): not shown as a sync */
+bool app_sync_running(void);     /* a sync runs, or waits for a refresh to end: what the screens show */
 bool app_sync_failed(void);      /* the last sync failed a step */
 bool app_sync_holds_wifi(void);  /* sync mode `always` keeps Wi-Fi now */
 bool app_sync_wifi_pending(void); /* Wi-Fi is on, but nothing needs it: awake until it is off */
@@ -134,6 +138,27 @@ bool app_sync_lan_ui(void);      /* sync mode `always` is on a network: the web 
 uint32_t app_sync_expected_s(void);
 /* Info ▸ Last sync: "12:05 OK", "05:30 Weather: HTTP 503", "Running", "Never". */
 void app_sync_summary(char *out, size_t size);
+
+/* The weather radar (main/app_radar.c, spec §11.2): its frames, kept in PSRAM, the newest also in
+ * /fs/state/radar.bin; the sync task fetches them. */
+typedef struct {
+    time_t fetched_at; /* the last fetch (UTC); 0 = none since the boot */
+    bool ok;           /* it brought the newest frame, or found it had it */
+    char detail[RADAR_FETCH_DETAIL_LEN];
+    uint8_t frames;    /* kept */
+    uint32_t frame_at; /* the newest one's time (UTC); 0 = none */
+    uint8_t source;    /* radar_source_t for the view now */
+} app_radar_status_t;
+void app_radar_request(radar_fetch_req_t *out); /* what a sync or a refresh fetches */
+/* The radar step's result (sync_step_result_t) and its detail: the frames that still fit the view are
+ * kept, the rest freed; a step that never ran leaves the status as it was. */
+void app_radar_apply(radar_fetch_result_t *res, uint8_t result, const char *detail);
+/* Before drawing `p`: the built-in map opened (spec §11.1) if `p` has one, and for the weather radar
+ * the newest frame read from its file, each once a boot or a wake, so other presets touch neither. */
+void app_radar_prepare(const ui_preset_t *p);
+const ui_radar_t *app_radar_ui(void); /* the radars as a render draws them now */
+uint32_t app_radar_step_s(void);      /* the source's frame step: 300 s for ČHMÚ, 600 for RainViewer */
+void app_radar_status(app_radar_status_t *out);
 
 /* Config mode (main/app_config.c, spec §10.2). */
 esp_err_t app_net_init(void); /* the Wi-Fi manager, started on first use */

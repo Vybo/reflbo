@@ -25,6 +25,9 @@ static const char *TAG = "app_sync";
 static bool s_active;           /* a sync runs, or its report waits for apply(): no other may start */
 static bool s_manual;           /* the running sync was asked for: it ends with a toast */
 static sync_due_t s_started_by; /* what started the running sync ({0, false} on demand) */
+static time_t s_radar_next;     /* sync mode `always`: the next radar-only refresh; 0 = at once */
+static bool s_refresh;          /* what runs is such a refresh, not a sync */
+static bool s_manual_waiting;   /* a sync asked for during such a refresh: it starts when that ends */
 
 static bool always_wanted(time_t now);
 static bool wifi_off(void);
@@ -102,6 +105,16 @@ time_t app_sync_due(void)
 bool app_sync_active(void)
 {
     return s_active;
+}
+
+bool app_sync_refreshing(void)
+{
+    return s_active && s_refresh;
+}
+
+bool app_sync_running(void)
+{
+    return (s_active && !s_refresh) || s_manual_waiting;
 }
 
 bool app_sync_failed(void)
@@ -187,10 +200,32 @@ static void save_summary(const sync_report_t *r, time_t started)
 
 static int64_t s_started_mono; /* esp_timer µs at the start, to date it once the clock is right */
 
+static esp_err_t start(bool manual, sync_due_t due);
+
+/* A radar-only refresh's report (spec §9.3): the frames, outside the syncs' history and retries. */
+static void apply_refresh(sync_report_t *r)
+{
+    app_radar_apply(&r->radar, r->result[SYNC_STEP_RADAR], r->detail[SYNC_STEP_RADAR]);
+    s_active = false;
+    s_refresh = false;
+    if (s_manual_waiting) {
+        s_manual_waiting = false;
+        if (start(true, (sync_due_t){ 0 }) != ESP_OK) {
+            app_ui_toast(lang_str(lang_get(app_settings()->language), LS_T_SYNC_FAILED));
+        }
+        return;
+    }
+    app_ui_render();
+}
+
 /* The report, on the app task. The EV_CALL around it sees the clock move and calls app_clock_moved(). */
 static void apply(void *arg)
 {
-    const sync_report_t *r = arg;
+    sync_report_t *r = arg;
+    if (r->radar_only) {
+        apply_refresh(r);
+        return;
+    }
     if (r->result[SYNC_STEP_TIME] == SYNC_STEP_OK) {
         int64_t moved_ms = 0;
         esp_err_t err = timekeeping_apply_true_time(r->ntp_utc_us, r->ntp_mono_us, &moved_ms);
@@ -214,6 +249,7 @@ static void apply(void *arg)
     if (r->result[SYNC_STEP_WEATHER] == SYNC_STEP_OK || r->result[SYNC_STEP_AIR] == SYNC_STEP_OK) {
         app_ui_save_forecast(); /* spec §6: it survives a power-off, shown as stale */
     }
+    app_radar_apply(&r->radar, r->result[SYNC_STEP_RADAR], r->detail[SYNC_STEP_RADAR]);
     time_t started = now - (time_t)((esp_timer_get_time() - s_started_mono) / 1000000);
     save_summary(r, started);
     bool ok = !app_sync_failed();
@@ -231,7 +267,7 @@ static void apply(void *arg)
     }
 }
 
-static void done(const sync_report_t *report) /* on the sync task */
+static void done(sync_report_t *report) /* on the sync task */
 {
     /* The report must arrive: until apply() runs, s_active holds every other sync and sleep off. */
     while (app_post(apply, (void *)report) != ESP_OK) {
@@ -249,8 +285,10 @@ static esp_err_t start(bool manual, sync_due_t due)
         return ESP_FAIL;
     }
     const settings_t *set = app_settings();
-    sync_request_t req = { .lat_e4 = set->lat_e4, .lon_e4 = set->lon_e4 };
+    static sync_request_t req; /* the radar's part is large for the app task's stack */
+    req = (sync_request_t){ .lat_e4 = set->lat_e4, .lon_e4 = set->lon_e4 };
     memcpy(req.ntp, set->ntp, sizeof(req.ntp));
+    app_radar_request(&req.radar);
     esp_err_t err = sync_start(&req, done);
     if (err == ESP_OK) {
         s_active = true;
@@ -277,6 +315,11 @@ esp_err_t app_sync_now(void)
         if (ns.state != NETMGR_STATION) {
             return ESP_ERR_INVALID_STATE; /* only the device's own network: nothing to reach */
         }
+    }
+    if (s_active && s_refresh) { /* the radar's refresh ends within 30 s: the sync follows it */
+        s_manual_waiting = true;
+        app_ui_render(); /* the status bar shows it running */
+        return ESP_OK;
     }
     return start(true, (sync_due_t){ 0 });
 }
@@ -308,6 +351,29 @@ void app_sync_wifi_check(void)
     app_net_refresh();
 }
 
+/* Sync mode `always` on the network: the radar alone every 5 min (RainViewer: 10), at once when the
+ * mode begins, so the loop's hour comes in one go (spec §9.3, D28). */
+static void radar_refresh_tick(time_t now)
+{
+    if (!app_sync_lan_ui()) {
+        s_radar_next = 0; /* the next time `always` holds Wi-Fi, the hour comes at once */
+        return;
+    }
+    if (s_active || now < s_radar_next) {
+        return;
+    }
+    static sync_request_t req;
+    req = (sync_request_t){ .radar_only = true };
+    app_radar_request(&req.radar);
+    if (sync_start(&req, done) == ESP_OK) {
+        s_active = true;
+        s_refresh = true;
+        s_manual = false;
+        s_radar_next = sync_radar_next(now, app_radar_step_s());
+        ESP_LOGI(TAG, "radar refresh: %u frames kept", req.radar.have_count);
+    }
+}
+
 void app_sync_tick(void)
 {
     time_t now = time(NULL);
@@ -316,6 +382,7 @@ void app_sync_tick(void)
     if (critical || app_ui_night()) {
         return; /* nothing may drain the battery, and the night runs nothing (spec §9.1) */
     }
+    radar_refresh_tick(now);
     sync_due_t due = st()->due;
     if (!s_active && due.at > now && st()->history.failed_at == 0 && always_wanted(now) && wifi_off()) {
         app_sync_schedule(); /* a night ended in sync mode `always`: Wi-Fi back at once, not at the hour */
@@ -342,7 +409,7 @@ void app_sync_summary(char *out, size_t size)
 {
     const lang_t *lang = lang_get(app_settings()->language);
     const app_sync_state_t *s = st();
-    if (s_active) {
+    if (app_sync_running()) {
         snprintf(out, size, "%s", lang_str(lang, LS_SYNC_RUNNING));
         return;
     }
@@ -357,7 +424,7 @@ void app_sync_summary(char *out, size_t size)
     const char *suffix;
     lang_format_time(local.tm_hour, local.tm_min, 0, app_settings()->clock_24h, false, when, sizeof(when), &suffix);
     static const lang_str_t k_steps[SYNC_STEP_COUNT] = { LS_SYNC_STEP_WIFI, LS_SYNC_STEP_TIME, LS_SYNC_STEP_WEATHER,
-                                                         LS_SYNC_STEP_AIR };
+                                                         LS_SYNC_STEP_AIR, LS_SYNC_STEP_RADAR };
     if (s->last_failed_step >= SYNC_STEP_COUNT) {
         snprintf(out, size, "%s%s%s OK", when, suffix[0] ? " " : "", suffix);
     } else {

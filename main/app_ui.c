@@ -213,7 +213,7 @@ void app_ui_context(ui_context_t *ctx)
                            .fahrenheit = s.settings.fahrenheit,
                            .web_session = (app_config_active() || app_sync_lan_ui()) && webui_session_active(),
                            .lat_e4 = s.settings.lat_e4, .lon_e4 = s.settings.lon_e4,
-                           .sync = app_sync_active()   ? UI_SYNC_RUNNING
+                           .sync = app_sync_running()  ? UI_SYNC_RUNNING
                                    : app_sync_failed() ? UI_SYNC_FAILED
                                                        : UI_SYNC_IDLE };
     if (app_sync_holds_wifi() && !app_config_active()) { /* spec §5.2: sync mode `always` */
@@ -223,6 +223,7 @@ void app_ui_context(ui_context_t *ctx)
     }
     localtime_r(&now, &ctx->local);
     ctx->local_day = local_day(&ctx->local);
+    ctx->radar = app_radar_ui(); /* M6 */
 }
 
 void app_ui_render(void)
@@ -235,6 +236,7 @@ void app_ui_render(void)
         app_menu_render();
         return;
     }
+    app_radar_prepare(&s.presets.presets[s.presets.active]);
     ui_context_t ctx;
     app_ui_context(&ctx);
     if (s.critical) {

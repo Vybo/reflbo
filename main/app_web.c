@@ -160,8 +160,9 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
     static const char *const k_modes[] = { "times", "interval", "always", "manual" };
     cJSON_AddStringToObject(sync, "mode", k_modes[st->settings.sync_mode <= SETTINGS_SYNC_MANUAL
                                                        ? st->settings.sync_mode : 0]);
-    cJSON_AddBoolToObject(sync, "running", app_sync_active());
-    if (app_sync_active()) {
+    bool running = app_sync_running(); /* a radar refresh isn't a sync (spec §9.3) */
+    cJSON_AddBoolToObject(sync, "running", running);
+    if (running) {
         cJSON_AddStringToObject(sync, "step", sync_step_name(sync_step()));
     }
     if (st->sync.last_at != 0) {

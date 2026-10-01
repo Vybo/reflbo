@@ -49,6 +49,8 @@ void gfx_rect(gfx_fb_t *fb, gfx_rect_t r, gfx_color_t color); /* outline, each p
 void gfx_fill_rect(gfx_fb_t *fb, gfx_rect_t r, gfx_color_t color);
 void gfx_circle(gfx_fb_t *fb, int cx, int cy, int r, gfx_color_t color); /* outline, each pixel drawn once */
 void gfx_fill_circle(gfx_fb_t *fb, int cx, int cy, int r, gfx_color_t color);
+/* The pixels whose centres lie inside or on the triangle, in any vertex order. */
+void gfx_fill_triangle(gfx_fb_t *fb, int x0, int y0, int x1, int y1, int x2, int y2, gfx_color_t color);
 
 /* 1-bpp image in the glyph format: rows MSB first, each row padded to whole bytes, 1 = ink. */
 typedef struct {

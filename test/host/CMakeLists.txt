@@ -12,7 +12,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(REPO_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 # The radar views' golden renders read the built-in map and the radar fixtures (radar_fixtures.h).
 add_compile_definitions(REFLBO_MAP_BIN="${REPO_ROOT}/assets/map/map.bin"
-                        REFLBO_PNG_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/png")
+                        REFLBO_PNG_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/png"
+                        REFLBO_ADSB_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/adsb")
 set(REFLBO_WARNINGS -Wall -Wextra -Werror)
 
 # cmake -DREFLBO_SANITIZE=ON: everything with AddressSanitizer and UndefinedBehaviorSanitizer.
@@ -185,7 +186,8 @@ file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)
 add_library(ui STATIC ${UI_SOURCES})
 target_include_directories(ui PUBLIC ${REPO_ROOT}/components/ui/include)
 target_compile_options(ui PRIVATE ${REFLBO_WARNINGS})
-target_link_libraries(ui PUBLIC gfx locale datastore util map radar_logic PRIVATE cjson scheduler weather_logic astro m)
+target_link_libraries(ui PUBLIC gfx locale datastore util map radar_logic adsb_logic
+                      PRIVATE cjson scheduler weather_logic astro m)
 
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
 function(reflbo_host_test name)
@@ -252,6 +254,7 @@ reflbo_host_test(test_ui_widget_fit ui)
 reflbo_host_test(test_ui_menu ui)
 reflbo_host_test(test_ui_config ui)
 reflbo_host_test(test_ui_catalog ui cjson)
+reflbo_host_test(test_ui_flights ui)
 reflbo_host_test(test_settings storage_logic)
 reflbo_host_test(test_storage_file storage_logic)
 target_compile_definitions(test_storage_file PRIVATE TEST_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/storage_tmp")

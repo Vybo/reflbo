@@ -44,9 +44,11 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
     gfx_clear(fb, GFX_WHITE);
     const ui_layout_t *layout = ui_layout((ui_layout_id_t)preset->layout);
     bool any_stale = false;
+    gfx_rect_t below = { 0, UI_STATUS_H + 1, fb->width, (int16_t)(fb->height - UI_STATUS_H - 1) };
     if (preset->layout == UI_LAYOUT_RADAR) { /* spec §5.2: the map under the status bar */
-        ui_draw_radar_view(fb, (gfx_rect_t){ 0, UI_STATUS_H + 1, fb->width, (int16_t)(fb->height - UI_STATUS_H - 1) },
-                           &c);
+        ui_draw_radar_view(fb, below, &c);
+    } else if (preset->layout == UI_LAYOUT_FLIGHTS) {
+        ui_draw_flights_view(fb, below, &c);
     } else if (layout != NULL) {
         draw_separators(fb, (ui_layout_id_t)preset->layout);
         for (int i = 0; i < layout->slot_count; i++) {

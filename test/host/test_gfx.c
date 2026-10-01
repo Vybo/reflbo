@@ -237,6 +237,38 @@ static void test_bitmap_draws_ink_only_and_clips(void)
     gfx_bitmap(&s_fb, 0, 0, NULL, GFX_WHITE);
 }
 
+static int count_in(const gfx_fb_t *fb)
+{
+    int n = 0;
+    for (int y = 0; y < fb->height; y++) {
+        for (int x = 0; x < fb->width; x++) {
+            n += gfx_get_pixel(fb, x, y);
+        }
+    }
+    return n;
+}
+
+static void test_a_filled_triangle_covers_its_inside_in_any_order_and_clips(void)
+{
+    static uint8_t buf[32 * 32 / 8];
+    gfx_fb_t fb;
+    gfx_fb_init(&fb, buf, 32, 32);
+    gfx_clear(&fb, GFX_WHITE);
+    gfx_fill_triangle(&fb, 2, 2, 20, 2, 2, 20, GFX_BLACK); /* legs of 19 px: 19 + 18 + ... + 1 */
+    TEST_ASSERT_EQUAL_INT(190, count_in(&fb));
+    TEST_ASSERT_TRUE(gfx_get_pixel(&fb, 2, 2) && gfx_get_pixel(&fb, 20, 2) && gfx_get_pixel(&fb, 2, 20));
+    TEST_ASSERT_FALSE(gfx_get_pixel(&fb, 12, 12)); /* beyond the hypotenuse x + y = 22 */
+    gfx_clear(&fb, GFX_WHITE);
+    gfx_fill_triangle(&fb, 2, 20, 20, 2, 2, 2, GFX_BLACK);
+    TEST_ASSERT_EQUAL_INT(190, count_in(&fb));
+    gfx_clear(&fb, GFX_WHITE);
+    gfx_fill_triangle(&fb, 3, 5, 9, 5, 6, 5, GFX_BLACK); /* flat: a line */
+    TEST_ASSERT_EQUAL_INT(7, count_in(&fb));
+    gfx_fill_triangle(&s_fb, -100, -100, 300, -100, -100, 300, GFX_BLACK); /* far past the 16 x 4 buffer */
+    TEST_ASSERT_EQUAL_INT(64, count_black());
+    assert_guards_intact();
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -254,5 +286,6 @@ int main(void)
     RUN_TEST(test_circle_is_symmetric_and_draws_each_pixel_once);
     RUN_TEST(test_filled_circle_covers_its_outline);
     RUN_TEST(test_bitmap_draws_ink_only_and_clips);
+    RUN_TEST(test_a_filled_triangle_covers_its_inside_in_any_order_and_clips);
     return UNITY_END();
 }

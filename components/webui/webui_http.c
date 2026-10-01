@@ -91,3 +91,25 @@ bool webui_host_is(const char *host, const char *name)
     }
     return true;
 }
+
+const char *webui_status_line(int status)
+{
+    switch (status) {
+    case 200: return "200 OK";
+    case 202: return "202 Accepted";
+    case 400: return "400 Bad Request";
+    case 401: return "401 Unauthorized";
+    case 403: return "403 Forbidden";
+    case 404: return "404 Not Found";
+    case 405: return "405 Method Not Allowed";
+    case 408: return "408 Request Timeout";
+    case 409: return "409 Conflict";
+    case 413: return "413 Content Too Large";
+    case 415: return "415 Unsupported Media Type";
+    case 421: return "421 Misdirected Request"; /* a Host that isn't this device (spec §10.4) */
+    case 429: return "429 Too Many Requests";
+    case 502: return "502 Bad Gateway";
+    case 503: return "503 Service Unavailable";
+    default: return "500 Internal Server Error";
+    }
+}

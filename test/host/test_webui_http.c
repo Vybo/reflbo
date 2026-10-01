@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "unity.h"
@@ -50,11 +51,27 @@ static void test_the_host_header_is_matched_loosely(void)
     TEST_ASSERT_FALSE(webui_host_under(NULL, "reflbo-bb94"));
 }
 
+static void test_every_status_the_server_sends_has_its_line(void)
+{
+    static const int k_sent[] = { 200, 202, 400, 401, 403, 404, 405, 408, 409, 413, 415, 421, 429, 500, 502, 503 };
+    for (size_t i = 0; i < sizeof(k_sent) / sizeof(k_sent[0]); i++) {
+        char code[4];
+        snprintf(code, sizeof(code), "%d", k_sent[i]);
+        const char *line = webui_status_line(k_sent[i]);
+        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(code, line, 3, line); /* not the 500 fallback */
+        TEST_ASSERT_EQUAL_CHAR(' ', line[3]);
+        TEST_ASSERT_TRUE(strlen(line) > 4);
+    }
+    TEST_ASSERT_EQUAL_STRING("421 Misdirected Request", webui_status_line(421)); /* spec §10.4 */
+    TEST_ASSERT_EQUAL_STRING("500 Internal Server Error", webui_status_line(418));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_only_json_counts_as_json);
     RUN_TEST(test_query_values_are_url_decoded);
     RUN_TEST(test_the_host_header_is_matched_loosely);
+    RUN_TEST(test_every_status_the_server_sends_has_its_line);
     return UNITY_END();
 }

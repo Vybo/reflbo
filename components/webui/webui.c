@@ -198,29 +198,9 @@ static esp_err_t to_portal(httpd_req_t *req)
     return httpd_resp_sendstr(req, "reflbo setup"); /* iOS wants a body to show the portal */
 }
 
-static const char *status_line(int status)
-{
-    switch (status) {
-    case 200: return "200 OK";
-    case 202: return "202 Accepted";
-    case 400: return "400 Bad Request";
-    case 401: return "401 Unauthorized";
-    case 403: return "403 Forbidden";
-    case 404: return "404 Not Found";
-    case 405: return "405 Method Not Allowed";
-    case 408: return "408 Request Timeout";
-    case 409: return "409 Conflict";
-    case 413: return "413 Content Too Large";
-    case 415: return "415 Unsupported Media Type";
-    case 429: return "429 Too Many Requests";
-    case 503: return "503 Service Unavailable";
-    default: return "500 Internal Server Error";
-    }
-}
-
 static esp_err_t send_json(httpd_req_t *req, int status, const char *json)
 {
-    httpd_resp_set_status(req, status_line(status));
+    httpd_resp_set_status(req, webui_status_line(status));
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_sendstr(req, json);
@@ -761,7 +741,7 @@ static esp_err_t api_handler(httpd_req_t *req)
     if (s_cfg.run(api_on_app, &call) != ESP_OK) {
         return send_error(req, 503, "the device is busy");
     }
-    httpd_resp_set_status(req, status_line(call.reply.status));
+    httpd_resp_set_status(req, webui_status_line(call.reply.status));
     httpd_resp_set_type(req, call.reply.type);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, (const char *)s_out, (ssize_t)call.reply.len);

@@ -128,6 +128,8 @@ esp_err_t app_sync_now(void);    /* on demand: ESP_ERR_NOT_FOUND with no network
 bool app_sync_active(void);      /* a sync runs */
 bool app_sync_failed(void);      /* the last sync failed a step */
 bool app_sync_holds_wifi(void);  /* sync mode `always` keeps Wi-Fi now */
+bool app_sync_wifi_pending(void); /* Wi-Fi is on, but nothing needs it: awake until it is off */
+void app_sync_wifi_check(void);   /* turns that Wi-Fi off, once a web reply has gone out */
 bool app_sync_lan_ui(void);      /* sync mode `always` is on a network: the web UI runs on the LAN (spec §10.4) */
 uint32_t app_sync_expected_s(void);
 /* Info ▸ Last sync: "12:05 OK", "05:30 Weather: HTTP 503", "Running", "Never". */

@@ -12,11 +12,13 @@
 #include "sync.h"
 #include "sync_plan.h"
 #include "timekeeping.h"
+#include "webui.h"
 
 /* When syncs run and what their reports change (spec §9.3, D25). It belongs to the app task: the
  * sync task fetches, this file applies, and sync mode `always` keeps Wi-Fi up between refreshes. */
 
 #define LOW_BATTERY_PCT 15 /* spec §8: no retries */
+#define WEB_REPLY_MS 3000  /* a web request just served gets its reply out before Wi-Fi goes */
 
 static const char *TAG = "app_sync";
 
@@ -279,19 +281,38 @@ esp_err_t app_sync_now(void)
     return start(true, (sync_due_t){ 0 });
 }
 
+bool app_sync_wifi_pending(void)
+{
+    if (!app_net_ready() || app_config_active() || s_active) {
+        return false;
+    }
+    if (!app_state()->critical && always_wanted(time(NULL))) {
+        return false;
+    }
+    return !wifi_off(); /* quiet hours or a night began in sync mode `always` (D25), or it ended */
+}
+
+void app_sync_wifi_check(void)
+{
+    static int64_t s_stopped_ms; /* netmgr_stop() was posted then: it takes a moment */
+    int64_t now_ms = app_uptime_ms();
+    if (!app_sync_wifi_pending() || now_ms - s_stopped_ms < WEB_REPLY_MS) {
+        return;
+    }
+    if (!app_state()->critical && now_ms - webui_last_request_ms() < WEB_REPLY_MS) {
+        return; /* a page changed the mode: its reply goes out first */
+    }
+    ESP_LOGI(TAG, "Wi-Fi off: nothing needs it");
+    s_stopped_ms = now_ms;
+    netmgr_stop();
+    app_net_refresh();
+}
+
 void app_sync_tick(void)
 {
     time_t now = time(NULL);
     bool critical = app_state()->critical;
-    if (app_net_ready() && (critical || !always_wanted(now)) && !app_config_active() && !s_active) {
-        netmgr_status_t ns;
-        netmgr_status(&ns);
-        if (ns.state != NETMGR_OFF) { /* quiet hours began in sync mode `always` (D25), or it ended */
-            ESP_LOGI(TAG, "Wi-Fi off: nothing needs it");
-            netmgr_stop();
-            app_net_refresh();
-        }
-    }
+    app_sync_wifi_check();
     if (critical || app_ui_night()) {
         return; /* nothing may drain the battery, and the night runs nothing (spec §9.1) */
     }

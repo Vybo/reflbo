@@ -672,7 +672,8 @@ static void app_task(void *arg)
         /* Config mode and a new image waiting to prove itself keep the chip awake: sleep would
          * drop Wi-Fi, and a deep-sleep wake would roll the image back (spec §10.5). */
         bool pending = uxQueueMessagesWaiting(s_queue) > 0 || board_buttons_busy() || app_config_active() ||
-                       s_ota_pending || app_sync_active() || app_sync_holds_wifi(); /* neither sleep keeps Wi-Fi */
+                       s_ota_pending || app_sync_active() || app_sync_holds_wifi() || /* neither sleep keeps Wi-Fi */
+                       app_sync_wifi_pending();
         if (err == ESP_OK) {
             check_clock_jump();
             check_ota();
@@ -681,6 +682,7 @@ static void app_task(void *arg)
                 app_menu_close(); /* 60 s without input (spec §5.7) */
             }
             app_config_tick();
+            app_sync_wifi_check();
             app_ui_toast_expire();
             bool busy = pending || app_menu_is_open() || app_ui_toast_active();
             if (!busy && app_ui_night() && mono >= s_peek_until_ms) {

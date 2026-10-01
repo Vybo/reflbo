@@ -62,6 +62,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D23 | Owner, 2026-10-01 (weather radar, §19.2): ČHMÚ by default, with RainViewer outside its coverage; both a full-screen radar layout and a slot widget; aircraft stay a separate view, never over the rain; the radar never turns Wi-Fi on itself: it takes a frame with each normal sync, and every 5 minutes in sync mode `always`; both radars join the roadmap | M7 follows M6, which brings sync mode `always`; Audio and microSD move to M8 and M9 |
 | D24 | Owner, 2026-10-01: the radars come sooner. Sync mode `always` moves from the MQTT milestone into M5, the radars follow as M6, and MQTT and Home Assistant become M7 | Nothing in the radars needs MQTT; `always` belongs with the sync framework anyway |
 | D25 | Owner, 2026-10-01 (M5 planning): M5 also brings quiet hours (§9.3), air quality and pollen from Open-Meteo (§5.1, §11) and the RTC trim against NTP (§7); a static IP stays deferred; M5 runs as one plan; review minors are fixed where M5 touches their code | The RTC loses about 3.4 s a day (`AGENTS.md` gotcha 7); one trim step is 4.34 ppm, 0.37 s a day |
+| D26 | Owner, 2026-10-01 (M5 spike review): the weather icons come from the Weather Icons font (SIL OFL 1.1) beside Material Icons (§4.5); the sun widget shows the day length's change since yesterday, M3's deferred proposal (§5.1); a UV index field joins the air quality (§5.1, §11); pollen stays as built: a top field and one per type | The day-length change needed `astro`; the UV index comes in the same request |
 
 ### 1.3 Out of scope for v1
 
@@ -256,6 +257,7 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 
 - A 1-bpp icon set generated into C bitmaps by `tools/imggen.py` (`tools/gen_icons.sh`) from Google's Material Icons font (Apache-2.0, pinned to one upstream commit). `assets/icons/icons.txt` lists each icon's name and sizes.
 - M3a: thermometer, drop, dew, bolt (charging), stale, clock, calendar, person, celebration and cloud, at 16, 24 or 48 px as the list says. The battery and the moon are drawn with primitives. Weather codes (day and night), Wi-Fi, sync, the alarm bell, sunrise and sunset join with their milestones.
+- M5 (D26): the weather codes, sunrise and sunset come from Erik Flowers' Weather Icons (SIL OFL 1.1), as Material Icons has no rain or showers. The generator draws a second font with `--font PREFIX=TTF,CODEPOINTS,LICENCE`, its glyphs fitted to the square inside Material's padding. Sync, a crossed-out cloud, Wi-Fi, a crossed-out Wi-Fi, air, particles, UV and a flower come from Material Icons.
 - Sources and licences are recorded in `THIRD_PARTY.md`.
 
 ## 5. UI
@@ -283,7 +285,8 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 | `date.holiday` | text | The language pack's public holidays | Same; empty on ordinary days |
 | `aq.index` | level: the European air quality index and its band | Air quality data (§11), the hour now | As `wx.now` |
 | `aq.pm25`, `aq.pm10` | number, µg/m³ | Air quality data, the hour now | Same |
-| `pollen.top` | pollen: the type with the highest level today, and that level | Air quality data, today's peaks | Same; missing outside Europe and out of season |
+| `aq.uv` | level: the UV index, rounded, and its WHO band (D26) | Air quality data, the hour now | Same |
+| `pollen.top` | pollen: the type with the highest level today, and that level | Air quality data, today's peaks | Same; missing where CAMS has no pollen (outside Europe); "None" when nothing is in the air |
 | `pollen.alder`, `pollen.birch`, `pollen.grass`, `pollen.mugwort`, `pollen.olive`, `pollen.ragweed` | pollen: today's peak in grains/m³, and its level | Same | Same |
 | `mqtt.<key>` | number or text, with unit and label | MQTT mapping (§12.5) | Configured TTL; default twice the expected sync interval (§9.3) |
 
@@ -292,6 +295,8 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 `wx.now` uses the `current` block while it is at most 60 minutes old. After that it uses the hourly forecast entry for the current local hour. This keeps "now" meaningful between syncs, even with a once-a-day schedule. `aq.*` take the hourly entry for the current hour in the same way. Pollen forecasts are read by the day, so `pollen.*` show today's peak.
 
 - **Air quality bands** (Open-Meteo's `european_aqi`, the EEA's bands): 0–20 good, 20–40 fair, 40–60 moderate, 60–80 poor, 80–100 very poor, above 100 extremely poor.
+- **UV bands** (WHO, D26), of the index rounded: 0–2 low, 3–5 moderate, 6–7 high, 8–10 very high, 11 and above extreme.
+- **Sun times** show the day length and, in medium and large slots, its change since yesterday in whole minutes (D26).
 - **Pollen levels** from the clinical thresholds CAMS uses (EAACI, checked 2026-10-01): below 1 grain/m³ none; then low; moderate from the season threshold; high from the peak threshold. Alder, birch, olive and mugwort: 10 and 100. Grass and ragweed: 3 and 50. `pollen.top` compares the types by level, then by concentration as a share of the type's peak threshold.
 
 ### 5.2 Layouts (v1)
@@ -480,7 +485,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - today's `env.temp_min` and `env.temp_max`, restarted at local midnight;
   - the trends: the change since the newest reading that is 60–90 min old, from a 16-point history spaced at least 5 min apart.
 - **Weather storage.** Kept compact: 72 hourly entries (int16 temperature ×10, uint8 code, uint8 precipitation %) and 3 daily entries.
-- **Air quality storage** (D25): 72 hourly entries (uint8 index, PM2.5 and PM10 in whole µg/m³, capped at 255), and each pollen type's peak for 3 days (uint16 grains/m³). Weather and air quality together add about 600 bytes to the snapshot.
+- **Air quality storage** (D25): 72 hourly entries (uint8 index, PM2.5 and PM10 in whole µg/m³, the UV index in tenths, each capped at 254), and each pollen type's peak for 3 days (uint16, 0.1 grains/m³). Weather and air quality together add about 700 bytes to the snapshot.
 - **API.** Setters and getters, a freshness check (missing, fresh, stale) and a change mask. The app task owns the datastore (`AGENTS.md` §5.3). Other tasks reach it through events, and console commands through the app's executor, so it needs no mutex.
 - **Snapshot.** The datastore is plain data inside the app's RTC-RAM snapshot (magic, version, CRC32, at most 4 KB in total), sealed before every deep sleep. From M5 it is also written to `/state/datastore.bin` after every sync, so data survives a power-off and reappears marked as stale.
 
@@ -768,11 +773,11 @@ GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>
 - Parser tests on the host use recorded fixtures (`test/host/fixtures/open-meteo/*.json`).
 - A provider interface allows other weather services later.
 
-**Air quality request** (D25; once per sync, about 3.3 KB of JSON; checked against the live API on 2026-10-01):
+**Air quality request** (D25, D26; once per sync, about 5 KB of JSON; checked against the live API on 2026-10-01):
 
 ```
 GET https://air-quality-api.open-meteo.com/v1/air-quality?latitude=<lat>&longitude=<lon>
-  &hourly=european_aqi,pm2_5,pm10,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,olive_pollen,ragweed_pollen
+  &hourly=european_aqi,pm2_5,pm10,uv_index,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,olive_pollen,ragweed_pollen
   &timezone=auto&timeformat=unixtime&forecast_days=3
 ```
 
@@ -1182,3 +1187,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r23 | 2026-10-01 | Both radars join the roadmap as M7 (D23): the milestone table (§18), the weather radar's answers and power (§19.2), the flight radar's slot (§19.1); Audio becomes M8 and microSD M9 (§5.2, §5.7, §9.4, §10.3, §10.5, §13, §14, §15, §19, §20) |
 | r24 | 2026-10-01 | D24: sync mode `always` moves into M5, the radars become M6 and MQTT/HA M7 (§5.1, §5.2, §9.4, §10.3, §18, §19) |
 | r25 | 2026-10-01 | M5 scope (D25): air quality and pollen fields with their bands and levels (§5.1, §6, §11); the status bar's sync and Wi-Fi state (§5.2); the Weather preset in the cycle (§5.4); the menu's Sync section (§5.7); SNTP to the millisecond and the RTC trim (§7, §14.2, §20); quiet hours, config mode and `always` mode in the sync, its steps and results (§9.3, §10.2); fast connect without RTC RAM (§10.1); the Sync page, the place search and their API (§10.3); the web UI on the LAN (§10.4); `time.ntp` and `sync.*` (§14.3); `sync status` (§15); the tests (§17); the M5 row (§18, §19) |
+| r26 | 2026-10-01 | M5 spike review (D26): Weather Icons beside Material Icons (§4.5); `aq.uv` and the UV bands, the day length's change, "None" for pollen (§5.1, §6, §11) |

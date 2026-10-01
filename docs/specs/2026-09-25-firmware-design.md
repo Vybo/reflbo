@@ -579,7 +579,7 @@ The sync schedule (`settings.sync`) is fully configurable from the menu and the 
 |---|---|---|
 | `times` (default) | Sync at fixed local times | 1–8 times of day; default `05:30` |
 | `interval` | Sync every N minutes, aligned to the clock | N = 15–1440 |
-| `always` | Wi-Fi and MQTT stay up. Weather refreshes every 60 min. State is published on change (at most every 30 s) and every 5 min. Commands and MQTT fields apply at once. Meant for USB power; not auto-detected | — |
+| `always` | Wi-Fi stays up (from M5, D24), and MQTT with it (from M7). Weather refreshes every 60 min, the weather radar every 5 min (M6). State is published on change (at most every 30 s) and every 5 min. Commands and MQTT fields apply at once. Meant for USB power; not auto-detected | — |
 | `manual` | Sync only on demand | — |
 
 - The UI offers shortcuts: *Battery saver* = `times ["05:30"]`, *Balanced* = `interval 60`, *Always connected* = `always`.

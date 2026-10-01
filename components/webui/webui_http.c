@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <string.h>
+#include <strings.h>
 
 bool webui_is_json_type(const char *content_type)
 {
@@ -56,6 +57,19 @@ int webui_url_decode(const char *in, char *out, size_t size)
     }
     out[n] = '\0';
     return (int)n;
+}
+
+bool webui_host_under(const char *host, const char *name)
+{
+    if (host == NULL || name == NULL) {
+        return false;
+    }
+    size_t n = strlen(name);
+    if (n == 0 || strncasecmp(host, name, n) != 0) {
+        return false;
+    }
+    char next = host[n];
+    return next == '\0' || next == ':' || (next == '.' && host[n + 1] != '\0' && host[n + 1] != ':');
 }
 
 bool webui_host_is(const char *host, const char *name)

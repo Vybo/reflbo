@@ -107,8 +107,21 @@ const char *webui_session_new(webui_sessions_t *t, const uint8_t random[16], int
     return t->s[slot].token;
 }
 
+bool webui_sessions_expire(webui_sessions_t *t, int64_t now_s)
+{
+    bool ended = false;
+    for (int i = 0; i < WEBUI_SESSIONS; i++) {
+        if (t->s[i].token[0] != '\0' && now_s - t->s[i].used_s > WEBUI_SESSION_IDLE_S) {
+            memset(&t->s[i], 0, sizeof(t->s[i]));
+            ended = true;
+        }
+    }
+    return ended;
+}
+
 bool webui_session_check(webui_sessions_t *t, const char *token, int64_t now_s)
 {
+    webui_sessions_expire(t, now_s);
     if (token == NULL || strlen(token) != WEBUI_TOKEN_LEN) {
         return false;
     }

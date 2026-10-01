@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "unity.h"
@@ -128,9 +129,26 @@ static void test_any_session_tells_whether_someone_is_logged_in(void)
     TEST_ASSERT_FALSE(webui_sessions_any(&s_t));
 }
 
+/* Spec §10.4: on the LAN the web UI stays up, so an idle session ends after an hour. */
+static void test_a_session_idle_for_an_hour_ends(void)
+{
+    webui_sessions_t t;
+    webui_sessions_clear(&t);
+    static const uint8_t k_random[16] = { 1, 2, 3 };
+    char token[WEBUI_TOKEN_LEN + 1];
+    snprintf(token, sizeof(token), "%s", webui_session_new(&t, k_random, 1000));
+    TEST_ASSERT_TRUE(webui_session_check(&t, token, 1000 + WEBUI_SESSION_IDLE_S)); /* in time: used again */
+    TEST_ASSERT_FALSE(webui_sessions_expire(&t, 1000 + 2 * WEBUI_SESSION_IDLE_S));
+    TEST_ASSERT_TRUE(webui_sessions_any(&t));
+    TEST_ASSERT_TRUE(webui_sessions_expire(&t, 1000 + 2 * WEBUI_SESSION_IDLE_S + 1));
+    TEST_ASSERT_FALSE(webui_sessions_any(&t));
+    TEST_ASSERT_FALSE(webui_session_check(&t, token, 1000 + 2 * WEBUI_SESSION_IDLE_S + 2));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_a_session_idle_for_an_hour_ends);
     RUN_TEST(test_passwords_are_8_to_64_bytes_without_control_characters);
     RUN_TEST(test_a_record_is_salted_pbkdf2_and_checks_the_password);
     RUN_TEST(test_a_malformed_record_matches_nothing);

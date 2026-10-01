@@ -45,6 +45,10 @@ const char *webui_session_new(webui_sessions_t *t, const uint8_t random[16], int
 bool webui_session_check(webui_sessions_t *t, const char *token, int64_t now_s);
 /* Logging out: ends the session `token`; false if there was none. */
 bool webui_session_end(webui_sessions_t *t, const char *token);
+/* Spec §10.4: a session idle this long ends, as the web UI may stay up on the LAN in sync mode `always`. */
+#define WEBUI_SESSION_IDLE_S 3600
+/* Ends the sessions idle longer than WEBUI_SESSION_IDLE_S; true if one ended. */
+bool webui_sessions_expire(webui_sessions_t *t, int64_t now_s);
 /* Whether anyone is logged in: config mode shows the dashboard meanwhile (D20). */
 bool webui_sessions_any(const webui_sessions_t *t);
 /* The session token in a Cookie header ("...; session=<token>; ..."), or false. */

@@ -12,3 +12,5 @@ bool webui_is_json_type(const char *content_type);
 int webui_url_decode(const char *in, char *out, size_t size);
 /* True if a Host header names `name`, ignoring case, a port and a trailing dot. */
 bool webui_host_is(const char *host, const char *name);
+/* `host` is `name` itself or a name under it: "reflbo-bb94.local", "reflbo-bb94.fritz.box" (spec §10.4). */
+bool webui_host_under(const char *host, const char *name);

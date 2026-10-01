@@ -39,6 +39,15 @@ static void test_the_host_header_is_matched_loosely(void)
     TEST_ASSERT_FALSE(webui_host_is("captive.apple.com", "192.168.4.1"));
     TEST_ASSERT_FALSE(webui_host_is("192.168.4.10", "192.168.4.1"));
     TEST_ASSERT_FALSE(webui_host_is(NULL, "192.168.4.1"));
+    /* spec §10.4: the device's own name, alone or under a domain, and nothing else */
+    TEST_ASSERT_TRUE(webui_host_under("reflbo-bb94", "reflbo-bb94"));
+    TEST_ASSERT_TRUE(webui_host_under("reflbo-bb94.local", "reflbo-bb94"));
+    TEST_ASSERT_TRUE(webui_host_under("Reflbo-BB94.fritz.box:80", "reflbo-bb94"));
+    TEST_ASSERT_FALSE(webui_host_under("reflbo-bb94.", "reflbo-bb94"));
+    TEST_ASSERT_FALSE(webui_host_under("reflbo-bb941.local", "reflbo-bb94"));
+    TEST_ASSERT_FALSE(webui_host_under("evil.example", "reflbo-bb94"));
+    TEST_ASSERT_FALSE(webui_host_under("reflbo-bb94-evil.example", "reflbo-bb94"));
+    TEST_ASSERT_FALSE(webui_host_under(NULL, "reflbo-bb94"));
 }
 
 int main(void)

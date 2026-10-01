@@ -7,7 +7,7 @@
  * Wake scheduler (spec §9.2): when to wake next and why. Pure C, host-buildable. Periodic jobs run
  * at local wall-clock slots (minute of day divisible by their period), so DST shifts nothing.
  * Local time comes from the TZ environment variable (tzset()). Preset cycling and the seconds
- * display add wakes between minutes; M5 adds syncs, M7 user alarms.
+ * display add wakes between minutes; M5 adds syncs, M8 user alarms.
  */
 
 typedef enum {

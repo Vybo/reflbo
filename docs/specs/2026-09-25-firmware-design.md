@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-25
 - **Status:** Approved by the owner on 2026-09-25 (r3; changes listed in §21)
-- **Covers:** firmware v1, milestones M0–M8
+- **Covers:** firmware v1, milestones M0–M9
 - **Related:** `AGENTS.md` (hardware reference §3, workflow §6–§8)
 
 ## 1. Purpose and scope
@@ -21,7 +21,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | R6 | Settings on the device and on a website the device hosts, reachable from a phone in AP mode and over the LAN |
 | R7 | Save power: sync on a configurable schedule (default once a day), keep Wi-Fi off otherwise, turn Wi-Fi on when asked so the configurator is reachable |
 | R8 | Control everything with the board buttons |
-| R9 | Use the microSD slot (feature set agreed at M8) |
+| R9 | Use the microSD slot (feature set agreed at M9) |
 | R10 | Two-way Home Assistant integration: publish status and sensors, and show chosen HA entities |
 | R11 | Agent-verifiable: logs and screenshots over USB, rendering on the host; the owner confirms physical output |
 
@@ -59,6 +59,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D20 | Owner, 2026-09-30 (M4 acceptance): config mode watches the battery (§8, §10.2); while a phone is logged in, config mode shows the dashboard with a globe in the status bar (§5.2, §10.2); the preset preview names its slots, and a new preset joins the cycle (§10.3); seconds keep the refresh rate the user picked (§7); the battery level can follow the owner's own full and empty voltages (§8) | A battery that sags under the radio would brown out anyway. The owner wants to watch settings change on the screen itself. The refresh rate is the user's to tune |
 | D21 | Owner, 2026-09-30: the battery curve is learned from one full discharge, not a charge (§8) | The firmware can't see charging, and the charger's current lifts VBAT, so a charge maps poorly to the resting level; this board's steady load makes time a fair measure of charge |
 | D22 | Owner, 2026-10-01 (ADS-B radar proposal, §19.1): adsb.fi is the only source; the radar runs only in sync mode `always` (D11), with no time-boxed sessions and no separate switch; the map is centred on a point and zoomed from the web UI, with towns and airports built in | Still a proposal for after M5 (D10). One always-on Wi-Fi mode serves both the radar and the LAN configurator (§10.4) |
+| D23 | Owner, 2026-10-01 (weather radar, §19.2): ČHMÚ by default, with RainViewer outside its coverage; both a full-screen radar layout and a slot widget; aircraft stay a separate view, never over the rain; the radar never turns Wi-Fi on itself: it takes a frame with each normal sync, and every 5 minutes in sync mode `always`; both radars join the roadmap | M7 follows M6, which brings sync mode `always`; Audio and microSD move to M8 and M9 |
 
 ### 1.3 Out of scope for v1
 
@@ -291,7 +292,7 @@ Every layout has a status bar (top 20 px):
 - Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale. After either, a globe while a phone is logged in to the web UI (D20).
 - Middle: a small clock, if the preset sets `status_clock`. It is meant for data-first presets (owner request, 2026-09-28).
 - Right: the charging bolt and the battery icon, with the parts `status_battery` lists: level %, voltage, days left. The default is the level.
-- Later: the sync state (M5), the Wi-Fi state (M5 and M6, the first times Wi-Fi runs under the dashboard, D19) and the next alarm (M7).
+- Later: the sync state (M5), the Wi-Fi state (M5 and M6, the first times Wi-Fi runs under the dashboard, D19) and the next alarm (M8).
 
 | Layout | Slots |
 |---|---|
@@ -415,8 +416,8 @@ The `diag` console command `btn` injects the same gestures. Holding BOOT at powe
 
 ```
 Presets    ▸ Active preset · Auto-cycle on/off · Interval (10 s … 1 h) · Schedule on/off
-Alarms     ▸ Alarm 1–8: on/off · Time · Days · Sound · Volume        (M7)
-Radio      ▸ Play/stop · Station · Volume                            (M7)
+Alarms     ▸ Alarm 1–8: on/off · Time · Days · Sound · Volume        (M8)
+Radio      ▸ Play/stop · Station · Volume                            (M8)
 Wi-Fi      ▸ Config mode · Forget networks · Reset web password
 Sync       ▸ Sync now · Schedule (times / interval / always / manual) · Times or interval
 Time       ▸ Set date and time · 24-hour clock · Time zone (short list)
@@ -427,7 +428,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 ```
 
 - The menu closes after 60 s without input.
-- Items for features that don't exist yet (Wi-Fi before M4, Sync before M5, Alarms and Radio before M7) are hidden, not shown disabled.
+- Items for features that don't exist yet (Wi-Fi before M4, Sync before M5, Alarms and Radio before M8) are hidden, not shown disabled.
 - Schedule entries are edited in the web UI (M4); until then `presets.json` or the console sets them.
 - Display ▸ Contrast is hidden for now (D17). Last sync result joins Info with M5.
 - As built (M3b):
@@ -618,7 +619,8 @@ On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync
   - M2: deep sleep vs light sleep while idle.
   - M5: energy per sync.
   - Config mode.
-  - M7: radio.
+  - M7: a radar frame per sync, and sync mode `always`.
+  - M8: radio.
 - Record results in `docs/power.md` with the date, commit, settings and meter model. Many USB meters are inaccurate below 1 mA, so long accumulation windows matter.
 
 **Measured at M2:** a floor of about 60 mW at 5.24 V (11.5 mA) in either sleep, with the chip awake 0.1 % of the time. 0.87 mA of it is the USB side (charger and power latch, read with the board switched off). Most of the rest is the TPS63020 3V3 converter: its PS/SYNC pin is tied high, which forces PWM, and TI gives about 10 % efficiency at 1 mA in that mode. The converter loss stays on battery too, so the stretch goal (D6) needs a board rework: PS/SYNC to GND enables power-save mode (25–50 µA quiescent).
@@ -663,7 +665,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 ### 10.3 Web UI and REST API
 
 - **Tech.** Plain HTML/CSS/JS, mobile-first. The files are gzipped and **embedded in the app image**, so OTA updates them and flashing never touches user data.
-- **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), MQTT/HA (M6), Alarms and Radio (M7) join later.
+- **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), MQTT/HA (M6), Radar (M7), Alarms and Radio (M8) join later.
   - Status sets the device's clock from the phone at once when the device has lost the time (D9, D19).
   - Device holds the menu's language, units, sensor offsets, sensor interval, update interval and refresh rate (D19), and the battery calibration (§8).
   - Presets: the preview names each slot at its corner as the slot fields call it; a new preset joins the cycle; "Undo changes" asks first, as the save bar can float over other buttons (D20).
@@ -685,7 +687,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 | `POST /api/battery/learn` | `{"start": true}` learns the battery curve from the next full discharge, `{"stop": true}` ends it (D21); `GET /api/status` reports its state and hours |
 | `GET /api/geocode?q=` | Proxy for the Open-Meteo geocoding search (station mode only; manual lat/lon always works) (M5) |
 | `POST /api/sync` | Sync now (M5) |
-| `GET/PUT /api/alarms` · `GET/PUT /api/stations` · `POST /api/radio/play` · `POST /api/radio/stop` | Audio (M7) |
+| `GET/PUT /api/alarms` · `GET/PUT /api/stations` · `POST /api/radio/play` · `POST /api/radio/stop` | Audio (M8) |
 | `POST /api/ota` · `GET /api/ota/status` | Firmware upload, as `application/octet-stream`; the running version, its slot, whether it is still pending, and the slot of an update that was rolled back |
 | `GET /api/backup` · `POST /api/restore` | Settings bundle without secrets |
 | `POST /api/done` · `POST /api/reboot` · `POST /api/factory-reset` | End config mode; system. The reply goes out before the device acts |
@@ -711,7 +713,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Until then the board doesn't deep-sleep: a deep-sleep wake is a reset, which would roll the image back.
   - The upload streams into the other slot. Its header must name this project and chip, and the image's own checksum and hash must pass.
   - Measured at M4: 1.3 MB in 11–15 s over the AP. A test build that crashed after 25 s rolled back to the previous image, which returned in config mode (§10.2) and reported it. After the M4 review, a test build that failed to start was back on the previous image within 6 s, in config mode.
-- Sources: upload through the web UI (M4). A file on microSD is an M8 candidate.
+- Sources: upload through the web UI (M4). A file on microSD is an M9 candidate.
 
 ## 11. Weather and astro
 
@@ -815,7 +817,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 - **Mics.** The ES7210 stays in standby, because v1 doesn't use the mics.
 - **Power.** PA_CTRL (GPIO46) is high only while playing, with a settle delay and a volume ramp to avoid pops. After playback the codecs go to standby and the I²S driver is removed.
 
-### 13.2 Alarms (M7)
+### 13.2 Alarms (M8)
 
 - **Storage.** Up to 8 alarms in `/cfg/alarms.json`: `{id, enabled, time "HH:MM", days (Mon–Sun bitmask; 0 = once), label, sound, volume, snooze_min (default 9), ramp_s (default 30)}`.
 - **Sounds.** Built-in generated patterns, and 16-bit PCM WAV files from LittleFS or microSD. MP3 files are added once the radio decoder exists.
@@ -823,7 +825,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 - **Conditions.** Alarms work offline and from deep sleep, but need a valid time.
 - **Display.** The next alarm is shown in the status bar.
 
-### 13.3 Internet radio (M7)
+### 13.3 Internet radio (M8)
 
 - **Start.** From the menu or the web UI. It needs Wi-Fi, which stays on while the radio plays.
 - **Pipeline.**
@@ -831,7 +833,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
   2. PSRAM ring buffer of about 256 KB.
   3. Decoder task using Espressif `esp_audio_codec` (MP3, AAC).
   4. PCM out to the ES8311.
-- **Stations.** The list lives in `/cfg/stations.json` (name, URL). Defaults are chosen at M7.
+- **Stations.** The list lives in `/cfg/stations.json` (name, URL). Defaults are chosen at M8.
 - **Screen and controls.** The screen shows the station and the ICY title, with a battery warning when on battery. BOOT long, the menu or the web UI stops playback. A dropped stream reconnects with backoff.
 
 ## 14. Storage
@@ -865,10 +867,10 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 /cfg/settings.json      non-secret settings
 /cfg/presets.json       §5.4
 /cfg/mqtt_fields.json   §12.5
-/cfg/alarms.json        §13.2 (M7)
-/cfg/stations.json      §13.3 (M7)
+/cfg/alarms.json        §13.2 (M8)
+/cfg/stations.json      §13.3 (M8)
 /state/datastore.bin    last datastore snapshot (written after each sync)
-/sounds/                user sound files (M7)
+/sounds/                user sound files (M8)
 ```
 
 - Every file carries a schema version, and migrations run at boot.
@@ -906,10 +908,10 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 - **Backup.** A JSON bundle of every `/cfg/*` file, without secrets: `{"reflbo_backup": 1, "device": …, "firmware": …, "files": {"settings.json": {…}, "presets.json": {…}}}`. Restore validates every file it knows before replacing anything, applies them at once, and leaves out files of a later firmware.
 - **Factory reset.** From the menu (System ▸ Factory reset, confirmed by holding KEY), or from M4 the web UI. The board restarts afterwards. It erases `storage` and the NVS namespaces `wifi`, `secrets` and `ctr`. It keeps `sys`, the device identity.
 
-### 14.5 microSD (M8)
+### 14.5 microSD (M9)
 
 - FAT32 on SDMMC 1-bit. The card is mounted on demand and unmounted after use; a mount attempt detects whether one is present.
-- The feature set is agreed at the start of M8, from the candidates in §19.
+- The feature set is agreed at the start of M9, from the candidates in §19.
 
 ## 15. Diagnostics and tooling
 
@@ -930,7 +932,7 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 | `wifi status` · `wifi scan` | Wi-Fi: the state, network, address, AP clients and saved names; the networks in sight while Wi-Fi is on (config mode) |
 | `sync now` | Run a sync |
 | `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging: sleeps, wake causes, and per-cycle awake and slept times; `sleep test` forces sleep cycles while tethered |
-| `audio tone <Hz> <ms>` | Audio check (M7) |
+| `audio tone <Hz> <ms>` | Audio check (M8) |
 
 Screenshot framing:
 
@@ -1003,8 +1005,9 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M4 | `netmgr` (STA/AP, captive portal, mDNS), config screen with QR, `webui` and REST API, preset editor with preview, set time from phone, OTA with rollback | Owner sets up Wi-Fi from a phone in AP mode (4); the preview matches a device screenshot (3); OTA upload and rollback work (3) |
 | M5 | SNTP → RTC, `weather`, `astro`, `sync` with the configurable schedule and backoff, weather widgets, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); sync energy and the daily average are measured and `docs/power.md` is updated (4) |
 | M6 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings, `always` sync mode | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
-| M7 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
-| M8 | microSD features agreed at the start of M8 | Per the agreed list |
+| M7 | Radar views (D22, D23; §19.1, §19.2): one web-Mercator map renderer (centre and zoom from the web UI, built-in borders, towns and airports); the weather radar (ČHMÚ, RainViewer outside its coverage; a full-screen layout and a slot widget; a frame at each sync, every 5 min in sync mode `always`); the ADS-B flight radar (adsb.fi; its own view; sync mode `always` only) | Goldens of both radars (2); a ČHMÚ frame renders after a sync (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
+| M8 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
+| M9 | microSD features agreed at the start of M9 | Per the agreed list |
 
 ## 19. Deferred proposals (discuss at the milestone)
 
@@ -1015,15 +1018,15 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
 | M4 | Accepted (D18): a web UI password, instead of the admin PIN. Accepted (D19): config mode after a web restart, the clock set from the phone when lost, changing the password and logging out, a Device page. Still deferred: web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
-| After M5 | ADS-B flight radar (owner request, 2026-10-01; answers D22): §19.1. A weather (precipitation) radar (owner question, 2026-10-01): §19.2. They would share one map renderer; together about the size of M3a and M3b |
 | M6 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
-| M7 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
-| M8 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots |
+| M7 | Accepted (D22, D23): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b |
+| M8 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
+| M9 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots |
 | Later | IDS JMK departures; a remote 1-bit image slot; the VBUS-sense hardware mod; external I²C sensors on the header; BLE or ESP-NOW sources |
 
-### 19.1 ADS-B flight radar (proposal)
+### 19.1 ADS-B flight radar (M7)
 
-Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. An extra feature (D10): nothing is built before M5 is done. The owner answered the design questions the same day (D22, below).
+Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. Accepted for M7 with the weather radar (D23); the owner answered the design questions the same day (D22, below). The milestone's plan settles the details.
 
 **Findings** (checked 2026-10-01)
 
@@ -1041,10 +1044,10 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. An extra feature 
 
 - **Data.** One parser for readsb / ADS-B Exchange v2 JSON (`ac[]`: `hex`, `flight`, `lat`, `lon`, `alt_baro`, `gs`, `track`), fed by adsb.fi by default or by a local `aircraft.json` URL. Bounded: a size cap and `util_json_depth()` before parsing (hardware gotcha 30), into a fixed aircraft table in PSRAM. Pure and host-tested: the parser, the distance and bearing projection, label placement.
 - **View.** A full-screen 1-bit radar: range rings around home; aircraft as arrows turned to their track (pre-rendered rotations) with callsign and altitude; a nearest-aircraft panel; an optional underlay of borders and towns, generated at build time by a `tools/` script like the fonts and icons (Natural Earth is public domain). Goldens and device screenshots verify it. LPM at 1–2 Hz suits updates every 5–15 s.
-- **Power, the main constraint.** The radar needs Wi-Fi on the whole time it shows. Estimate, to be measured: about 1 % of the battery per hour; nonstop it would cut the battery life from about a week to 2–3 days. So a time-boxed radar mode like config mode, started from a button, the menu, a schedule or the web UI, with Wi-Fi off afterwards; perhaps continuous on USB power, which the firmware can only tell reliably with the VBUS-sense mod (hardware gotcha 3).
+- **Power, the main constraint.** The radar needs Wi-Fi on the whole time it shows, which is what sync mode `always` gives (D22). Estimate, to be measured: about 1 % of the battery per hour; nonstop it would cut the battery life from about a week to 2–3 days, so `always` suits USB power best (the firmware can only tell USB power reliably with the VBUS-sense mod, hardware gotcha 3).
 - **Settings.** `adsb.source` (adsb.fi or a local URL), range, maximum aircraft, filters (minimum altitude, aircraft on the ground). The adsb.fi credit goes in the web UI and the README.
 - **From MeteoPlaneRadar:** range-dependent polling with back-off, the User-Agent, routes on demand, the borders and cities. Rewritten in C for ESP-IDF rather than ported; adapted code would be credited in `THIRD_PARTY.md`.
-- **Fit.** It needs M5's HTTPS client, the certificate bundle and the sync framework, so its slot is right after M5.
+- **Fit.** It needs M5's HTTPS client, the certificate bundle and the sync framework, and M6's sync mode `always`, so it comes in M7 (D23).
 
 **Owner's answers** (2026-10-01, D22)
 
@@ -1057,9 +1060,9 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. An extra feature 
    - Settings this implies: the radar's centre (latitude and longitude) and zoom or range, and the filters above.
 
 
-### 19.2 Weather radar (proposal)
+### 19.2 Weather radar (M7)
 
-Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one too. An extra feature (D10), for after M5 like §19.1; nothing is decided yet.
+Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one too. Accepted for M7 (D23, below).
 
 **Sources** (checked 2026-10-01)
 
@@ -1069,16 +1072,16 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 **Sketch**
 
 - **Fetch and decode.** HTTPS through M5's client; the PNG decoded in PSRAM by a small streaming decoder (pngle, MIT, is a candidate; adapted code goes in `THIRD_PARTY.md`). Palette index to dBZ through ČHMÚ's colour scale (`scl/scl-dbz-mmh.png`), then two or three dither densities for light, moderate and heavy rain on the 1-bit panel.
-- **Map.** Both sources are web Mercator, the projection §19.1's map would use, so one map renderer with the same centre, zoom, borders and towns serves both radars, and aircraft could be drawn over the rain. The web UI previews it through `/api/preview.bmp`.
-- **Power: cheaper than the flight radar.** Rain moves slowly, so a frame every 5–15 minutes does, and that fits the normal sync rather than sync mode `always`. Estimate, to be measured: a 3 s Wi-Fi session costs about 1.5 J, so a frame every 10 minutes adds about 4 % a day to this board's ~60 mW floor; every 5 minutes, about 8 %.
-- **Where it shows.** A full-screen radar layout, or a smaller rain-map widget in a slot. A short loop of the last frames on KEY costs one download per frame.
+- **Map.** Both sources are web Mercator, the projection §19.1's map uses, so one map renderer with the same centre, zoom, borders and towns draws both radars. The aircraft stay on their own view, never over the rain (D23). The web UI previews it through `/api/preview.bmp`.
+- **Power: it never turns Wi-Fi on itself** (D23). Each normal sync takes one frame along, a few KB more and well under a second; in sync mode `always`, Wi-Fi is on anyway and a frame comes every 5 minutes, ČHMÚ's own step (RainViewer's is 10). So on battery it costs next to nothing beyond the sync; the frame is as old as the last sync.
+- **Where it shows** (D23): a full-screen radar layout and a smaller rain-map widget for a slot, both from the latest frame. A short loop of past frames on KEY would cost one download per frame, so it is left for the milestone's plan.
 - **A cheaper alternative**, inside M5's weather work: Open-Meteo's 15-minute precipitation forecast for the location, drawn as "rain in the next 2 hours". It needs no map and no images.
 
-**For the owner**
+**Owner's answers** (2026-10-01, D23)
 
-1. Source: ČHMÚ only, or ČHMÚ with RainViewer for places outside its coverage? Recommended: ČHMÚ by default, RainViewer as the fallback.
-2. How it shows: a full-screen radar layout, a slot widget, or both; and aircraft over the rain on one shared map?
-3. Refresh: with the normal sync on battery (every 10–15 min), or every 5 minutes in sync mode `always` only?
+1. **Source:** ČHMÚ by default, and RainViewer where the map lies outside ČHMÚ's coverage.
+2. **Where:** both a full-screen layout and a slot widget. Aircraft are a separate view, not drawn on the weather radar.
+3. **Refresh:** by the board's mode at the time. The radar never starts Wi-Fi by itself: it fetches with the normal sync, and every 5 minutes while sync mode `always` is on.
 
 ## 20. Risks and open items
 
@@ -1090,7 +1093,7 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | The stretch goal (D6) is out of reach on the board as built | Owner decision on the PS/SYNC rework (a VSON package with pins underneath); until then about 15 mA from the battery is expected (estimate) |
 | USB meters are inaccurate below 1 mA | Long mAh windows; note the limits in `docs/power.md` |
 | SHTC3 self-heating | Offset calibration; sample right after wake |
-| `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M7; pick another decoder if needed |
+| `esp_audio_codec` is distributed as prebuilt binaries, which may not suit an open-source repo | Check at M8; pick another decoder if needed |
 | Open-Meteo's free tier is for non-commercial use | Low request rate (daily sync); the provider can be swapped |
 | The Czech name-day calendar needs a source whose licence allows redistribution in this repository | Checked 2026-09-29: the best list (`namedays-cs`, MIT) traces its data to Czech Wikipedia (CC BY-SA); others were incomplete, broken or unlicensed. Deferred (D16): `cs` ships the holidays only until a clean source turns up |
 | The critical-battery path has not met a really low battery: its thresholds are host-tested and its screen is a golden, but its KEY-only sleep has not run on the board | Watch the first time the board runs flat on battery (M5 power work) |
@@ -1124,3 +1127,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r20 | 2026-10-01 | The owner's answers on the ADS-B radar (D22, §19.1): adsb.fi only, the always-on client mode, a centred and zoomed map with built-in towns and airports; one question left |
 | r21 | 2026-10-01 | The ADS-B radar runs in sync mode `always` (D22); its last question is closed (§19.1) |
 | r22 | 2026-10-01 | Weather radar proposal: ČHMÚ and RainViewer, a map shared with the ADS-B radar, three owner questions (§19, §19.2) |
+| r23 | 2026-10-01 | Both radars join the roadmap as M7 (D23): the milestone table (§18), the weather radar's answers and power (§19.2), the flight radar's slot (§19.1); Audio becomes M8 and microSD M9 (§5.2, §5.7, §9.4, §10.3, §10.5, §13, §14, §15, §19, §20) |

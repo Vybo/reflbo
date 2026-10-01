@@ -32,7 +32,7 @@ Guiding principles:
 - **Status:** M0 and M1 are done. M0: toolchain, skeleton, USB console, host tests and `devlog.py`. M1: ST7305 driver, `gfx` with fonts, the `display` service, screenshots over USB, host rendering with a golden test pattern; the owner checked the physical panel. M2 is done: board services, the clock screen and both idle strategies; the owner's measurements picked light sleep (D3). M3 runs as two plans. M3a is done: LittleFS config files, the datastore with the extra fields, the English pack, four layouts with widgets and a status bar, and presets that KEY switches and auto-cycles and that survive a reboot. M3b is done: the on-device menu with settings editing, toasts and the critical-battery screen, the preset schedule with timed night sleep, and the Czech pack with its public holidays. On 2026-09-30 the owner checked preset switching, a held KEY and BOOT, the menu buttons and timeout, and the Czech panel. Two owner checks wait for a later session at the owner's request: the night-sleep current (D15) and the night peek, which needs a night started from the console (`night <minutes>`) or from a schedule, which the web UI now edits. M4 is built: the Wi-Fi manager with the device's own network and captive portal, config mode with its QR screen, the web configurator with its API and a live preset preview, setting the time from a phone, and firmware updates with rollback. M4 is done once the owner has set up Wi-Fi from a phone and updated the firmware from the page (Owner acceptance in the M4 plan). The M4 review's fixes are in (spec r16). Owner acceptance, 2026-09-30: Wi-Fi from a phone works; the page's feedback is handled (D20, spec r17); the update from the page and the first run wait for a later session at the owner's request.
 - **Design spec:** [`docs/specs/2026-09-25-firmware-design.md`](docs/specs/2026-09-25-firmware-design.md) is the authoritative design. The owner approved it on 2026-09-25. §5 below summarises it. If the two disagree, the spec wins; fix this file.
 - **Plans:** each milestone gets its own implementation plan in `docs/plans/`, written just before that milestone starts. Latest plan: [`docs/plans/2026-09-30-m4-wifi-and-web.md`](docs/plans/2026-09-30-m4-wifi-and-web.md).
-- **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees. Proposed for after M5 (owner request, 2026-10-01): an ADS-B flight radar over Wi-Fi (spec §19.1; the owner's answers are D22) and a weather radar from ČHMÚ or RainViewer on the same map (spec §19.2; three owner questions open).
+- **Extra features:** anything beyond the requirements (spec §1.1) is a proposal. Raise it at the relevant milestone (spec §19) and build it only after the owner agrees. Accepted for M7 (owner, 2026-10-01): the ADS-B flight radar (spec §19.1, D22) and the weather radar (spec §19.2, D23).
 - **Repository:** the owner is in Brno, CZ. Remote `origin` is `git@github.com:Vybo/reflbo.git`.
 
 | # | Milestone | Done when |
@@ -44,8 +44,9 @@ Guiding principles:
 | M4 | Wi-Fi manager (STA/AP, captive portal), web configurator, mDNS, OTA | A phone sets up Wi-Fi from AP mode; OTA works |
 | M5 | Time sync, weather, astro, sync scheduler, power tuning | Daily sync works on battery; the measured average current is in `docs/power.md` |
 | M6 | MQTT and Home Assistant, including data from other local devices over MQTT | Entities appear in HA; a mapped MQTT value renders on the device |
-| M7 | Audio: offline alarms, then internet radio | An alarm fires from idle; a radio stream plays |
-| M8 | microSD features (list agreed at the start of M8) | The agreed features are verified |
+| M7 | Radar views (D22, D23): a shared map, the weather radar (ČHMÚ, RainViewer outside its coverage) as a layout and a slot widget, and the ADS-B flight radar (adsb.fi) as its own view | Both radars render on the panel: rain after a sync, aircraft in sync mode `always` |
+| M8 | Audio: offline alarms, then internet radio | An alarm fires from idle; a radio stream plays |
+| M9 | microSD features (list agreed at the start of M9) | The agreed features are verified |
 
 ## 3. Hardware reference: Waveshare ESP32-S3-RLCD-4.2
 
@@ -169,7 +170,7 @@ The spec (§1.1) lists these with IDs.
 - Provide settings on the device and through a website the device hosts, opened from a phone: in AP mode (to set up the client Wi-Fi) and over the local network.
 - Save power: sync over Wi-Fi on a configurable schedule (default once a day), then switch Wi-Fi off. The owner can switch Wi-Fi on to reach the configurator.
 - Control everything with the board's buttons.
-- Suggest uses for the microSD slot (list agreed at M8).
+- Suggest uses for the microSD slot (list agreed at M9).
 - Later, integrate two-way with Home Assistant over MQTT: report device status and sensor data, and read chosen HA entities to show on the dashboard.
 - Verification: flash from this Mac; the agent reads logs and screenshots over USB; the owner confirms what the panel physically shows and measures current with a USB power meter.
 
@@ -385,3 +386,4 @@ Recorded 2026-09-25. Rationale is in spec §1.2.
 | D20 | Owner, 2026-09-30 (M4 acceptance): config mode watches the battery, as a battery that sags under the radio would brown out anyway; while a phone is logged in, config mode shows the dashboard with a globe in the status bar, and KEY brings the setup screen back; the preset preview names its slots and a new preset joins the cycle; seconds keep the refresh rate the user picked; the battery level follows the built-in curve or the owner's own full and empty voltages (a learned curve is still open) |
 | D21 | Owner, 2026-09-30: the battery curve is learned from one full discharge, not a charge: charging is invisible to the firmware (gotcha 3), and this board's steady load makes time a fair measure of charge |
 | D22 | Owner, 2026-10-01 (ADS-B radar proposal, spec §19.1): adsb.fi only; it runs only in sync mode `always` (D11), not behind a separate switch; the map is centred and zoomed from the web UI, with towns and airports from OurAirports and Natural Earth built in. Still a proposal for after M5 |
+| D23 | Owner, 2026-10-01 (weather radar, spec §19.2): ČHMÚ by default with RainViewer outside its coverage; a full-screen layout and a slot widget; aircraft stay a separate view; the radar never turns Wi-Fi on itself, taking a frame with each normal sync and every 5 minutes in sync mode `always`; both radars join the roadmap as M7, after M6 brings `always`, so Audio is M8 and microSD M9 |

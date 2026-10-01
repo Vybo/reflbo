@@ -58,7 +58,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D19 | Owner, 2026-09-30 (M4 spike review): the first-run screen appears when `settings.json` is missing at boot (§5.5); the status bar's Wi-Fi state moves to M5 and M6 (§5.2); a restart from the web UI returns in config mode (§10.2); the web UI sets a lost clock from the phone, can change the password and log out, and gets a Device page (§10.3, §10.4); the temperature offset defaults to −2.0 °C (§8) | In M4 Wi-Fi runs only in config mode, which has its own screen. The board warms the SHTC3 by about 2 °C at all times; the user trims the rest |
 | D20 | Owner, 2026-09-30 (M4 acceptance): config mode watches the battery (§8, §10.2); while a phone is logged in, config mode shows the dashboard with a globe in the status bar (§5.2, §10.2); the preset preview names its slots, and a new preset joins the cycle (§10.3); seconds keep the refresh rate the user picked (§7); the battery level can follow the owner's own full and empty voltages (§8) | A battery that sags under the radio would brown out anyway. The owner wants to watch settings change on the screen itself. The refresh rate is the user's to tune |
 | D21 | Owner, 2026-09-30: the battery curve is learned from one full discharge, not a charge (§8) | The firmware can't see charging, and the charger's current lifts VBAT, so a charge maps poorly to the resting level; this board's steady load makes time a fair measure of charge |
-| D22 | Owner, 2026-10-01 (ADS-B radar proposal, §19.1): adsb.fi is the only source; the radar runs only while an always-on Wi-Fi client mode, switched on in the settings, is on, with no time-boxed sessions; the map is centred on a point and zoomed from the web UI, with towns and airports built in | Still a proposal for after M5 (D10); whether the always-on mode is sync mode `always` (D11) is open |
+| D22 | Owner, 2026-10-01 (ADS-B radar proposal, §19.1): adsb.fi is the only source; the radar runs only in sync mode `always` (D11), with no time-boxed sessions and no separate switch; the map is centred on a point and zoomed from the web UI, with towns and airports built in | Still a proposal for after M5 (D10). One always-on Wi-Fi mode serves both the radar and the LAN configurator (§10.4) |
 
 ### 1.3 Out of scope for v1
 
@@ -1049,14 +1049,13 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. An extra feature 
 **Owner's answers** (2026-10-01, D22)
 
 1. **Source:** adsb.fi only; no local receiver.
-2. **When it runs:** only while an always-on Wi-Fi client mode is on, which the user switches on in the settings. No time-boxed radar sessions, so the power estimate above is the price of that mode.
+2. **When it runs:** only in sync mode `always` (D11, §9.3), which the user picks in the settings; not behind a separate switch, and no time-boxed radar sessions. The power estimate above is the price of that mode.
 3. **Map:** set in the web UI, centred on a point (default `location.*`) with a zoom level, and with towns and airports built in.
    - Sources, both public domain, with no attribution required (terms checked 2026-10-01): OurAirports (`ourairports.com/data`; its `airports.csv` is 12.7 MB for every airport, so only the large and medium ones) and Natural Earth's populated places. GeoNames (CC BY) and OpenStreetMap (ODbL, share-alike) would need attribution, so they are left out.
    - Proposed: a build-time `tools/` generator, like `gen_fonts.sh` and `gen_icons.sh`, packs the towns and the large and medium airports of the world into a compact table: about 12 000 entries of about 24 bytes, some 300 KB, which fits the 4 MB app slot beside the 1.3 MB image. The device picks what falls inside the configured map at render time, so it works offline for any centre. The alternative, the page fetching the area's data and uploading it to LittleFS, has more moving parts and depends on CORS.
    - The radar's web settings could show a live preview through `/api/preview.bmp`, as the preset editor does.
-   - Settings this implies: the radar's centre (latitude and longitude) and zoom or range, the always-on switch, and the filters above.
+   - Settings this implies: the radar's centre (latitude and longitude) and zoom or range, and the filters above.
 
-**Still open:** is the always-on client mode sync mode `always` (D11, §9.3; §10.4 already has the configurator on the LAN in that mode), or a separate setting? The plan shouldn't grow two always-on Wi-Fi modes. Ask at M5 planning.
 
 ## 20. Risks and open items
 
@@ -1100,3 +1099,4 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. An extra feature 
 | r18 | 2026-09-30 | D21: learning the battery curve from a full discharge (§8), `POST /api/battery/learn` (§10.3), `battery.learned_mv` (§14.3); the open item on a learned curve is closed (§20) |
 | r19 | 2026-10-01 | ADS-B flight radar proposal, for after M5, with three owner questions (§19, §19.1) |
 | r20 | 2026-10-01 | The owner's answers on the ADS-B radar (D22, §19.1): adsb.fi only, the always-on client mode, a centred and zoomed map with built-in towns and airports; one question left |
+| r21 | 2026-10-01 | The ADS-B radar runs in sync mode `always` (D22); its last question is closed (§19.1) |

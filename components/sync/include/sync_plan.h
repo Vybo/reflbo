@@ -46,6 +46,25 @@ time_t sync_next_scheduled(const sync_schedule_t *s, time_t after);
  * `low_battery`, none in `manual` mode. A retry inside quiet hours moves to their end too. A retry
  * that is already overdue, after a restart, is due at `now`. */
 sync_due_t sync_next_due(const sync_schedule_t *s, const sync_history_t *h, time_t now, bool low_battery);
+typedef enum {
+    SYNC_NEED_NOTHING,  /* the schedule decides */
+    SYNC_NEED_FORECAST, /* no forecast yet: a network was just saved, or the first boot */
+    SYNC_NEED_TIME,     /* the clock is lost (D9) */
+} sync_need_t;
+
+/* sync_next_due() for a device that lacks what a sync brings. SYNC_NEED_TIME: at `now`, or after a
+ * failure at the next retry, 15, 30 then 60 min on and every 60 min after the third, whatever the
+ * schedule, quiet hours or the battery, as a lost clock knows none of them. SYNC_NEED_FORECAST: at
+ * `now`, unless a sync failed since (the retries and the schedule take over) or in `manual` mode. */
+sync_due_t sync_next_due_needing(const sync_schedule_t *s, const sync_history_t *h, time_t now, bool low_battery,
+                                 sync_need_t need);
+
+#define SYNC_RADIO_MAX_MS 45000 /* spec §9.3: the radio is on for at most 45 s a sync */
+#define SYNC_STEP_MIN_MS 1000   /* a step with less left is skipped, as a timeout */
+/* What a sync's step may take (ms): its own limit, or what is left before `deadline_us` (one monotonic
+ * clock for both), whichever is less; 0 with less than SYNC_STEP_MIN_MS left. */
+int sync_budget_ms(int64_t now_us, int64_t deadline_us, int step_max_ms);
+
 /* After a sync ended at `ended`: `due` is what started it ({0, false} for one on demand), `ok` whether
  * every step passed. Success clears the history; a failed retry counts up; any other failure starts
  * the retries over. */

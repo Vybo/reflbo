@@ -358,6 +358,53 @@ static void test_a_time_in_the_repeated_hour_runs_once(void)
     TEST_ASSERT_EQUAL_INT64(utc(2026, 10, 26, 1, 30, 0), sync_next_scheduled(&s, first)); /* not 01:30 UTC today */
 }
 
+static void test_a_lost_clock_syncs_at_once_then_waits_between_tries(void)
+{
+    sync_schedule_t s = at_times(1, k_half_past_five);
+    sync_history_t h = { 0 };
+    time_t t = utc(2000, 1, 1, 0, 0, 0); /* D9: the RTC restarted from its reset value */
+    sync_due_t due = sync_next_due_needing(&s, &h, t, false, SYNC_NEED_TIME);
+    TEST_ASSERT_EQUAL_INT64(t, due.at);
+    static const int k_waits_min[] = { 15, 30, 60, 60, 60 }; /* and every hour after the third */
+    for (int i = 0; i < 5; i++) {
+        sync_history_record(&h, due, false, t);
+        due = sync_next_due_needing(&s, &h, t, true, SYNC_NEED_TIME); /* the battery doesn't stop it */
+        TEST_ASSERT_EQUAL_INT64_MESSAGE(t + k_waits_min[i] * 60, due.at, "a failed try waits");
+        TEST_ASSERT_TRUE(due.retry);
+        t = due.at + 40;
+    }
+    due = sync_next_due_needing(&s, &h, t + 5 * 3600, false, SYNC_NEED_TIME); /* overdue: now */
+    TEST_ASSERT_EQUAL_INT64(t + 5 * 3600, due.at);
+}
+
+static void test_no_forecast_yet_syncs_at_once_unless_a_sync_failed(void)
+{
+    sync_schedule_t s = at_times(1, k_half_past_five);
+    sync_history_t h = { 0 };
+    sync_due_t due = sync_next_due_needing(&s, &h, oct1(18, 40), false, SYNC_NEED_FORECAST); /* a network saved */
+    TEST_ASSERT_EQUAL_INT64(oct1(18, 40), due.at);
+    TEST_ASSERT_FALSE(due.retry);
+    sync_history_record(&h, due, false, oct1(18, 41)); /* then the retries and the schedule, as ever */
+    due = sync_next_due_needing(&s, &h, oct1(18, 41), false, SYNC_NEED_FORECAST);
+    TEST_ASSERT_EQUAL_INT64(oct1(18, 56), due.at);
+    TEST_ASSERT_TRUE(due.retry);
+    sync_schedule_t manual = { .mode = SYNC_MODE_MANUAL };
+    h = (sync_history_t){ 0 };
+    TEST_ASSERT_EQUAL_INT64(0, sync_next_due_needing(&manual, &h, oct1(18, 40), false, SYNC_NEED_FORECAST).at);
+    due = sync_next_due_needing(&s, &h, oct1(18, 40), false, SYNC_NEED_NOTHING);
+    TEST_ASSERT_EQUAL_INT64(oct2(5, 30), due.at);
+}
+
+static void test_a_step_gets_its_limit_or_what_is_left_of_the_sync(void)
+{
+    int64_t deadline = (int64_t)SYNC_RADIO_MAX_MS * 1000; /* the sync started at 0 */
+    TEST_ASSERT_EQUAL_INT(5000, sync_budget_ms(0, deadline, 5000));
+    TEST_ASSERT_EQUAL_INT(5000, sync_budget_ms(deadline - 5000000, deadline, 10000));
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_MIN_MS, sync_budget_ms(deadline - SYNC_STEP_MIN_MS * 1000, deadline, 10000));
+    TEST_ASSERT_EQUAL_INT(0, sync_budget_ms(deadline - 999000, deadline, 10000)); /* skipped */
+    TEST_ASSERT_EQUAL_INT(0, sync_budget_ms(deadline + 1, deadline, 10000));
+}
+
 static void test_interval_slots_on_the_fall_back_day(void)
 {
     sync_schedule_t s = every(60);
@@ -387,6 +434,9 @@ int main(void)
     RUN_TEST(test_low_battery_runs_no_retries);
     RUN_TEST(test_a_retry_inside_quiet_hours_waits_for_their_end);
     RUN_TEST(test_an_overdue_retry_is_due_now);
+    RUN_TEST(test_a_lost_clock_syncs_at_once_then_waits_between_tries);
+    RUN_TEST(test_no_forecast_yet_syncs_at_once_unless_a_sync_failed);
+    RUN_TEST(test_a_step_gets_its_limit_or_what_is_left_of_the_sync);
     RUN_TEST(test_a_failure_after_now_counts_from_now);
     RUN_TEST(test_the_history_records_success_and_failures);
     RUN_TEST(test_the_expected_interval_of_one_daily_time_is_a_day);

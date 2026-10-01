@@ -59,9 +59,10 @@ void netmgr_start(bool keep_ap);
 void netmgr_stop(void); /* Wi-Fi off */
 /* A saved network for a sync or sync mode `always` (spec §9.3), never the AP. Waits for the result:
  * ESP_OK once on a network (at once if already), ESP_ERR_NOT_FOUND with none saved, ESP_FAIL if none
- * joined (Wi-Fi is off again), ESP_ERR_INVALID_STATE while only the AP runs. Not from the app task,
- * which netmgr's callbacks reach. */
-esp_err_t netmgr_join(void);
+ * joined within `timeout_ms` (Wi-Fi is off again; an attempt takes up to 8 s, and none starts that
+ * would end later, but the first always runs), ESP_ERR_INVALID_STATE while only the AP runs, or config
+ * mode's AP while it rejoins. Not from the app task, which netmgr's callbacks reach. */
+esp_err_t netmgr_join(int timeout_ms);
 /* Config mode ended while a sync or `always` keeps the station: the AP goes, the station stays; with
  * no station, Wi-Fi goes off. */
 void netmgr_ap_off(void);

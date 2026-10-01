@@ -8,6 +8,7 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -45,6 +46,7 @@ typedef enum {
 typedef struct {
     uint8_t kind;
     bool keep_ap;
+    int timeout_ms; /* CMD_JOIN */
     char ssid[NETMGR_SSID_MAX + 1];
     char pass[NETMGR_PASS_MAX + 1];
 } cmd_t;
@@ -146,6 +148,7 @@ static esp_err_t save_list(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "saving the networks: %s", esp_err_to_name(err));
     }
+    notify(); /* the app plans its syncs by the saved networks */
     return err;
 }
 
@@ -197,6 +200,18 @@ static void load_ap_password(void)
     nvs_close(nvs);
 }
 
+/* The station's next connect looks for any AP of its network, not only the one it joined. */
+static void forget_bssid(void)
+{
+    static wifi_config_t c;
+    if (esp_wifi_get_config(WIFI_IF_STA, &c) == ESP_OK && c.sta.bssid_set) {
+        c.sta.bssid_set = false;
+        c.sta.channel = 0;
+        esp_wifi_set_config(WIFI_IF_STA, &c);
+    }
+    memset(&c, 0, sizeof(c)); /* the driver keeps its own copy */
+}
+
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -212,6 +227,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
             lock();
             s_status.ip[0] = '\0';
             unlock();
+            forget_bssid(); /* a mesh node, or a new router, may carry the network now */
             esp_wifi_connect();
             notify();
             break;
@@ -451,6 +467,13 @@ static void joined(const char *ssid, bool ap_on)
 }
 
 /* Tries the saved networks in order, each first where it was last found; true once one joined. */
+static int64_t s_join_until_us; /* a sync's join starts no attempt that would end after this; 0: none */
+
+static bool join_time_left(void)
+{
+    return s_join_until_us == 0 || esp_timer_get_time() + (int64_t)JOIN_TIMEOUT_MS * 1000 <= s_join_until_us;
+}
+
 static bool join_saved(bool ap_on)
 {
     static netmgr_list_t list;
@@ -458,11 +481,11 @@ static bool join_saved(bool ap_on)
     list = s_list;
     unlock();
     bool ok = false;
-    for (int i = 0; i < list.count && !ok; i++) {
+    for (int i = 0; i < list.count && !ok && (i == 0 || join_time_left()); i++) {
         const netmgr_net_t *n = &list.nets[i];
         bool cached = n->channel != 0;
         netmgr_test_t r = join(n->ssid, n->pass, cached ? n->bssid : NULL, n->channel);
-        if (r != NETMGR_TEST_OK && cached) {
+        if (r != NETMGR_TEST_OK && cached && join_time_left()) {
             r = join(n->ssid, n->pass, NULL, 0); /* the router may have moved */
         }
         if (r == NETMGR_TEST_OK) {
@@ -516,8 +539,9 @@ static void do_start(bool keep_ap)
     int saved = s_list.count;
     netmgr_state_t state = s_status.state;
     bool ap_on = s_status.ap_on;
+    bool on_ip = s_status.ip[0] != '\0'; /* without one, `always` is rejoining a lost network */
     unlock();
-    if (state == NETMGR_STATION) { /* config mode joins the network a sync or `always` is on */
+    if (state == NETMGR_STATION && on_ip) { /* config mode joins the network a sync or `always` is on */
         if (keep_ap && !ap_on) {
             add_ap();
         }
@@ -587,24 +611,30 @@ static netmgr_test_t do_test(const char *ssid, const char *pass)
 }
 
 /* A saved network for a sync, without the AP: ESP_OK on it, ESP_ERR_NOT_FOUND with none saved,
- * ESP_FAIL if none joined, ESP_ERR_INVALID_STATE while only the AP runs (config mode without a network). */
-static esp_err_t do_join(void)
+ * ESP_FAIL if none joined within `timeout_ms`, ESP_ERR_INVALID_STATE while the AP runs without a
+ * network (config mode). A station without an address is rejoining a lost network: joined again. */
+static esp_err_t do_join(int timeout_ms)
 {
     lock();
     int saved = s_list.count;
     netmgr_state_t state = s_status.state;
+    bool ap_on = s_status.ap_on;
+    bool on_ip = s_status.ip[0] != '\0';
     unlock();
-    if (state == NETMGR_STATION) {
+    if (state == NETMGR_STATION && on_ip) {
         return ESP_OK;
     }
-    if (state == NETMGR_AP || state == NETMGR_JOINING) {
-        return ESP_ERR_INVALID_STATE;
+    if (state == NETMGR_AP || state == NETMGR_JOINING || (state == NETMGR_STATION && ap_on)) {
+        return ESP_ERR_INVALID_STATE; /* config mode's AP stays: it rejoins by itself, or the phone helps */
     }
     if (saved == 0) {
         return ESP_ERR_NOT_FOUND;
     }
     set_state(NETMGR_JOINING, false);
-    if (wifi_up(WIFI_MODE_STA, 1) == ESP_OK && join_saved(false)) {
+    s_join_until_us = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    bool ok = wifi_up(WIFI_MODE_STA, 1) == ESP_OK && join_saved(false);
+    s_join_until_us = 0;
+    if (ok) {
         return ESP_OK;
     }
     wifi_down();
@@ -651,7 +681,7 @@ static void netmgr_task(void *arg)
             set_test(do_test(cmd.ssid, cmd.pass), cmd.ssid);
             break;
         case CMD_JOIN:
-            s_join_result = do_join();
+            s_join_result = do_join(cmd.timeout_ms);
             xSemaphoreGive(s_joined);
             break;
         case CMD_AP_OFF:
@@ -720,11 +750,11 @@ void netmgr_stop(void)
     post(&(cmd_t){ .kind = CMD_STOP });
 }
 
-esp_err_t netmgr_join(void)
+esp_err_t netmgr_join(int timeout_ms)
 {
     xSemaphoreTake(s_join_lock, portMAX_DELAY);
-    post(&(cmd_t){ .kind = CMD_JOIN });
-    xSemaphoreTake(s_joined, portMAX_DELAY); /* join_saved() gives up within 16 s a network */
+    post(&(cmd_t){ .kind = CMD_JOIN, .timeout_ms = timeout_ms });
+    xSemaphoreTake(s_joined, portMAX_DELAY); /* join_saved() ends its last attempt by the limit */
     esp_err_t err = s_join_result;
     xSemaphoreGive(s_join_lock);
     return err;

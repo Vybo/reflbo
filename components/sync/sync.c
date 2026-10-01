@@ -14,6 +14,7 @@
 #include "lwip/sockets.h"
 #include "netmgr.h"
 #include "sync_ntp.h"
+#include "sync_plan.h"
 #include "weather.h"
 #include "weather_http.h"
 
@@ -23,6 +24,7 @@ static const char *TAG = "sync";
 #define TASK_PRIORITY 3  /* below netmgr (4) and the app (5) */
 #define NTP_TIMEOUT_MS 5000 /* spec §9.3 */
 #define HTTP_TIMEOUT_MS 10000
+#define JOIN_MAX_MS 25000 /* three 8 s attempts; the rest of the 45 s is the steps' (spec §9.3) */
 #define BODY_MAX (12 * 1024) /* the largest reply, air quality, is about 4 KB */
 
 static volatile bool s_running;
@@ -30,6 +32,7 @@ static volatile uint8_t s_step = SYNC_STEP_COUNT;
 static sync_request_t s_req;
 static void (*s_done)(const sync_report_t *report);
 static sync_report_t s_report;
+static int64_t s_deadline_us; /* esp_timer: SYNC_RADIO_MAX_MS after the start */
 EXT_RAM_BSS_ATTR static char s_body[BODY_MAX];
 
 static void failed(sync_step_t step, const char *detail)
@@ -81,7 +84,12 @@ static void step_time(void)
 {
     for (int i = 0; i < SETTINGS_NTP_MAX; i++) {
         int64_t true_us, delay, mono;
-        if (s_req.ntp[i][0] != '\0' && ask_ntp(s_req.ntp[i], NTP_TIMEOUT_MS, &true_us, &delay, &mono)) {
+        int budget = sync_budget_ms(esp_timer_get_time(), s_deadline_us, NTP_TIMEOUT_MS);
+        if (budget == 0) {
+            failed(SYNC_STEP_TIME, "timeout");
+            return;
+        }
+        if (s_req.ntp[i][0] != '\0' && ask_ntp(s_req.ntp[i], budget, &true_us, &delay, &mono)) {
             s_report.result[SYNC_STEP_TIME] = SYNC_STEP_OK;
             s_report.ntp_utc_us = true_us;
             s_report.ntp_mono_us = mono;
@@ -97,7 +105,12 @@ static bool fetch(sync_step_t step, const char *url)
 {
     size_t len;
     int status;
-    esp_err_t err = weather_http_get(url, s_body, sizeof(s_body), &len, HTTP_TIMEOUT_MS, &status);
+    int budget = sync_budget_ms(esp_timer_get_time(), s_deadline_us, HTTP_TIMEOUT_MS);
+    if (budget == 0) {
+        failed(step, "timeout"); /* the radio's 45 s are up (spec §9.3) */
+        return false;
+    }
+    esp_err_t err = weather_http_get(url, s_body, sizeof(s_body), &len, budget, &status);
     if (err == ESP_OK) {
         return true;
     }
@@ -143,8 +156,9 @@ static void sync_task(void *arg)
 {
     (void)arg;
     int64_t start = esp_timer_get_time();
+    s_deadline_us = start + (int64_t)SYNC_RADIO_MAX_MS * 1000;
     s_step = SYNC_STEP_WIFI;
-    esp_err_t err = netmgr_join();
+    esp_err_t err = netmgr_join(JOIN_MAX_MS);
     if (err == ESP_OK) {
         s_report.result[SYNC_STEP_WIFI] = SYNC_STEP_OK;
         s_step = SYNC_STEP_TIME; /* the steps are independent (spec §9.3): one failing skips nothing */

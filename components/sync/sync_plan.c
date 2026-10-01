@@ -125,6 +125,33 @@ sync_due_t sync_next_due(const sync_schedule_t *s, const sync_history_t *h, time
     return due;
 }
 
+sync_due_t sync_next_due_needing(const sync_schedule_t *s, const sync_history_t *h, time_t now, bool low_battery,
+                                 sync_need_t need)
+{
+    if (need == SYNC_NEED_TIME) {
+        if (h->failed_at == 0) {
+            return (sync_due_t){ .at = now };
+        }
+        time_t base = h->failed_at < now ? h->failed_at : now; /* a clock moved back counts from now */
+        int step = h->retries < SYNC_RETRY_COUNT ? h->retries : SYNC_RETRY_COUNT - 1;
+        time_t retry = base + (time_t)k_retry_min[step] * 60;
+        return (sync_due_t){ .at = retry < now ? now : retry, .retry = true };
+    }
+    if (need == SYNC_NEED_FORECAST && s->mode != SYNC_MODE_MANUAL && h->failed_at == 0) {
+        return (sync_due_t){ .at = now };
+    }
+    return sync_next_due(s, h, now, low_battery);
+}
+
+int sync_budget_ms(int64_t now_us, int64_t deadline_us, int step_max_ms)
+{
+    int64_t left_ms = (deadline_us - now_us) / 1000;
+    if (left_ms < SYNC_STEP_MIN_MS) {
+        return 0;
+    }
+    return left_ms < step_max_ms ? (int)left_ms : step_max_ms;
+}
+
 void sync_history_record(sync_history_t *h, sync_due_t due, bool ok, time_t ended)
 {
     if (ok) {

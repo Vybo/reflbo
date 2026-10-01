@@ -58,11 +58,17 @@ static void trim_save(void)
     }
 }
 
-esp_err_t timekeeping_trim_start(void)
+/* The kept trim, once a boot: a deep-sleep wake keeps the chip's offset but not this copy. A routine
+ * wake has no NVS yet (gotcha 11), so it tries again next time rather than take the defaults. */
+static void trim_load(void)
 {
+    if (s_trim_up) {
+        return;
+    }
     timekeeping_trim_init(&s_trim);
     nvs_handle_t nvs;
-    if (nvs_open("sys", NVS_READONLY, &nvs) == ESP_OK) {
+    esp_err_t err = nvs_open("sys", NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
         uint8_t rec[TRIM_RECORD_LEN];
         size_t len = sizeof(rec);
         if (nvs_get_blob(nvs, NVS_KEY_TRIM, rec, &len) == ESP_OK && !timekeeping_trim_unpack(&s_trim, rec, len)) {
@@ -70,13 +76,19 @@ esp_err_t timekeeping_trim_start(void)
         }
         nvs_close(nvs);
     }
-    s_trim_up = true;
+    s_trim_up = err != ESP_ERR_NVS_NOT_INITIALIZED;
+}
+
+esp_err_t timekeeping_trim_start(void)
+{
+    trim_load();
     ESP_LOGI(TAG, "RTC trim %d steps", s_trim.offset);
     return pcf85063_set_offset(s_trim.offset); /* the chip loses it with its power (D9) */
 }
 
 const rtc_trim_t *timekeeping_trim(void)
 {
+    trim_load();
     return &s_trim;
 }
 
@@ -89,9 +101,7 @@ static int64_t clock_us(void)
 
 esp_err_t timekeeping_apply_true_time(int64_t true_utc_us, int64_t mono_us, int64_t *moved_ms)
 {
-    if (!s_trim_up) {
-        timekeeping_trim_start();
-    }
+    trim_load();
     int64_t error_ms = 0; /* the RTC against the system clock, while the RTC still keeps its time */
     bool measured = s_valid && pcf85063_error_ms(&error_ms) == ESP_OK;
     int64_t true_now = true_utc_us + (esp_timer_get_time() - mono_us);
@@ -116,7 +126,8 @@ esp_err_t timekeeping_apply_true_time(int64_t true_utc_us, int64_t mono_us, int6
 esp_err_t timekeeping_set_utc(time_t utc)
 {
     ESP_RETURN_ON_ERROR(pcf85063_write(utc), TAG, "RTC write");
-    if (s_trim_up && s_trim.set_at_ms != 0) {
+    trim_load(); /* also after a deep-sleep wake: the measurement must not span this set */
+    if (s_trim.set_at_ms != 0) {
         timekeeping_trim_forget(&s_trim);
         trim_save();
     }

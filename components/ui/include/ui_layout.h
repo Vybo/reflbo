@@ -14,6 +14,8 @@ typedef enum {
     UI_LAYOUT_WEATHER,
     UI_LAYOUT_GRID,
     UI_LAYOUT_FOCUS,
+    UI_LAYOUT_RADAR,   /* M6: the weather radar's map, without slots (spec §5.2) */
+    UI_LAYOUT_FLIGHTS, /* M6: the flight radar's map and panel, without slots */
     UI_LAYOUT_COUNT,
 } ui_layout_id_t;
 

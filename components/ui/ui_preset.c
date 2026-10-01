@@ -40,6 +40,36 @@ void ui_presets_defaults(ui_presets_t *p)
     p->active = 0;
     p->cycle_enabled = false;
     p->cycle_interval_s = 60;
+    ui_presets_offer_builtins(p); /* the radars (M6) */
+}
+
+/* The built-ins added after M5: the two radars (D28), whose layouts have no slots. */
+static const struct {
+    uint8_t bit;
+    const char *id, *name;
+    ui_layout_id_t layout;
+} k_offered[] = {
+    { UI_OFFERED_RAIN, "rain", "Rain radar", UI_LAYOUT_RADAR },
+    { UI_OFFERED_FLIGHTS, "flights", "Flights", UI_LAYOUT_FLIGHTS },
+};
+
+bool ui_presets_offer_builtins(ui_presets_t *p)
+{
+    bool changed = false;
+    for (size_t i = 0; i < sizeof(k_offered) / sizeof(k_offered[0]); i++) {
+        if (p->offered & k_offered[i].bit) {
+            continue;
+        }
+        if (ui_presets_find(p, k_offered[i].id) < 0 && p->count < UI_PRESET_MAX) {
+            ui_preset_t *added = &p->presets[p->count++];
+            *added = make(k_offered[i].id, k_offered[i].name, k_offered[i].layout, true,
+                          (ui_field_id_t[UI_SLOT_MAX]){ UI_FIELD_NONE });
+            added->status_clock = true; /* a map fills the screen: the time goes to the status bar */
+        }
+        p->offered |= k_offered[i].bit;
+        changed = true;
+    }
+    return changed;
 }
 
 int ui_presets_find(const ui_presets_t *p, const char *id)
@@ -52,11 +82,11 @@ int ui_presets_find(const ui_presets_t *p, const char *id)
     return -1;
 }
 
-int ui_presets_next(const ui_presets_t *p)
+int ui_presets_next(const ui_presets_t *p, bool always)
 {
     for (int step = 1; step < p->count; step++) {
         int i = (p->active + step) % p->count;
-        if (p->presets[i].in_cycle) {
+        if (p->presets[i].in_cycle && (always || p->presets[i].layout != UI_LAYOUT_FLIGHTS)) {
             return i;
         }
     }

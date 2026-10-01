@@ -12,6 +12,7 @@
 static const char *const k_policies[] = { [UI_STALE_STALE] = "stale", [UI_STALE_PLACEHOLDER] = "placeholder",
                                           [UI_STALE_HIDE] = "hide" };
 static const char *const k_battery_parts[] = { "percent", "voltage", "days" }; /* UI_STATUS_BAT_* bit order */
+static const char *const k_offered_ids[] = { "rain", "flights" };              /* UI_OFFERED_* bit order */
 
 static bool fail(char *err, size_t size, const char *fmt, ...)
 {
@@ -264,6 +265,17 @@ static bool parse(const cJSON *root, ui_presets_t *out, char *err, size_t size)
     out->cycle_interval_s = (uint16_t)(seconds < UI_CYCLE_MIN_S ? UI_CYCLE_MIN_S
                                        : seconds > UI_CYCLE_MAX_S ? UI_CYCLE_MAX_S
                                                                   : seconds);
+    const cJSON *offered = cJSON_GetObjectItemCaseSensitive(root, "offered");
+    const cJSON *names = cJSON_IsArray(offered) ? offered : NULL;
+    const cJSON *id;
+    cJSON_ArrayForEach(id, names)
+    {
+        for (int i = 0; cJSON_IsString(id) && i < (int)(sizeof(k_offered_ids) / sizeof(k_offered_ids[0])); i++) {
+            if (strcmp(id->valuestring, k_offered_ids[i]) == 0) {
+                out->offered |= (uint8_t)(1u << i); /* unknown names are a later firmware's */
+            }
+        }
+    }
     const cJSON *schedule = cJSON_GetObjectItemCaseSensitive(root, "schedule");
     return schedule == NULL || cJSON_IsNull(schedule) || parse_schedule(schedule, out, err, size);
 }
@@ -346,6 +358,14 @@ size_t ui_presets_to_json(const ui_presets_t *p, char *out, size_t size)
                 cJSON_AddStringToObject(obj, "preset", e->preset < p->count ? p->presets[e->preset].id : "");
             }
             cJSON_AddItemToArray(entries, obj);
+        }
+    }
+    if (p->offered) {
+        cJSON *offered = cJSON_AddArrayToObject(root, "offered");
+        for (int i = 0; i < (int)(sizeof(k_offered_ids) / sizeof(k_offered_ids[0])); i++) {
+            if (p->offered & (1u << i)) {
+                cJSON_AddItemToArray(offered, cJSON_CreateString(k_offered_ids[i]));
+            }
         }
     }
     /* unformatted: the device reads it, and 16 presets must fit UI_PRESETS_JSON_MAX */

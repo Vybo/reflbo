@@ -89,6 +89,14 @@ int ui_schedule_step(const ui_schedule_t *schedule, time_t *checked, time_t now,
  * the entries inside it don't run, and one at the end minute does. */
 time_t ui_schedule_after_night(time_t until);
 
+/* Built-in presets a file from an earlier firmware is offered once (spec §5.4): presets.json's
+ * "offered" names them, so one deleted later stays deleted. */
+enum {
+    UI_OFFERED_RAIN = 1u << 0,    /* "rain": Rain radar (M6) */
+    UI_OFFERED_FLIGHTS = 1u << 1, /* "flights": Flights (M6) */
+};
+#define UI_OFFERED_ALL (UI_OFFERED_RAIN | UI_OFFERED_FLIGHTS)
+
 typedef struct {
     uint8_t count;
     uint8_t active; /* index into presets */
@@ -96,14 +104,19 @@ typedef struct {
     uint16_t cycle_interval_s;
     ui_preset_t presets[UI_PRESET_MAX];
     ui_schedule_t schedule;
+    uint8_t offered; /* UI_OFFERED_* */
 } ui_presets_t;
 
 /* The built-in presets (spec §5.4): used when presets.json is missing or invalid. */
 void ui_presets_defaults(ui_presets_t *p);
 int ui_presets_find(const ui_presets_t *p, const char *id); /* index, or -1 */
 /* The next preset in cycle order after the active one, wrapping; the active one if no other
- * preset is in the cycle (spec §5.4, KEY short). */
-int ui_presets_next(const ui_presets_t *p);
+ * preset is in the cycle (spec §5.4, KEY short). Presets on the Flights layout are in it only in
+ * sync mode `always` (D28). */
+int ui_presets_next(const ui_presets_t *p, bool always);
+/* Offers the built-ins `offered` doesn't name yet: each joins at the end if its id is free and
+ * there is room, and is marked offered either way. True if anything changed: save the file. */
+bool ui_presets_offer_builtins(ui_presets_t *p);
 /* Parses and validates presets.json. On failure returns false with a reason in `err` and leaves
  * *out unspecified. */
 bool ui_presets_from_json(const char *json, ui_presets_t *out, char *err, size_t err_size);

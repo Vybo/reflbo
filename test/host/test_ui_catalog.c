@@ -54,7 +54,11 @@ static void test_layouts_list_their_slots_with_rectangles_sizes_and_kinds(void)
     TEST_ASSERT_EQUAL_INT(400, num(s_root, "width"));
     TEST_ASSERT_EQUAL_INT(300, num(s_root, "height"));
     const cJSON *layouts = cJSON_GetObjectItemCaseSensitive(s_root, "layouts");
-    TEST_ASSERT_EQUAL_INT(4, cJSON_GetArraySize(layouts));
+    TEST_ASSERT_EQUAL_INT(6, cJSON_GetArraySize(layouts));
+    const cJSON *radar = by_id(layouts, "radar"); /* M6: the radars draw their own map, without slots */
+    TEST_ASSERT_NOT_NULL(radar);
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(radar, "slots")));
+    TEST_ASSERT_NOT_NULL(by_id(layouts, "flights"));
     const cJSON *classic = by_id(layouts, "classic");
     TEST_ASSERT_NOT_NULL(classic);
     const cJSON *slots = cJSON_GetObjectItemCaseSensitive(classic, "slots");
@@ -71,6 +75,9 @@ static void test_layouts_list_their_slots_with_rectangles_sizes_and_kinds(void)
     TEST_ASSERT_EQUAL_STRING("number", cJSON_GetArrayItem(kinds, 1)->valuestring);
     const cJSON *hourly = by_id(cJSON_GetObjectItemCaseSensitive(by_id(layouts, "weather"), "slots"), "hourly");
     TEST_ASSERT_EQUAL_STRING("M", str(hourly, "size"));
+    const cJSON *hourly_kinds = cJSON_GetObjectItemCaseSensitive(hourly, "kinds");
+    const cJSON *last = cJSON_GetArrayItem(hourly_kinds, cJSON_GetArraySize(hourly_kinds) - 1);
+    TEST_ASSERT_EQUAL_STRING("rain_map", last->valuestring); /* a medium slot takes the rain map */
 }
 
 /* GET /api/fields: the catalogue with values right now, labels in English (spec §5.8). */

@@ -72,7 +72,7 @@ static bool night_at(const ui_context_t *ctx, time_t t)
     return t < sun.sunrise || t >= sun.sunset;
 }
 
-static void clock_text(const ui_context_t *ctx, time_t t, char *out, size_t size)
+void ui_clock_text(const ui_context_t *ctx, time_t t, char *out, size_t size)
 {
     struct tm local;
     localtime_r(&t, &local);
@@ -94,8 +94,8 @@ static void resolve_sun(const ui_context_t *ctx, ui_value_t *out)
         snprintf(out->text, sizeof(out->text), "%s", lang_str(ctx->lang, out->polar == 1 ? LS_POLAR_DAY : LS_POLAR_NIGHT));
         return;
     }
-    clock_text(ctx, (time_t)sun.sunrise, out->text, sizeof(out->text));
-    clock_text(ctx, (time_t)sun.sunset, out->extra, sizeof(out->extra));
+    ui_clock_text(ctx, (time_t)sun.sunrise, out->text, sizeof(out->text));
+    ui_clock_text(ctx, (time_t)sun.sunset, out->extra, sizeof(out->extra));
     int minutes = (sun.day_length_s + 30) / 60;
     const char *h = lang_str(ctx->lang, LS_HOURS_UNIT), *min = lang_str(ctx->lang, LS_MINUTES_UNIT);
     astro_sun_t before = sun_on(ctx, ctx->local_day - 1); /* D26: the change since yesterday */
@@ -279,7 +279,7 @@ static void resolve_rain(const ui_context_t *ctx, ui_value_t *out)
         snprintf(out->extra, sizeof(out->extra), "%s %s", rate, lang_str(ctx->lang, LS_MM_PER_H));
     } else if (first > 0) {
         char at[12]; /* where its quarter hour starts */
-        clock_text(ctx, (time_t)w->rain.t0 + (time_t)(i0 + first - 1) * DS_RAIN_STEP_S, at, sizeof(at));
+        ui_clock_text(ctx, (time_t)w->rain.t0 + (time_t)(i0 + first - 1) * DS_RAIN_STEP_S, at, sizeof(at));
         snprintf(out->text, sizeof(out->text), "%s %s", lang_str(ctx->lang, LS_RAIN_FROM), at);
     } else {
         snprintf(out->text, sizeof(out->text), "%s", lang_str(ctx->lang, LS_DRY_2H));

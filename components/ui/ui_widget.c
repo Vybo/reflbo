@@ -170,7 +170,7 @@ void ui_split_two_lines(const gfx_font_t *font, const char *text, int max_w, cha
     gfx_text_ellipsize(font, first, max_w, line1, size); /* no space that helps: one cut line */
 }
 
-static void format_age(const lang_t *lang, uint32_t age_s, char *out, size_t size)
+void ui_format_age(const lang_t *lang, uint32_t age_s, char *out, size_t size)
 {
     if (age_s < 3600) {
         snprintf(out, size, "%lu %s", (unsigned long)(age_s / 60), lang_str(lang, LS_MINUTES_UNIT));
@@ -185,7 +185,7 @@ static void format_age(const lang_t *lang, uint32_t age_s, char *out, size_t siz
 static void draw_age(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, const lang_t *lang)
 {
     char age[16];
-    format_age(lang, v->age_s, age, sizeof(age));
+    ui_format_age(lang, v->age_s, age, sizeof(age));
     const gfx_font_t *f = &gfx_font_sans_12;
     int w = gfx_text_width(f, age);
     int x = r.x + r.w - 6 - w;
@@ -414,6 +414,8 @@ void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t
     gfx_set_clip(fb, gfx_rect_intersect(saved, r));
     if (ui_forecast_draw(fb, r, size, &shown)) {
         /* the weather, air quality, pollen and sun widgets (ui_forecast.c) */
+    } else if (ui_radar_widget(fb, r, size, &shown)) {
+        /* rain.map (ui_radar.c) */
     } else if (size == UI_SIZE_S) {
         draw_small(fb, r, &shown);
     } else {

@@ -109,6 +109,8 @@ png_err_t radar_rv_decode_tile(const uint8_t *png, size_t len, const png_mem_t *
 void radar_render(gfx_fb_t *fb, gfx_rect_t area, const map_view_t *v, const radar_frame_t *f);
 /* Any rain inside the view. */
 bool radar_any_rain(const map_view_t *v, const radar_frame_t *f);
+/* The dither: whether screen pixel (x, y) is inked at `level`, as radar_render() draws it. */
+bool radar_inks(radar_level_t level, int x, int y);
 
 /* ---- the frames kept ---- */
 

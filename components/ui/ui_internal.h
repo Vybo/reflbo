@@ -9,6 +9,15 @@
 
 #define UI_BATTERY_LOW_PCT 15 /* spec §8: the status bar marks a low battery */
 
+/* "20:48" or "8:48 PM": a UTC time in local time, as the clock setting shows it (ui_forecast.c). */
+void ui_clock_text(const ui_context_t *ctx, time_t t, char *out, size_t size);
+/* An age as the stale mark shows it: "45 min", "3 h", "2 d" (ui_widget.c). */
+void ui_format_age(const lang_t *lang, uint32_t age_s, char *out, size_t size);
+/* rain.map (ui_radar.c, M6); false for any other field. */
+bool ui_resolve_radar(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);
+/* Its widget in an M or L slot; false for any other kind. */
+bool ui_radar_widget(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v);
+
 /* The weather, air quality, pollen and sun fields (ui_forecast.c, D25); false for any other field. */
 bool ui_resolve_forecast(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);
 /* Their widgets; false for a kind they don't draw. */

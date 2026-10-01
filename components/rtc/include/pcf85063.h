@@ -21,3 +21,13 @@ esp_err_t pcf85063_write(time_t utc);
 /* Arms the alarm for `wake` (a whole minute) and clears a pending alarm flag. */
 esp_err_t pcf85063_set_alarm(time_t wake);
 esp_err_t pcf85063_clear_alarm(void);
+/* Spec §7: sets the RTC to the system clock to the millisecond. STOP holds the prescaler while the
+ * next second is written, and is released so the first tick lands on the system clock's whole second.
+ * Takes up to 1.5 s; `*set_at_ms` (may be NULL) is that second, in UTC ms. */
+esp_err_t pcf85063_write_precise(int64_t *set_at_ms);
+/* How far the RTC is ahead of the system clock, in ms (negative: behind): waits up to 1.1 s for the
+ * RTC's next second and times its start. */
+esp_err_t pcf85063_error_ms(int64_t *error_ms);
+/* The Offset register (spec §7, D25): MODE 0, `steps` -64..63, a positive value slows the clock. */
+esp_err_t pcf85063_set_offset(int steps);
+esp_err_t pcf85063_get_offset(int *steps);

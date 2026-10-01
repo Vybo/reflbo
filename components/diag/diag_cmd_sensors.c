@@ -99,6 +99,14 @@ static int rtc_body(int argc, char **argv)
         format_local(utc, local, sizeof(local));
         printf("rtc: %s (%s), local %s\n", iso, valid ? "valid" : "INVALID: oscillator stopped, set the time",
                local);
+        const rtc_trim_t *trim = timekeeping_trim(); /* spec §7, D25 */
+        int drift10 = timekeeping_trim_drift_s10_per_day(trim);
+        printf("trim %d steps (%+.2f ppm)%s", trim->offset, -trim->offset * TRIM_STEP_PPB / 1000.0,
+               trim->set_at_ms != 0 ? "" : "; not set to the millisecond since the last manual set");
+        if (trim->drift_ppb != TRIM_NO_DRIFT) {
+            printf("; last drift %s%d.%d s a day", drift10 < 0 ? "-" : "+", abs(drift10) / 10, abs(drift10) % 10);
+        }
+        printf("\n");
         return 0;
     }
     if (argc == 3 && strcmp(argv[1], "set") == 0) {

@@ -199,6 +199,8 @@ target_compile_definitions(test_png PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_
 reflbo_host_test(test_map_view map)
 reflbo_host_test(test_map_data map)
 target_compile_definitions(test_map_data PRIVATE MAP_BIN="${REPO_ROOT}/assets/map/map.bin")
+reflbo_host_test(test_map_draw map)
+target_compile_definitions(test_map_draw PRIVATE MAP_BIN="${REPO_ROOT}/assets/map/map.bin")
 reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)

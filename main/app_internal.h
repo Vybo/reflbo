@@ -160,6 +160,18 @@ const ui_radar_t *app_radar_ui(void); /* the radars as a render draws them now *
 uint32_t app_radar_step_s(void);      /* the source's frame step: 300 s for ČHMÚ, 600 for RainViewer */
 void app_radar_status(app_radar_status_t *out);
 
+/* The flight radar (main/app_flights.c, spec §11.3): its task, and the reports it brings. */
+typedef struct {
+    bool on;          /* its task polls */
+    time_t updated;   /* the last good poll (UTC); 0 = none since the view came up */
+    bool failed;      /* the last poll failed */
+    uint8_t aircraft; /* on the map at the last good poll */
+} app_flights_status_t;
+/* Starts or stops the polling: `shown` says the Flights view is on screen; call before each render. */
+void app_flights_tick(bool shown);
+void app_flights_fill(ui_radar_t *ui); /* the last good poll into the view's context */
+void app_flights_status(app_flights_status_t *out);
+
 /* Config mode (main/app_config.c, spec §10.2). */
 esp_err_t app_net_init(void); /* the Wi-Fi manager, started on first use */
 bool app_net_ready(void);     /* it started: netmgr_status() may be called */

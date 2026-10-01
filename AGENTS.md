@@ -196,7 +196,7 @@ The spec has the full design. This section keeps the essentials at hand.
 | Audio | `esp_codec_dev` (ES8311/ES7210) and the Espressif audio decoder |
 | OTA | Two app slots with rollback |
 
-Partition table: spec §14.1. Key `sdkconfig.defaults`: 16 MB QIO flash; octal PSRAM at 80 MHz with `CONFIG_SPIRAM_MEMTEST=n`; console on USB-Serial-JTAG; custom partition table; `CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP`; bootloader and app logs at warning level (the app raises its logs to info once the board stays awake); core dumps without the boot-time check and logs; `tasks` statistics; app rollback; 16 lwIP sockets and 2 KB request headers for the web server (gotcha 25; other gadgets' cookies for 192.168.4.1 come along); large static buffers in PSRAM (`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` with `EXT_RAM_BSS_ATTR`). Automatic light sleep (`CONFIG_PM_ENABLE`) is not used (D14).
+Partition table: spec §14.1. Key `sdkconfig.defaults`: 16 MB QIO flash; octal PSRAM at 80 MHz with `CONFIG_SPIRAM_MEMTEST=n`; console on USB-Serial-JTAG; custom partition table; `CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP`; bootloader and app logs at warning level (the app raises its logs to info once the board stays awake); core dumps without the boot-time check and logs; `tasks` statistics; app rollback; 16 lwIP sockets and 2 KB request headers for the web server (gotcha 25; other gadgets' cookies for 192.168.4.1 come along); large static buffers in PSRAM (`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` with `EXT_RAM_BSS_ATTR`); TLS allocations in PSRAM too (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`), so the flight radar's polls and a sync each hold a connection without exhausting internal RAM. Automatic light sleep (`CONFIG_PM_ENABLE`) is not used (D14).
 
 ### 5.2 Components
 
@@ -224,7 +224,7 @@ components/
   png/           PNG reader for the radar images: palette and RGBA, row by row   [host]
   map/           web-Mercator views; the built-in map (assets/map/map.bin) and its drawing   [host]
   radar/         ČHMÚ's and RainViewer's frames: their decoding, store and drawing [host]; their fetch
-  adsb/          adsb.fi's aircraft on the Flights map, adsb.lol's routes and their cache   [host]
+  adsb/          adsb.fi's aircraft on the Flights map, adsb.lol's routes and their cache [host]; the polling task
   ha_mqtt/       MQTT session, discovery, state, commands, field mappings   (planned)
   sync/          when syncs run and their retries, SNTP packets, the sync task
   audio/         codec control, tone/WAV/stream players, alarm ringing      (planned)

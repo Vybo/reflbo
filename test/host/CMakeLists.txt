@@ -127,6 +127,13 @@ target_include_directories(storage_logic PUBLIC ${REPO_ROOT}/components/storage/
 target_compile_options(storage_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(storage_logic PRIVATE cjson util m)
 
+# weather: the Open-Meteo requests, replies, bands and levels build on the host; the fetch does not.
+add_library(weather_logic STATIC ${REPO_ROOT}/components/weather/weather_url.c
+            ${REPO_ROOT}/components/weather/weather_parse.c ${REPO_ROOT}/components/weather/weather_levels.c)
+target_include_directories(weather_logic PUBLIC ${REPO_ROOT}/components/weather/include)
+target_compile_options(weather_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(weather_logic PUBLIC datastore PRIVATE cjson util m)
+
 # ui: pure C on top of gfx, locale, the datastore and the scheduler's local-time rules.
 file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)
 add_library(ui STATIC ${UI_SOURCES})
@@ -175,6 +182,8 @@ reflbo_host_test(test_lang locale)
 reflbo_host_test(test_lang_glyphs locale gfx)
 reflbo_host_test(test_datastore datastore)
 reflbo_host_test(test_datastore_weather datastore)
+reflbo_host_test(test_weather weather_logic)
+target_compile_definitions(test_weather PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/open-meteo")
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
 reflbo_host_test(test_ui_schedule ui)

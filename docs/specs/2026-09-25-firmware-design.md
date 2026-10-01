@@ -63,6 +63,8 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D24 | Owner, 2026-10-01: the radars come sooner. Sync mode `always` moves from the MQTT milestone into M5, the radars follow as M6, and MQTT and Home Assistant become M7 | Nothing in the radars needs MQTT; `always` belongs with the sync framework anyway |
 | D25 | Owner, 2026-10-01 (M5 planning): M5 also brings quiet hours (§9.3), air quality and pollen from Open-Meteo (§5.1, §11) and the RTC trim against NTP (§7); a static IP stays deferred; M5 runs as one plan; review minors are fixed where M5 touches their code | The RTC loses about 3.4 s a day (`AGENTS.md` gotcha 7); one trim step is 4.34 ppm, 0.37 s a day |
 | D26 | Owner, 2026-10-01 (M5 spike review): the weather icons come from the Weather Icons font (SIL OFL 1.1) beside Material Icons (§4.5); the sun widget shows the day length's change since yesterday, M3's deferred proposal (§5.1); a UV index field joins the air quality (§5.1, §11); pollen stays as built: a top field and one per type | The day-length change needed `astro`; the UV index comes in the same request |
+| D27 | Owner, 2026-10-01 (M6 planning): M6 runs as one plan, written straight from the spec without a spike; review minors are fixed where M6 touches their code; three extras join the radars: rain in the next 2 hours (§11.4), a loop of the last hour's radar frames (§11.2), and the nearest aircraft's route from adsb.lol (§11.3) | The radars are about the size of M3a and M3b together (§19) |
+| D28 | Owner, 2026-10-01 (M6 design): the flight radar is a built-in preset that the cycle visits only in sync mode `always` (§5.4); each radar has its own centre and zoom (§11.1); BOOT short on the radar layout plays the last hour, 12 frames (§5.6, §11.2); the map draws borders, towns and airports (§11.1); no microSD in M6, as its working set fits PSRAM and LittleFS, while radar and flight history over days, a detailed map pack and an aircraft registration database join M9's candidates (§19) | A frame's grid is 78 KB of PSRAM; 12 frames take about 1 MB of the 8 MB |
 
 ### 1.3 Out of scope for v1
 
@@ -288,9 +290,11 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 | `aq.uv` | level: the UV index, rounded, and its WHO band (D26) | Air quality data, the hour now | Same |
 | `pollen.top` | pollen: the type with the highest level today, and that level | Air quality data, today's peaks | Same; missing where CAMS has no pollen (outside Europe); "None" when nothing is in the air |
 | `pollen.alder`, `pollen.birch`, `pollen.grass`, `pollen.mugwort`, `pollen.olive`, `pollen.ragweed` | pollen: today's peak in grains/m³, and its level | Same | Same |
+| `wx.rain2h` | series: 8 × 15 min from now (precipitation, its probability) | forecast, Open-Meteo's `minutely_15` (§11.4) | As `wx.now`; missing past the 24 h stored |
+| `rain.map` | rain map: the weather radar's latest frame around its centre | the weather radar (§11.2) | Its frame time always shows; after 30 min the time shows inverted with its age |
 | `mqtt.<key>` | number or text, with unit and label | MQTT mapping (§12.5) | Configured TTL; default twice the expected sync interval (§9.3) |
 
-`env.temp` and `env.hum` carry a trend: the change over the last hour. Widgets show ↑ or ↓ when it exceeds 0.5 °C or 3 %. The extra fields (from `env.dew` to `date.holiday`) are the accepted M3 proposals (D15); the air quality and pollen fields are an accepted M5 proposal (D25).
+`env.temp` and `env.hum` carry a trend: the change over the last hour. Widgets show ↑ or ↓ when it exceeds 0.5 °C or 3 %. The extra fields (from `env.dew` to `date.holiday`) are the accepted M3 proposals (D15); the air quality and pollen fields are an accepted M5 proposal (D25); `wx.rain2h` and `rain.map` come with M6 (D23, D27).
 
 `wx.now` uses the `current` block while it is at most 60 minutes old. After that it uses the hourly forecast entry for the current local hour. This keeps "now" meaningful between syncs, even with a once-a-day schedule. `aq.*` take the hourly entry for the current hour in the same way. Pollen forecasts are read by the day, so `pollen.*` show today's peak.
 
@@ -314,6 +318,8 @@ Every layout has a status bar (top 20 px):
 | Weather | `now` L, `today` M, `hourly` M (series strip), `s1`–`s2` S |
 | Grid | `g1`–`g6` M, in 3×2 |
 | Focus | `main` XL, `s1`–`s2` M |
+| Radar (M6) | the weather radar map, full width under the status bar (400×280), with the frame's time and source and a legend (§11.2) |
+| Flights (M6) | the flight radar map (400×240) over a 40 px panel for the nearest aircraft (§11.3) |
 
 - Slot rectangles are fixed per layout and defined in code (`components/ui/ui_layout.c`). The owner approved them from the M3a host renders on 2026-09-28.
 - Each slot declares which field kinds it accepts. The preset editor offers only compatible fields.
@@ -355,7 +361,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 }
 ```
 
-- **Built-in defaults.** Home (Classic), Indoor (Grid, with the status clock), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. The built-in Weather preset joins the cycle from M5, which brings its data; a `presets.json` saved earlier keeps its own choice. There can be at most 16 presets.
+- **Built-in defaults.** Home (Classic), Indoor (Grid, with the status clock), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. The built-in Weather preset joins the cycle from M5, which brings its data; a `presets.json` saved earlier keeps its own choice. M6 adds Rain radar (the Radar layout, in the cycle) and Flights (the Flights layout, D28): the cycle visits Flights only in sync mode `always`, and outside it a preset on that layout says "Flights need sync mode Always on". A `presets.json` saved before M6 gains both once, at the first boot that knows them, if there is room; the file then carries a marker, so a preset deleted later stays deleted. There can be at most 16 presets.
 - **Options.** `clock_24h` overrides the time setting when present. `status_clock` and `status_battery` shape the status bar (§5.2).
 - **Validation.** A file with a structural error is rejected as a whole, and the error names it. Structural errors:
   - not JSON, or another schema;
@@ -417,6 +423,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 | Context | KEY short | KEY double | KEY long | BOOT short | BOOT long |
 |---|---|---|---|---|---|
 | Dashboard | Next preset | Auto-cycle on/off | Open menu | Refresh sensors | Config mode (3 s) |
+| Radar layout (M6) | Next preset | Auto-cycle on/off | Open menu | Play the last hour in sync mode `always`; otherwise refresh sensors (§11.2) | Config mode (3 s) |
 | Menu: browsing | Next item | — | Select / enter | Back | Exit menu |
 | Menu: editing a value | + | — | Confirm | − | Cancel |
 | First run | Dashboard | — | Open menu | — | Config mode (3 s) |
@@ -489,6 +496,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - the trends: the change since the newest reading that is 60–90 min old, from a 16-point history spaced at least 5 min apart.
 - **Weather storage.** Kept compact: 72 hourly entries (int16 temperature ×10, uint8 code, uint8 precipitation %) and 3 daily entries.
 - **Air quality storage** (D25): 72 hourly entries (uint8 index, PM2.5 and PM10 in whole µg/m³, the UV index in tenths, each capped at 254), and each pollen type's peak for 3 days (uint16, 0.1 grains/m³). Weather and air quality together add about 700 bytes to the snapshot.
+- **Rain in the next 2 h** (M6, D27): 96 entries of 15 min (uint8 precipitation in 0.1 mm, capped at 25.4 mm, and uint8 probability %), 24 h from the forecast's fetch: 192 bytes, which keeps the snapshot under its 4 KB. The radar's frames are kept outside the datastore (§11.2).
 - **API.** Setters and getters, a freshness check (missing, fresh, stale) and a change mask. The app task owns the datastore (`AGENTS.md` §5.3). Other tasks reach it through events, and console commands through the app's executor, so it needs no mutex.
 - **Snapshot.** The datastore is plain data inside the app's RTC-RAM snapshot (magic, version, CRC32, at most 4 KB in total), sealed before every deep sleep. From M5 the forecast and the air quality are also written to `/fs/state/datastore.bin` after every sync that brought one (magic, version, CRC32), so they survive a power-off and come back at the next cold boot, marked as stale by their age.
   - As built (M5): the snapshot is 3392 bytes (version 6), with the syncs' state (§9.3) beside the datastore.
@@ -629,6 +637,7 @@ The sync schedule (`settings.sync`) is fully configurable from the menu and the 
   - A sync on demand still runs, and so does the sync at boot that fetches a lost time, as the hour isn't known then.
   - The span may cross midnight; a span of no minutes counts as off. The web UI says when a sync time falls inside it.
 - **In config mode** a sync that comes due runs over config mode's station, if it has one, and leaves Wi-Fi on; on the AP alone it waits until config mode ends. Leaving config mode in `always` mode keeps Wi-Fi and the web UI on.
+- **Radar refresh and flights** (M6): in `always` mode a radar-only refresh comes every 5 min (RainViewer: 10), without SNTP or the forecast and outside the sync's history and retries; the flight radar polls adsb.fi from its own task while its view is on screen (§11.3).
 - **In `always` mode** the board stays awake, as neither sleep keeps Wi-Fi (D14), and netmgr keeps rejoining a network it lost. The web UI is reachable on the LAN (§10.4). A critical battery turns Wi-Fi off, as it ends config mode (§8).
 - **Results.** Each step's result and the sync's time are kept until the next sync, also through deep sleep. Info ▸ Last sync result shows the time and the first step that failed; the web UI's Sync page shows every step.
 - **Power** (measured at M5, §9.4): a sync wakes the radio for some seconds at about 100 mA; `always` keeps the chip awake with Wi-Fi in modem sleep, tens of mA.
@@ -639,13 +648,14 @@ Sequence. The steps are independent and each has a timeout. The radio may be on 
 2. **SNTP.** 5 s. Sets the RTC to the millisecond and trims it (§7).
 3. **Weather.** 10 s.
 4. **Air quality** (D25). 10 s.
-5. **MQTT** (M7). 15 s.
+5. **Radar** (M6, §11.2). 10 s: one ČHMÚ frame, or RainViewer's index and the view's tiles.
+6. **MQTT** (M7). 15 s.
    1. Connect with a persistent session.
    2. Subscribe to field and command topics.
    3. Collect retained and queued messages until 1 s passes with none, or until every mapped topic has arrived.
    4. Publish state, plus discovery if the config or firmware changed.
    5. Disconnect.
-6. **Finish.** Wi-Fi off, unless config mode or `always` mode keeps it. Persist the datastore snapshot. Record each step's result (shown in Info and the web UI).
+7. **Finish.** Wi-Fi off, unless config mode or `always` mode keeps it. Persist the datastore snapshot. Record each step's result (shown in Info and the web UI).
 
 A sync fails when any step fails. On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync. At low battery there are no retries.
 
@@ -669,7 +679,7 @@ As built (M5):
   - M2: deep sleep vs light sleep while idle.
   - M5: energy per sync, and sync mode `always`.
   - Config mode.
-  - M6: a radar frame per sync.
+  - M6: a radar frame per sync, and the flight radar in sync mode `always`.
   - M8: radio.
 - Record results in `docs/power.md` with the date, commit, settings and meter model. Many USB meters are inaccurate below 1 mA, so long accumulation windows matter.
 
@@ -723,6 +733,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Presets: the preview names each slot at its corner as the slot fields call it; a new preset joins the cycle; "Undo changes" asks first, as the save bar can float over other buttons (D20).
   - Sync (M5): the mode with its shortcuts, the times or the interval, the quiet hours (D25), "Sync now" with its progress, the last sync's steps, the next sync, and the RTC's trim and drift (§7).
   - Location & time (M5): a place search through `/api/geocode`, which fills in the name, latitude and longitude.
+  - Radar (M6): a card for each radar: its centre (the location, the place search or coordinates) and zoom or range, the flight radar's filters, a live preview through `/api/preview.bmp`, and the credits (§11.2, §11.3). The flight radar's card says it runs only in sync mode Always on.
 - **API.** JSON. Mutating requests must send `Content-Type: application/json`, those without a body too.
   - The server reads each body once, before any route and any login: at most 16 KB (413), nested at most 18 levels, a backup bundle's depth (400).
   - A client that sends nothing for 15 s gets 408, and the connection closes, so one phone that vanishes mid-request can't stop the server.
@@ -730,7 +741,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 | Method and path | Purpose |
 |---|---|
 | `GET /api/auth` · `POST /api/auth/setup` · `POST /api/auth/login` · `POST /api/auth/logout` · `POST /api/auth/password` | The web password (§10.4): whether one is set and the session is valid; choosing it (over the AP only); logging in and out; changing it. The only routes open without a session |
-| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; from M5 `sync` (mode, running, the last one's time and steps, the next one and whether it is a retry, when the forecast and the air quality came) and `time.rtc` (the trim's steps, and the last drift once measured) |
+| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; from M5 `sync` (mode, running, the last one's time and steps, the next one and whether it is a retry, when the forecast and the air quality came) and `time.rtc` (the trim's steps, and the last drift once measured); from M6 `radar` (the weather radar's source, frame time, frames kept and last error; the flight radar's aircraft count and poll time) |
 | `GET/PATCH /api/settings` | Non-secret settings; secrets are accepted on write and never returned |
 | `GET /api/wifi/scan` · `GET/POST/DELETE /api/wifi/networks` | Wi-Fi setup. A POST starts a test and answers 202 at once; GET reports its result with the saved names, never their passwords. `"test": false` saves without trying |
 | `GET /api/layouts` · `GET /api/fields` | Slot definitions; the field catalogue with current values |
@@ -802,6 +813,45 @@ GET https://air-quality-api.open-meteo.com/v1/air-quality?latitude=<lat>&longitu
 - The bands and levels are in §5.1; Open-Meteo's terms are the same as for the forecast (§20).
 
 - **Astro.** Sunrise, sunset and day length use the NOAA solar algorithm at the configured location. They work offline. Host tests compare them with the sunrise/sunset values in the Open-Meteo fixtures (±2 min). On a polar day or night the field shows that instead of times.
+
+### 11.1 Map (M6)
+
+- **Projection.** Web Mercator (EPSG:3857), the projection of both radar sources. A view is a centre and a zoom: at zoom z one ground pixel is 156 543 m × cos(latitude) ÷ 2^z, about 1.1 km at Brno at zoom 6.5. Each radar has its own view (D28): `radar.weather` and `radar.flights` (§14.3), whose centres default to `location.*`.
+- **Data, built in** (`map`, host-tested). `tools/gen_map.py` packs them at build time, as `gen_fonts.sh` and `gen_icons.sh` do (§4.4, §4.5):
+  - country borders from Natural Earth's 1:10 m boundary lines, simplified to about 200 m, delta-coded in a coarse grid of cells;
+  - towns from Natural Earth's populated places, with name and population rank;
+  - large and medium airports from OurAirports, with their IATA and ICAO codes.
+
+  Both sources are public domain, so no credit is due. The whole world takes about 0.5–1 MB of the app image (to be measured, §20), and any centre works offline.
+- **Drawing.** Borders as 1 px lines, clipped to the view; towns as dots with labels, the larger first and thinned by zoom; on the flight radar, airports as a short runway bar with the IATA code; home as ⊙. Labels keep clear of each other and of home, a label with no room is left out, and every label has a 1 px white halo, so it stays legible over rain.
+
+### 11.2 Weather radar (M6)
+
+- **Source** (D23): ČHMÚ when the view's centre lies inside its data area, otherwise RainViewer. Parts of a view outside ČHMÚ's coverage show its edge, not rain.
+  - **ČHMÚ** (CC BY 4.0, credited "Data: ČHMÚ, opendata.chmi.cz, CC BY 4.0"; checked 2026-10-01): `https://opendata.chmi.cz/meteorology/weather/radar/composite/maxz/png/pacz2gmaps3.z_max3d.YYYYMMDD.hhmm.0.png` (UTC), a 680×460 8-bit palette PNG every 5 min, about 3 KB on a dry day and tens of KB in rain, kept for a week. The image spans 11.267–20.770 E and 48.047–52.167 N; its data end at 19.624 E and 51.458 N, and the title and colour scale beyond are masked (ČHMÚ's documentation as MeteoPlaneRadar, MIT, reads it; checked on the board against ČHMÚ's own viewer). The file name comes from the clock, so the sync's time step comes first: the newest 5-min step at least 5 min old, then up to two steps back on a 404. The directory's index is 327 KB, too much to read.
+  - **RainViewer** (free for personal and educational use, with a link to rainviewer.com; checked 2026-10-01): `https://api.rainviewer.com/public/weather-maps.json` (about 2 KB) names the last 2 h of frames at 10-min steps; a frame's tiles are `{host}{path}/256/{z}/{x}/{y}/2/1_1.png`, RGBA, at zoom 7 at most (a higher zoom answers a placeholder), so a closer view enlarges them. 100 requests a minute per IP. A view's tiles come over one kept-alive connection.
+- **Decoding** (`png`, host-tested): a reader for 8-bit palette and RGBA PNGs, non-interlaced, row by row, inflating with the ROM's `tinfl` on the device (ESP32-S3 ROM, `esp_rom/include/miniz.h`) and with miniz's `tinfl.c` (MIT) on the host. It refuses a truncated file, a bad CRC, interlacing, other bit depths, more than 1024×1024 pixels, and more than 256 KB.
+- **Levels.** Each pixel becomes none, light (from about 20 dBZ), moderate (35) or heavy (45): ČHMÚ's palette through its colour scale (`scl/scl-dbz-mmh.png`), RainViewer's colours through its scheme. The levels are kept as a 2-bit grid in the source's own pixels (78 KB for ČHMÚ) in PSRAM, and every render reprojects the grid into its view: the frame is decoded once and drawn many times.
+- **Dithering.** Light is a sparse dot pattern, moderate a checkerboard, heavy solid; the map and its labels go on top.
+- **Frames.** The latest frame's PNG is kept in `/fs/state/radar.png`, so a power-off or a deep sleep keeps it. In sync mode `always` the last 12 frames (1 h, D28) stay in PSRAM for the loop; when `always` begins, the past hour comes in one go, 12 small files from ČHMÚ (RainViewer: 6).
+- **When frames come** (§9.3): a radar step in each sync, after air quality; in sync mode `always`, a radar-only refresh every 5 min (RainViewer: 10). It never turns Wi-Fi on by itself (D23).
+- **Where it shows** (D23): the Radar layout and the `rain.map` slot widget (§5.1, §5.2).
+  - The layout: the map with the rain; the frame's time and source at the bottom left, inverted with its age once older than 30 min ("21:05 · 3 h ago"); a legend of the three levels at the bottom right; "No radar frame yet" before the first.
+  - The widget, in M and L slots: the same, cropped to the slot around the weather view's centre at its zoom, with the frame's time.
+- **The loop** (D27, D28): BOOT short on the Radar layout switches the panel to HPM and plays the kept frames, oldest first, at about 3 a second with each frame's time and a row of progress dots, then stops on the newest and returns to LPM. Missing frames are skipped; KEY short still switches the preset and ends it. Outside sync mode `always` there is one frame, and BOOT short refreshes the sensors as elsewhere.
+
+### 11.3 Flight radar (M6)
+
+- **Source** (D22): adsb.fi's open data, `https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}`, readsb JSON (`ac[]`: `hex`, `flight`, `lat`, `lon`, `alt_baro`, `gs`, `track`, `t`); for non-commercial use, at most 1 request a second, credited with a link to adsb.fi (checked 2026-10-01).
+- **When it runs** (D22): only in sync mode `always`, while Wi-Fi is up and the Flights view is on screen, and not in quiet hours or a night. Its own task polls every 5 s up to 25 km of range, 10 s up to 50 km and 15 s beyond, doubling the interval after a failure up to 60 s, over one kept-alive connection with a `reflbo/<version>` User-Agent.
+- **Bounded** (`adsb`, host-tested): a reply over 128 KB is refused, and its depth is checked first (`AGENTS.md` gotcha 30). At most `radar.flights.max` aircraft are kept (100 at most), the nearest first, from `min_alt_ft` up, and without those on the ground unless `ground` is set.
+- **Routes** (D27): when the nearest aircraft changes, one lookup at adsb.lol, `https://api.adsb.lol/api/0/route/{callsign}/{lat}/{lon}` (origin and destination with their codes and names; checked 2026-10-01), kept for 24 h in a 64-entry cache. A failed lookup counts as unknown for 1 h; a 403 or 429 backs off. adsb.lol is credited beside adsb.fi.
+- **The view** (§5.2): the map at the flight radar's centre and range, with rings at half the range and at the range; aircraft as 12 px arrows in 16 headings, labelled with the callsign and the flight level ("FL338", or feet below 10 000 ft), the nearest first and none overlapping; a panel for the nearest aircraft with its callsign, type, altitude, speed in km/h, distance and direction, its route once known, and the adsb.fi credit. "No aircraft within 50 km" when there are none, "No aircraft data (HH:MM)" after a failure.
+
+### 11.4 Rain in the next 2 hours (M6, D27)
+
+- The forecast request also asks for `&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=96`: 24 h of 15-minute values (checked 2026-10-01), as a daily sync's next 2 h are long past by evening.
+- `wx.rain2h` (§5.1) shows the 2 h from now as 8 bars, and a line: "Dry for 2 h", "Rain from 21:45" or "Rain now · 1.2 mm/h". It is missing past the 24 h stored.
 
 ## 12. MQTT and Home Assistant
 
@@ -940,6 +990,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 /cfg/alarms.json        §13.2 (M8)
 /cfg/stations.json      §13.3 (M8)
 /state/datastore.bin    last datastore snapshot (written after each sync)
+/state/radar.png        the latest weather radar frame, as fetched (M6)
 /sounds/                user sound files (M8)
 ```
 
@@ -965,6 +1016,9 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
   "sensors": { "interval_min": 5, "temp_offset_c": 0.0, "hum_offset_pct": 0.0 },
   "display": { "contrast": "default", "update_min": 1, "lpm_hz": 1 },
   "battery": { "level_from": "curve", "empty_v": 3.27, "full_v": 4.2 },
+  "radar": { "weather": { "lat": 49.1951, "lon": 16.6068, "zoom": 6.5 },
+             "flights": { "lat": 49.1951, "lon": 16.6068, "range_km": 50, "min_alt_ft": 0,
+                          "ground": false, "max": 100 } },
   "mqtt": { "enabled": false, "host": "", "port": 1883, "user": "",
             "discovery_prefix": "homeassistant", "discovery": true }
 }
@@ -972,7 +1026,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 Once a discharge is learned, `battery` also holds `learned_mv` (21 voltages, 0 % to 100 %) and `learned_at` (UTC seconds), and `level_from` can be `learned` (D21).
 
-M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). M5 adds `time.ntp` (1–2 host names) and `sync.*`: `times` keeps 1–8 valid `HH:MM` times, sorted and without repeats, falling back to `["05:30"]`; `interval_min` is clamped to 15–1440. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
+M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). M5 adds `time.ntp` (1–2 host names) and `sync.*`: `times` keeps 1–8 valid `HH:MM` times, sorted and without repeats, falling back to `["05:30"]`; `interval_min` is clamped to 15–1440. M6 adds `radar.*` (§11.1–§11.3): each centre defaults to `location.*`; `weather.zoom` is clamped to 4–9 in steps of 0.25; `flights.range_km` to 10–100 (from the centre to the map's top edge), `max` to 1–100, `min_alt_ft` to 0–60000. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
 
 ### 14.4 Backup, restore, factory reset
 
@@ -1002,6 +1056,7 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 | `night <minutes>` | Night sleep now (§9.1), for measuring; the console drops until it ends |
 | `wifi status` · `wifi scan` | Wi-Fi: the state, network, address, AP clients and saved names; the networks in sight while Wi-Fi is on (config mode) |
 | `sync now` · `sync status` | Run a sync; the running or last sync's steps and the next one (M5). `rtc get` also prints the trim and the last drift (§7) |
+| `radar status` · `radar loop` | The weather radar's source, frame time, frames kept and last error, and the flight radar's state (M6); the loop as BOOT short plays it |
 | `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging: sleeps, wake causes, and per-cycle awake and slept times; `sleep test` forces sleep cycles while tethered |
 | `audio tone <Hz> <ms>` | Audio check (M8) |
 
@@ -1050,6 +1105,7 @@ pyserial comes from the ESP-IDF Python environment. The generators run through `
   - Weather and air quality parsers: against fixtures.
   - Sync planning: the next sync in each mode, the quiet hours, the retries, the expected interval, the syncs the device needs (a lost clock, a first forecast, `always` mode's Wi-Fi) and each step's share of the 45 s; the RTC trim's arithmetic and the Offset register's codec; SNTP packets and their refusals.
   - The forecast fields and widgets: the words, rounding and units, a two-digit high and low that must show whole, and the goldens of each new widget.
+  - M6: the PNG reader against real ČHMÚ frames and a RainViewer tile, and its refusals; the map's projection round trips through known points, clipping and label placement; `tools/gen_map.py` against small fixtures; ČHMÚ's file names from the time, its palette's levels, a known pixel landing on its place in a view, the coverage test; RainViewer's index and tile choice; the adsb.fi parser against a real reply, its caps, filters, distance and bearing; the route parser and cache; the 15-minute rain and its window; `radar.*` in the settings; the preset migration; goldens of the Radar layout (rain, stale, a loop frame), the rain map in M and L slots, the rain strip, and the Flights view (aircraft and a route, none, outside sync mode `always`).
   - Preset and settings JSON: validation and migrations.
   - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
   - MQTT payload builders: golden JSON.
@@ -1077,7 +1133,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M3 | Two plans. **M3a:** `storage` (LittleFS config files), `datastore` with the extra fields, `locale` (en), fonts and icons, 4 layouts, widgets, status bar, presets JSON and defaults, cycling. **M3b:** menu v1, special screens, settings, schedule and night sleep, the LPM rate setting, the `cs` pack | Owner reviews golden renders (2); presets switch with KEY/`btn` and survive a reboot (3); owner measures night sleep (4); owner reviews the Czech renders (2) |
 | M4 | `netmgr` (STA/AP, captive portal, mDNS), config screen with QR, `webui` and REST API, preset editor with preview, set time from phone, OTA with rollback | Owner sets up Wi-Fi from a phone in AP mode (4); the preview matches a device screenshot (3); OTA upload and rollback work (3) |
 | M5 | One plan (D25): SNTP → RTC with the trim (D25), `weather` with air quality and pollen (D25), `astro`, `sync` with the configurable schedule, quiet hours (D25) and backoff, sync mode `always` with the web UI on the LAN (D24), the weather and air quality widgets, the status bar's sync and Wi-Fi state, the Sync page and the place search, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); the owner reviews the new widgets' goldens (2); the RTC trim brings the drift under 1 s a day (3); sync energy, `always`'s cost and the daily average are measured and `docs/power.md` is updated (4) |
-| M6 | Radar views (D22, D23, D24; §19.1, §19.2): one web-Mercator map renderer (centre and zoom from the web UI, built-in borders, towns and airports); the weather radar (ČHMÚ, RainViewer outside its coverage; a full-screen layout and a slot widget; a frame at each sync, every 5 min in sync mode `always`); the ADS-B flight radar (adsb.fi; its own view; sync mode `always` only) | Goldens of both radars (2); a ČHMÚ frame renders after a sync (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
+| M6 | One plan (D27): the radar views (D22, D23, D24, D28; §11.1–§11.4): `png`, the web-Mercator `map` with built-in borders, towns and airports; the weather radar (ČHMÚ, RainViewer outside its coverage) as the Radar layout and the `rain.map` widget, with a frame each sync, every 5 min in sync mode `always`, and the last hour's loop; the flight radar (adsb.fi, sync mode `always` only) as the Flights preset, with the nearest aircraft's route (adsb.lol); rain in the next 2 hours; the Radar page | Goldens of both radars and the new widgets (2); a ČHMÚ frame renders after a sync (3); the loop plays in sync mode `always` (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
 | M7 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
 | M8 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
 | M9 | microSD features agreed at the start of M9 | Per the agreed list |
@@ -1091,13 +1147,15 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
 | M4 | Accepted (D18): a web UI password, instead of the admin PIN. Accepted (D19): config mode after a web restart, the clock set from the phone when lost, changing the password and logging out, a Device page. Still deferred: web UI translations |
 | M5 | Accepted (D25): quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration. Still deferred: static IP |
-| M6 | Accepted (D22, D23, D24): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b |
+| M6 | Accepted (D22, D23, D24): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b. Designed in §11.1–§11.4 (D27, D28), with three extras: rain in the next 2 hours, the last hour's loop, the nearest aircraft's route |
 | M7 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
 | M8 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
-| M9 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots |
+| M9 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots; from M6 (D28): radar and flight history over days, a detailed map pack, an aircraft registration database |
 | Later | IDS JMK departures; a remote 1-bit image slot; the VBUS-sense hardware mod; external I²C sensors on the header; BLE or ESP-NOW sources |
 
 ### 19.1 ADS-B flight radar (M6)
+
+Designed in §11.1 and §11.3 (r28); the findings and answers below are its background.
 
 Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. Accepted for M6 with the weather radar (D23, D24); the owner answered the design questions the same day (D22, below). The milestone's plan settles the details.
 
@@ -1134,6 +1192,8 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. Accepted for M6 w
 
 
 ### 19.2 Weather radar (M6)
+
+Designed in §11.1 and §11.2 (r28); the findings and answers below are its background.
 
 Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one too. Accepted for M6 (D23, D24, below).
 
@@ -1175,6 +1235,11 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | The board's spot gets the home network at −87 to −88 dBm (M5): syncs of up to 27 s, and a step that times out now and then | The 45 s and the retries bound it; moving the board or the router helps |
 | The RTC trim measures only across syncs at least 20 h apart (M5 review) | The default schedule trims; `interval`, `always` and several daily times keep the RTC untrimmed, which matters once syncs stop. Owner decision: a measurement that adds up each set's error instead (a §7 change) |
 | The deep-sleep idle strategy's syncs (a routine wake has no NVS) are fixed but unchecked on the board, which never deep-sleeps while tethered | Check with the power measurements on battery (§9.4) |
+| The ČHMÚ image's bounds come from MeteoPlaneRadar's reading of ČHMÚ's documentation (§11.2) | Constants, checked on the board with a rainy frame against ČHMÚ's own viewer |
+| RainViewer's free use is personal and educational, 100 requests a minute per IP and zoom 7 at most, and its terms changed in 2026-01 | Used only outside ČHMÚ's coverage; a refusal shows "No radar here" |
+| adsb.fi's open data are for non-commercial use, at most 1 request a second, with credit; adsb.lol's rate limits move and may need an API key later | Caps, back-off and credits; routes are optional, and the flight radar works without them |
+| The map's data (0.5–1 MB) bring the image to about 2.5 of the app slot's 4 MB | The generator thins the data; OTA still fits |
+| Rain dithered on 1 bit over borders and labels | Label halos; the owner checks the panel |
 | The web UI moving focus to a text box on a phone (owner, 2026-09-30) | Not reproduced in iOS 26 Safari; waiting for the phone and browser |
 | Homebrew Python 3.14 on this Mac (3.14.6 and 3.14.7 checked) can't load `pyexpat` (it expects a newer libexpat than macOS 26.2 has), which breaks pip and the ESP-IDF installer | ESP-IDF uses uv's Python 3.13 through `~/esp/python-shim` (`AGENTS.md` §6) |
 
@@ -1209,3 +1274,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r25 | 2026-10-01 | M5 scope (D25): air quality and pollen fields with their bands and levels (§5.1, §6, §11); the status bar's sync and Wi-Fi state (§5.2); the Weather preset in the cycle (§5.4); the menu's Sync section (§5.7); SNTP to the millisecond and the RTC trim (§7, §14.2, §20); quiet hours, config mode and `always` mode in the sync, its steps and results (§9.3, §10.2); fast connect without RTC RAM (§10.1); the Sync page, the place search and their API (§10.3); the web UI on the LAN (§10.4); `time.ntp` and `sync.*` (§14.3); `sync status` (§15); the tests (§17); the M5 row (§18, §19) |
 | r26 | 2026-10-01 | M5 spike review (D26): Weather Icons beside Material Icons (§4.5); `aq.uv` and the UV bands, the day length's change, "None" for pollen (§5.1, §6, §11) |
 | r27 | 2026-10-01 | M5 as built: the components (§3.1); the menu's Sync section and Info row (§5.7); the snapshot's size and the forecast file (§6); our own SNTP client, the lost clock's retries and the trim's loading and reach (§7); the 45 s, the syncs the device needs, nights and leaving `always` mode, and the measured syncs (§9.3); rejoining by name and a station without an address (§10.1); the place search's and the status's final shape (§10.3); the new tests (§17); three open items (§20) |
+| r28 | 2026-10-01 | M6 design (D27, D28): the map, the weather radar with its loop, the flight radar with routes, and rain in the next 2 hours (§11.1–§11.4); their fields, layouts, presets and control (§5.1, §5.2, §5.4, §5.6); the 15-minute rain's storage (§6); the radar step, refresh and flights in the sync (§9.3, §9.4); the Radar page and status (§10.3); `radar.*` and the frame file (§14.3); `radar` commands (§15); the tests (§17); the M6 row (§18); M6's place in §19 and M9's new candidates; five risks (§20) |

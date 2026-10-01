@@ -5,6 +5,8 @@
 #include "app_internal.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lang.h"
 #include "netmgr.h"
 #include "sync.h"
@@ -70,11 +72,13 @@ void app_sync_schedule(void)
     ds_set_forecast_ttl(app_ds(), expected == 0 ? 0 : expected + 2 * 3600); /* spec §5.1 */
     if (!networks_saved()) {
         st()->due = (sync_due_t){ 0 }; /* nothing to join: no sync wakes the board */
-    } else if (!timekeeping_valid()) {
-        st()->due = (sync_due_t){ .at = now }; /* spec §3.3, §7: fetch the lost time at once */
     } else {
-        st()->due = sync_next_due(&s, &st()->history, now, low_battery());
-        if (st()->due.at % 60 != 0) {
+        /* spec §3.3, §7: a lost time at once, then with the retries' pauses; the first forecast at once */
+        sync_need_t need = !timekeeping_valid()         ? SYNC_NEED_TIME
+                           : ds_weather(app_ds()) == NULL ? SYNC_NEED_FORECAST
+                                                          : SYNC_NEED_NOTHING;
+        st()->due = sync_next_due_needing(&s, &st()->history, now, low_battery(), need);
+        if (st()->due.at > now && st()->due.at % 60 != 0) {
             st()->due.at += 60 - st()->due.at % 60; /* minute wakes use the RTC alarm (spec §9.2) */
         }
     }
@@ -116,9 +120,13 @@ bool app_sync_failed(void)
     return false;
 }
 
-/* Sync mode `always` wants Wi-Fi now: on, unless quiet hours (D25). */
+/* Sync mode `always` wants Wi-Fi now: on, unless quiet hours (D25) or a night (spec §9.1), which
+ * sleeps whatever else runs. */
 static bool always_wanted(time_t now)
 {
+    if (app_ui_night()) {
+        return false;
+    }
     sync_schedule_t s;
     schedule_from_settings(&s);
     return sync_wifi_wanted(&s, now);
@@ -216,8 +224,10 @@ static void apply(void *arg)
 
 static void done(const sync_report_t *report) /* on the sync task */
 {
-    if (app_post(apply, (void *)report) != ESP_OK) {
-        ESP_LOGE(TAG, "the app queue is full: the sync's report is lost");
+    /* The report must arrive: until apply() runs, s_active holds every other sync and sleep off. */
+    while (app_post(apply, (void *)report) != ESP_OK) {
+        ESP_LOGW(TAG, "the app queue is full; the sync's report waits");
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -226,13 +236,12 @@ static esp_err_t start(bool manual, sync_due_t due)
     if (s_active) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (app_net_init() != ESP_OK) {
+    if (app_net_init() != ESP_OK) { /* it brings NVS up first: a routine wake has none (gotcha 11) */
         return ESP_FAIL;
     }
     const settings_t *set = app_settings();
     sync_request_t req = { .lat_e4 = set->lat_e4, .lon_e4 = set->lon_e4 };
     memcpy(req.ntp, set->ntp, sizeof(req.ntp));
-    app_alive(); /* Wi-Fi needs NVS, and the console may as well come up */
     esp_err_t err = sync_start(&req, done);
     if (err == ESP_OK) {
         s_active = true;

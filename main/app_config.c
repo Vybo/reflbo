@@ -33,6 +33,16 @@ static int s_shown_minutes;
 static void net_changed_on_app(void *arg)
 {
     (void)arg;
+    static int s_saved = -1; /* the saved networks last seen */
+    static netmgr_list_t list;
+    netmgr_networks(&list);
+    if (list.count != s_saved) {
+        bool changed = s_saved >= 0;
+        s_saved = list.count;
+        if (changed) {
+            app_sync_schedule(); /* the first network saved: the first forecast at once; the last forgotten: none */
+        }
+    }
     if (s_on) {
         app_ui_render();
     }
@@ -53,6 +63,7 @@ esp_err_t app_net_init(void)
     if (s_net_ready) {
         return ESP_OK;
     }
+    app_alive(); /* netmgr reads the networks and the AP password from NVS, which a routine wake lacks */
     esp_err_t err = netmgr_init(net_changed);
     s_net_ready = err == ESP_OK;
     if (err != ESP_OK) {

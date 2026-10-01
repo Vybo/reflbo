@@ -96,6 +96,63 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         *preset = fixture_preset("home");
         fixture_fill(&s_fix_ds, FIX_NOW - 3 * 3600);
         ctx->web_session = true;
+    } else if (strcmp(name, "weather_now") == 0) { /* M5: the Weather preset after a sync */
+        *preset = fixture_preset("weather");
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "weather_noon_cs") == 0) { /* by day, in Czech, the current block an hour old */
+        *preset = fixture_preset("weather");
+        ctx->lang = lang_get("cs");
+        ctx->now = FIX_NOW - 8 * 3600 - 48 * 60; /* 12:00 */
+        ctx->local = fixture_local(12, 0, 0);
+        fixture_fill(&s_fix_ds, ctx->now);
+        fixture_forecast(&s_fix_ds, FIX_NOW - 9 * 3600);
+    } else if (strcmp(name, "weather_stale") == 0) { /* a daily sync missed: two days old */
+        *preset = fixture_preset("weather");
+        fixture_forecast(&s_fix_ds, FIX_NOW - 50 * 3600);
+    } else if (strcmp(name, "air_grid") == 0) { /* the air quality and pollen fields in a grid (D25) */
+        *preset = fixture_preset("indoor");
+        static const uint8_t k_slots[6] = { UI_FIELD_AQ_INDEX, UI_FIELD_AQ_PM25, UI_FIELD_POLLEN_TOP,
+                                            UI_FIELD_POLLEN_GRASS, UI_FIELD_SUN_TIMES, UI_FIELD_WX_DAILY };
+        memcpy(preset->slots, k_slots, sizeof(k_slots));
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "air_grid_cs") == 0) { /* the same in Czech: the bands and levels' words */
+        fixture_dashboard("air_grid", ctx, preset);
+        ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "grid_sun_uv") == 0) { /* D26: the day's change and the UV index, at noon */
+        *preset = fixture_preset("indoor");
+        static const uint8_t k_slots[6] = { UI_FIELD_WX_NOW, UI_FIELD_SUN_TIMES, UI_FIELD_AQ_UV,
+                                            UI_FIELD_WX_TODAY, UI_FIELD_AQ_PM10, UI_FIELD_POLLEN_BIRCH };
+        memcpy(preset->slots, k_slots, sizeof(k_slots));
+        ctx->now = FIX_NOW - 7 * 3600 - 48 * 60; /* 13:00 */
+        ctx->local = fixture_local(13, 0, 0);
+        fixture_fill(&s_fix_ds, ctx->now);
+        fixture_forecast(&s_fix_ds, ctx->now - 3600);
+    } else if (strcmp(name, "home_forecast") == 0) { /* small slots: the weather, the sun, air, pollen */
+        *preset = fixture_preset("home");
+        preset->slots[2] = UI_FIELD_WX_NOW;
+        preset->slots[3] = UI_FIELD_SUN_TIMES;
+        preset->slots[4] = UI_FIELD_AQ_INDEX;
+        preset->slots[5] = UI_FIELD_POLLEN_TOP;
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "focus_forecast") == 0) { /* medium slots: today and the next hours */
+        *preset = fixture_preset("focus");
+        preset->slots[1] = UI_FIELD_WX_TODAY;
+        preset->slots[2] = UI_FIELD_WX_HOURLY;
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "home_syncing") == 0) { /* the status bar's sync marks (spec §5.2) */
+        *preset = fixture_preset("home");
+        ctx->sync = UI_SYNC_RUNNING;
+    } else if (strcmp(name, "home_sync_failed") == 0) {
+        *preset = fixture_preset("home");
+        ctx->sync = UI_SYNC_FAILED;
+    } else if (strcmp(name, "home_always") == 0) { /* sync mode `always`, on the network */
+        *preset = fixture_preset("home");
+        ctx->wifi = UI_WIFI_ON;
+    } else if (strcmp(name, "home_always_rejoining") == 0) {
+        *preset = fixture_preset("home");
+        ctx->wifi = UI_WIFI_REJOINING;
+        ctx->sync = UI_SYNC_FAILED;
+        ctx->web_session = true;
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -112,4 +169,7 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "focus_seconds", "home_battery_details", "home_inverted",
                                                     "indoor_hot_f", "indoor_frost", "home_frost", "grid_clock_12h",
                                                     "home_cs", "indoor_cs", "home_holiday_cs", "home_low_battery",
-                                                    "home_web", "home_stale_web" };
+                                                    "home_web", "home_stale_web", "weather_now",
+                                                    "weather_noon_cs", "weather_stale", "air_grid", "air_grid_cs", "grid_sun_uv", "home_forecast",
+                                                    "focus_forecast", "home_syncing", "home_sync_failed",
+                                                    "home_always", "home_always_rejoining" };

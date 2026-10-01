@@ -21,7 +21,6 @@ static ui_preset_t make(const char *id, const char *name, ui_layout_id_t layout,
 void ui_presets_defaults(ui_presets_t *p)
 {
     memset(p, 0, sizeof(*p));
-    /* Weather has nothing to show until M5, so it stays out of the cycle until then. */
     p->presets[0] = make("home", "Home", UI_LAYOUT_CLASSIC, true,
                          (ui_field_id_t[UI_SLOT_MAX]){ UI_FIELD_TIME_CLOCK, UI_FIELD_DATE_DAY, UI_FIELD_ENV_TEMP,
                                                        UI_FIELD_ENV_HUM, UI_FIELD_MOON_PHASE, UI_FIELD_BAT_LEVEL });
@@ -29,7 +28,7 @@ void ui_presets_defaults(ui_presets_t *p)
                          (ui_field_id_t[UI_SLOT_MAX]){ UI_FIELD_ENV_TEMP, UI_FIELD_ENV_HUM, UI_FIELD_ENV_DEW,
                                                        UI_FIELD_ENV_TEMP_MIN, UI_FIELD_ENV_TEMP_MAX,
                                                        UI_FIELD_BAT_DAYS });
-    p->presets[2] = make("weather", "Weather", UI_LAYOUT_WEATHER, false,
+    p->presets[2] = make("weather", "Weather", UI_LAYOUT_WEATHER, true, /* in the cycle since M5 brings its data */
                          (ui_field_id_t[UI_SLOT_MAX]){ UI_FIELD_WX_NOW, UI_FIELD_WX_TODAY, UI_FIELD_WX_HOURLY,
                                                        UI_FIELD_ENV_TEMP, UI_FIELD_ENV_HUM, UI_FIELD_NONE });
     p->presets[3] = make("focus", "Focus clock", UI_LAYOUT_FOCUS, true,

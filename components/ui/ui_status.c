@@ -6,8 +6,9 @@
 #include "ui_internal.h"
 
 /* Status bar (spec §5.2): "Set time" or a stale warning on the left, then a globe while a phone is
- * logged in to the web UI (D20), an optional clock in the middle, the battery on the right with
- * its level, voltage or days left as the preset asks. */
+ * logged in to the web UI (D20), the sync state and in sync mode `always` the Wi-Fi state; an
+ * optional clock in the middle, the battery on the right with its level, voltage or days left as
+ * the preset asks. */
 void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, bool any_stale)
 {
     ui_value_t bat, days;
@@ -28,6 +29,15 @@ void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *pr
     }
     if (ctx->web_session) {
         gfx_bitmap(fb, left, 2, &gfx_icon_web_16, GFX_BLACK);
+        left += 20;
+    }
+    if (ctx->sync != UI_SYNC_IDLE) { /* spec §5.2: a sync running, or the last one failed */
+        gfx_bitmap(fb, left, 2, ctx->sync == UI_SYNC_RUNNING ? &gfx_icon_sync_16 : &gfx_icon_sync_failed_16,
+                   GFX_BLACK);
+        left += 20;
+    }
+    if (ctx->wifi != UI_WIFI_NONE) { /* sync mode `always` (D19) */
+        gfx_bitmap(fb, left, 2, ctx->wifi == UI_WIFI_ON ? &gfx_icon_wifi_16 : &gfx_icon_wifi_off_16, GFX_BLACK);
     }
 
     if (preset->status_clock && ctx->time_valid) {

@@ -9,6 +9,13 @@
 
 #define UI_BATTERY_LOW_PCT 15 /* spec §8: the status bar marks a low battery */
 
+/* The weather, air quality, pollen and sun fields (ui_forecast.c, D25); false for any other field. */
+bool ui_resolve_forecast(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);
+/* Their widgets; false for a kind they don't draw. */
+bool ui_forecast_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v);
+/* A sky's icon at 24 or 48 px, its night variant where it has one. */
+const gfx_bitmap_t *ui_sky_icon(int sky, bool night, int size);
+
 void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, ui_stale_policy_t policy,
                     const lang_t *lang);
 void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, bool any_stale);

@@ -28,3 +28,6 @@ status-cache.json
 compile_commands.json
 *.swp
 .DS_Store
+
+# Golden tests write what they drew beside a golden that differs
+*.actual.pbm

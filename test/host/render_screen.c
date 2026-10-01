@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L /* setenv() in fixture_zone() */
+
 #include <stdio.h>
 #include <string.h>
 

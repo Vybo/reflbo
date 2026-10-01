@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L /* setenv() in fixture_zone() */
+
 #include <string.h>
 
 #include "cJSON.h"

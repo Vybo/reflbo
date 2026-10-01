@@ -24,7 +24,7 @@ static void test_defaults_are_home_indoor_weather_and_focus(void)
     TEST_ASSERT_EQUAL(UI_LAYOUT_CLASSIC, s_p.presets[0].layout);
     TEST_ASSERT_EQUAL(UI_FIELD_TIME_CLOCK, s_p.presets[0].slots[0]);
     TEST_ASSERT_EQUAL_INT(2, ui_presets_find(&s_p, "weather"));
-    TEST_ASSERT_FALSE(s_p.presets[2].in_cycle);
+    TEST_ASSERT_TRUE(s_p.presets[2].in_cycle); /* M5 brings its data (spec §5.4) */
     TEST_ASSERT_EQUAL_INT(-1, ui_presets_find(&s_p, "nope"));
 }
 
@@ -32,7 +32,9 @@ static void test_next_follows_cycle_order_and_skips_presets_out_of_it(void)
 {
     TEST_ASSERT_EQUAL_INT(1, ui_presets_next(&s_p)); /* home -> indoor */
     s_p.active = 1;
-    TEST_ASSERT_EQUAL_INT(3, ui_presets_next(&s_p)); /* indoor -> focus, skipping weather */
+    TEST_ASSERT_EQUAL_INT(2, ui_presets_next(&s_p)); /* indoor -> weather */
+    s_p.presets[2].in_cycle = false;
+    TEST_ASSERT_EQUAL_INT(3, ui_presets_next(&s_p)); /* indoor -> focus, skipping weather out of the cycle */
     s_p.active = 3;
     TEST_ASSERT_EQUAL_INT(0, ui_presets_next(&s_p)); /* wraps */
     for (int i = 0; i < s_p.count; i++) {

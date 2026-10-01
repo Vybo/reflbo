@@ -9,7 +9,7 @@
 #define K_ANY_SMALL                                                                                                  \
     (UI_KIND(UI_FK_TIME) | UI_KIND(UI_FK_DATE) | UI_KIND(UI_FK_NUMBER) | UI_KIND(UI_FK_BATTERY) |                    \
      UI_KIND(UI_FK_MOON) | UI_KIND(UI_FK_TEXT) | UI_KIND(UI_FK_WEATHER_NOW) | UI_KIND(UI_FK_WEATHER_DAY) |           \
-     UI_KIND(UI_FK_SUN))
+     UI_KIND(UI_FK_SUN) | UI_KIND(UI_FK_LEVEL) | UI_KIND(UI_FK_POLLEN))
 #define K_ANY_MEDIUM (K_ANY_SMALL | UI_KIND(UI_FK_SERIES))
 #define K_LARGE (K_ANY_SMALL)
 #define K_XL (UI_KIND(UI_FK_TIME) | UI_KIND(UI_FK_NUMBER))

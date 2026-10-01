@@ -26,6 +26,8 @@ typedef enum {
     UI_FK_WEATHER_DAY,
     UI_FK_SERIES,
     UI_FK_SUN,
+    UI_FK_LEVEL,  /* a number and its band: the air quality index (D25) */
+    UI_FK_POLLEN, /* a pollen level, and its type or count (D25) */
     UI_FK_COUNT,
 } ui_field_kind_t;
 
@@ -51,6 +53,17 @@ typedef enum {
     UI_FIELD_WX_HOURLY, /* M5 */
     UI_FIELD_WX_DAILY,  /* M5 */
     UI_FIELD_SUN_TIMES, /* M5 */
+    UI_FIELD_AQ_INDEX,  /* M5 (D25) */
+    UI_FIELD_AQ_PM25,
+    UI_FIELD_AQ_PM10,
+    UI_FIELD_AQ_UV, /* D26 */
+    UI_FIELD_POLLEN_TOP,
+    UI_FIELD_POLLEN_ALDER, /* the types in ds_pollen_t order */
+    UI_FIELD_POLLEN_BIRCH,
+    UI_FIELD_POLLEN_GRASS,
+    UI_FIELD_POLLEN_MUGWORT,
+    UI_FIELD_POLLEN_OLIVE,
+    UI_FIELD_POLLEN_RAGWEED,
     UI_FIELD_COUNT,
 } ui_field_id_t;
 
@@ -66,6 +79,29 @@ const ui_field_info_t *ui_field_info(ui_field_id_t field);
 /* UI_FIELD_NONE for an unknown id. */
 ui_field_id_t ui_field_by_name(const char *id);
 
+typedef enum {
+    UI_SYNC_IDLE,
+    UI_SYNC_RUNNING,
+    UI_SYNC_FAILED, /* the last sync failed a step */
+} ui_sync_mark_t;
+
+typedef enum {
+    UI_WIFI_NONE,      /* not sync mode `always`: nothing to show */
+    UI_WIFI_ON,        /* `always`, on the network */
+    UI_WIFI_REJOINING, /* `always`, off it */
+} ui_wifi_mark_t;
+
+#define UI_SERIES_MAX 6
+
+/* One column of a forecast strip. */
+typedef struct {
+    char label[8]; /* the local hour "14" or the weekday "Thu" */
+    char temp[8];  /* "16°"; daily: the high */
+    char temp2[8]; /* daily: the low */
+    uint8_t sky;   /* weather_sky_t */
+    bool night;
+} ui_series_point_t;
+
 /* Everything the dashboard reads, gathered by the app for one render. */
 typedef struct {
     time_t now;          /* UTC */
@@ -78,6 +114,9 @@ typedef struct {
     bool seconds;
     bool fahrenheit;
     bool web_session; /* config mode with a phone logged in to the web UI: marked in the status bar (D20) */
+    int32_t lat_e4, lon_e4; /* the location, for the sun's times */
+    ui_sync_mark_t sync;    /* the status bar's sync state (spec §5.2) */
+    ui_wifi_mark_t wifi;
 } ui_context_t;
 
 typedef enum {
@@ -100,6 +139,13 @@ typedef struct {
     int percent;       /* battery level or moon illumination */
     ds_bat_state_t battery;
     util_moon_t moon;
+    char detail[40];   /* a third line: "Feels like 19 °C", the day length */
+    int sky;           /* weather_sky_t of a weather value */
+    bool night;        /* its icon's night variant */
+    int polar;         /* sun.times: 0, or 1 on a polar day and 2 on a polar night */
+    int bands;         /* UI_FK_LEVEL: how many bands its scale has; `percent` is the one it is in */
+    int series_count;
+    ui_series_point_t series[UI_SERIES_MAX];
 } ui_value_t;
 
 void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);

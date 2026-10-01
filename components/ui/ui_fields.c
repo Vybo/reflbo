@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ui_internal.h"
+
 #define TEMP_TREND_C100 50 /* spec §5.1: arrows beyond 0.5 °C or 3 % an hour */
 #define HUM_TREND_PCT100 300
 
@@ -25,6 +27,17 @@ static const ui_field_info_t k_fields[UI_FIELD_COUNT] = {
     [UI_FIELD_WX_HOURLY] = { "wx.hourly", UI_FK_SERIES, LS_FORECAST, -1 },
     [UI_FIELD_WX_DAILY] = { "wx.daily", UI_FK_SERIES, LS_FORECAST, -1 },
     [UI_FIELD_SUN_TIMES] = { "sun.times", UI_FK_SUN, LS_SUN, -1 },
+    [UI_FIELD_AQ_INDEX] = { "aq.index", UI_FK_LEVEL, LS_AIR_QUALITY, -1 },
+    [UI_FIELD_AQ_PM25] = { "aq.pm25", UI_FK_NUMBER, LS_PM25, -1 },
+    [UI_FIELD_AQ_PM10] = { "aq.pm10", UI_FK_NUMBER, LS_PM10, -1 },
+    [UI_FIELD_AQ_UV] = { "aq.uv", UI_FK_LEVEL, LS_UV_INDEX, -1 },
+    [UI_FIELD_POLLEN_TOP] = { "pollen.top", UI_FK_POLLEN, LS_POLLEN, -1 },
+    [UI_FIELD_POLLEN_ALDER] = { "pollen.alder", UI_FK_POLLEN, LS_POLLEN_ALDER, -1 },
+    [UI_FIELD_POLLEN_BIRCH] = { "pollen.birch", UI_FK_POLLEN, LS_POLLEN_BIRCH, -1 },
+    [UI_FIELD_POLLEN_GRASS] = { "pollen.grass", UI_FK_POLLEN, LS_POLLEN_GRASS, -1 },
+    [UI_FIELD_POLLEN_MUGWORT] = { "pollen.mugwort", UI_FK_POLLEN, LS_POLLEN_MUGWORT, -1 },
+    [UI_FIELD_POLLEN_OLIVE] = { "pollen.olive", UI_FK_POLLEN, LS_POLLEN_OLIVE, -1 },
+    [UI_FIELD_POLLEN_RAGWEED] = { "pollen.ragweed", UI_FK_POLLEN, LS_POLLEN_RAGWEED, -1 },
 };
 
 const ui_field_info_t *ui_field_info(ui_field_id_t field)
@@ -199,7 +212,7 @@ void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out)
     out->label = lang_str(ctx->lang, info->label);
     if (info->ds_field >= 0) {
         resolve_store(ctx, field, out);
-    } else {
-        resolve_clock(ctx, field, out); /* weather and sun stay missing until M5 */
+    } else if (!ui_resolve_forecast(ctx, field, out)) {
+        resolve_clock(ctx, field, out);
     }
 }

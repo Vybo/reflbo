@@ -20,7 +20,10 @@ static const char *const k_kinds[UI_FK_COUNT] = {
     [UI_FK_WEATHER_DAY] = "weather_day",
     [UI_FK_SERIES] = "series",
     [UI_FK_SUN] = "sun",
+    [UI_FK_LEVEL] = "level",
+    [UI_FK_POLLEN] = "pollen",
 };
+_Static_assert(UI_FK_COUNT == 12, "every kind has a name in the catalogue");
 static const char *const k_sizes[] = { "S", "M", "L", "XL" };
 
 static size_t print(cJSON *root, char *out, size_t size)

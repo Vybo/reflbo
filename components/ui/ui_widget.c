@@ -73,8 +73,29 @@ static const gfx_bitmap_t *field_icon(ui_field_id_t field, int size)
     case UI_FIELD_WX_TODAY:
     case UI_FIELD_WX_HOURLY:
     case UI_FIELD_WX_DAILY:
+        s24 = &gfx_icon_cloud_24, s48 = &gfx_icon_cloud_48; /* missing: drawn as the placeholder */
+        break;
     case UI_FIELD_SUN_TIMES:
-        s24 = &gfx_icon_cloud_24, s48 = &gfx_icon_cloud_48;
+        s24 = &gfx_icon_sunrise_24, s48 = &gfx_icon_sunrise_48;
+        break;
+    case UI_FIELD_AQ_INDEX:
+        s24 = &gfx_icon_air_24, s48 = &gfx_icon_air_48;
+        break;
+    case UI_FIELD_AQ_PM25:
+    case UI_FIELD_AQ_PM10:
+        s24 = &gfx_icon_particles_24, s48 = &gfx_icon_particles_48;
+        break;
+    case UI_FIELD_AQ_UV:
+        s24 = &gfx_icon_uv_24, s48 = &gfx_icon_uv_48;
+        break;
+    case UI_FIELD_POLLEN_TOP:
+    case UI_FIELD_POLLEN_ALDER:
+    case UI_FIELD_POLLEN_BIRCH:
+    case UI_FIELD_POLLEN_GRASS:
+    case UI_FIELD_POLLEN_MUGWORT:
+    case UI_FIELD_POLLEN_OLIVE:
+    case UI_FIELD_POLLEN_RAGWEED:
+        s24 = &gfx_icon_pollen_24, s48 = &gfx_icon_pollen_48;
         break;
     default:
         break;
@@ -391,7 +412,9 @@ void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t
     }
     gfx_rect_t saved = fb->clip;
     gfx_set_clip(fb, gfx_rect_intersect(saved, r));
-    if (size == UI_SIZE_S) {
+    if (ui_forecast_draw(fb, r, size, &shown)) {
+        /* the weather, air quality, pollen and sun widgets (ui_forecast.c) */
+    } else if (size == UI_SIZE_S) {
         draw_small(fb, r, &shown);
     } else {
         draw_labelled(fb, r, size, &shown);

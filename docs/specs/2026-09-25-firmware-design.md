@@ -1015,7 +1015,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
 | M4 | Accepted (D18): a web UI password, instead of the admin PIN. Accepted (D19): config mode after a web restart, the clock set from the phone when lost, changing the password and logging out, a Device page. Still deferred: web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
-| After M5 | ADS-B flight radar (owner request, 2026-10-01; answers D22): §19.1. About the size of M3b |
+| After M5 | ADS-B flight radar (owner request, 2026-10-01; answers D22): §19.1. A weather (precipitation) radar (owner question, 2026-10-01): §19.2. They would share one map renderer; together about the size of M3a and M3b |
 | M6 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
 | M7 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
 | M8 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots |
@@ -1056,6 +1056,29 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. An extra feature 
    - The radar's web settings could show a live preview through `/api/preview.bmp`, as the preset editor does.
    - Settings this implies: the radar's centre (latitude and longitude) and zoom or range, and the filters above.
 
+
+### 19.2 Weather radar (proposal)
+
+Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one too. An extra feature (D10), for after M5 like §19.1; nothing is decided yet.
+
+**Sources** (checked 2026-10-01)
+
+- **ČHMÚ open data**, as in MeteoPlaneRadar: the composite of maximum reflectivity from the Brdy and Skalky radars, a new image every 5 minutes. `https://opendata.chmi.cz/meteorology/weather/radar/composite/maxz/png/pacz2gmaps3.z_max3d.YYYYMMDD.hhmm.0.png` (UTC): a 680×460 palette PNG, a few KB on a dry day, with the map at 1×1 km in web Mercator (EPSG:3857) beside side projections that get cropped away. `png_masked/` marks the echoes that reach the ground. Licence CC BY 4.0, commercial use included; the credit reads "Data: ČHMÚ, opendata.chmi.cz, CC BY 4.0". It covers Czechia and the land around it, so Brno sits well inside. A forecast for +10 to +60 min exists only as HDF5 in TAR files, too heavy for the device.
+- **RainViewer**, MeteoPlaneRadar's source outside Czechia: free for personal or educational use, with a link to rainviewer.com. Since 2026-01-01: zoom 7 at most (about 0.8 km a pixel at Brno's latitude), one colour scheme, no nowcast, 100 requests per IP per minute; 2 h of past frames at 10-minute steps, as 256 or 512 px tiles.
+
+**Sketch**
+
+- **Fetch and decode.** HTTPS through M5's client; the PNG decoded in PSRAM by a small streaming decoder (pngle, MIT, is a candidate; adapted code goes in `THIRD_PARTY.md`). Palette index to dBZ through ČHMÚ's colour scale (`scl/scl-dbz-mmh.png`), then two or three dither densities for light, moderate and heavy rain on the 1-bit panel.
+- **Map.** Both sources are web Mercator, the projection §19.1's map would use, so one map renderer with the same centre, zoom, borders and towns serves both radars, and aircraft could be drawn over the rain. The web UI previews it through `/api/preview.bmp`.
+- **Power: cheaper than the flight radar.** Rain moves slowly, so a frame every 5–15 minutes does, and that fits the normal sync rather than sync mode `always`. Estimate, to be measured: a 3 s Wi-Fi session costs about 1.5 J, so a frame every 10 minutes adds about 4 % a day to this board's ~60 mW floor; every 5 minutes, about 8 %.
+- **Where it shows.** A full-screen radar layout, or a smaller rain-map widget in a slot. A short loop of the last frames on KEY costs one download per frame.
+- **A cheaper alternative**, inside M5's weather work: Open-Meteo's 15-minute precipitation forecast for the location, drawn as "rain in the next 2 hours". It needs no map and no images.
+
+**For the owner**
+
+1. Source: ČHMÚ only, or ČHMÚ with RainViewer for places outside its coverage? Recommended: ČHMÚ by default, RainViewer as the fallback.
+2. How it shows: a full-screen radar layout, a slot widget, or both; and aircraft over the rain on one shared map?
+3. Refresh: with the normal sync on battery (every 10–15 min), or every 5 minutes in sync mode `always` only?
 
 ## 20. Risks and open items
 
@@ -1100,3 +1123,4 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. An extra feature 
 | r19 | 2026-10-01 | ADS-B flight radar proposal, for after M5, with three owner questions (§19, §19.1) |
 | r20 | 2026-10-01 | The owner's answers on the ADS-B radar (D22, §19.1): adsb.fi only, the always-on client mode, a centred and zoomed map with built-in towns and airports; one question left |
 | r21 | 2026-10-01 | The ADS-B radar runs in sync mode `always` (D22); its last question is closed (§19.1) |
+| r22 | 2026-10-01 | Weather radar proposal: ČHMÚ and RainViewer, a map shared with the ADS-B radar, three owner questions (§19, §19.2) |

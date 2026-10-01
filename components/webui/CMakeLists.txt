@@ -3,7 +3,7 @@
 # update brings them along (spec §5.3).
 idf_component_register(SRCS "webui.c" "webui_auth.c" "webui_http.c"
                        INCLUDE_DIRS "include"
-                       PRIV_REQUIRES app_update bootloader_support esp_app_format esp_http_server esp_timer json
+                       PRIV_REQUIRES app_update bootloader_support esp_app_format esp_http_server esp_timer json weather
                                      lwip netmgr nvs_flash util)
 
 set(web_dir "${CMAKE_CURRENT_LIST_DIR}/../../web")

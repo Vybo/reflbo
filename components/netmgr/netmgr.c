@@ -38,6 +38,8 @@ typedef enum {
     CMD_STOP,
     CMD_SCAN,
     CMD_TEST,
+    CMD_JOIN,   /* a sync or sync mode `always`: a saved network, never the AP (spec §9.3) */
+    CMD_AP_OFF, /* config mode ended while Wi-Fi stays for a sync or `always` */
 } cmd_kind_t;
 
 typedef struct {
@@ -58,6 +60,9 @@ typedef struct {
 static QueueHandle_t s_cmds;
 static SemaphoreHandle_t s_lock; /* s_status and s_list: read by any task, written by the netmgr task */
 static SemaphoreHandle_t s_done; /* a scan finished */
+static SemaphoreHandle_t s_joined; /* a CMD_JOIN finished */
+static SemaphoreHandle_t s_join_lock; /* one netmgr_join() at a time */
+static esp_err_t s_join_result;
 static SemaphoreHandle_t s_scan_lock; /* one netmgr_scan() at a time: the console and the web UI may both ask */
 static EventGroupHandle_t s_events;
 static void (*s_changed)(void);
@@ -428,12 +433,18 @@ static void joined(const char *ssid, bool ap_on)
         channel = info.primary;
         rssi = info.rssi;
     }
+    static netmgr_list_t before;
     lock();
     snprintf(s_status.ssid, sizeof(s_status.ssid), "%s", ssid);
     s_status.rssi = rssi;
+    before = s_list;
     netmgr_list_succeeded(&s_list, netmgr_list_find(&s_list, ssid), bssid, channel);
+    bool changed = memcmp(&before, &s_list, sizeof(before)) != 0;
     unlock();
-    save_list();
+    memset(&before, 0, sizeof(before));
+    if (changed) { /* spec §10.1: frequent syncs on the same network don't wear the flash */
+        save_list();
+    }
     mdns_up();
     ESP_LOGI(TAG, "joined \"%s\" as %s", s_status.ssid, s_status.ip);
     set_state(NETMGR_STATION, ap_on);
@@ -488,11 +499,31 @@ static void start_ap(void)
     set_state(NETMGR_AP, true);
 }
 
+/* The AP beside the station that already runs (a sync's or sync mode `always`'s), on its channel. */
+static void add_ap(void)
+{
+    uint8_t channel = 1;
+    wifi_second_chan_t second;
+    esp_wifi_get_channel(&channel, &second);
+    if (wifi_up(WIFI_MODE_APSTA, channel) == ESP_OK) {
+        ap_services(true);
+    }
+}
+
 static void do_start(bool keep_ap)
 {
     lock();
     int saved = s_list.count;
+    netmgr_state_t state = s_status.state;
+    bool ap_on = s_status.ap_on;
     unlock();
+    if (state == NETMGR_STATION) { /* config mode joins the network a sync or `always` is on */
+        if (keep_ap && !ap_on) {
+            add_ap();
+        }
+        set_state(NETMGR_STATION, keep_ap || ap_on);
+        return;
+    }
     if (saved > 0) {
         set_state(NETMGR_JOINING, keep_ap);
         if (wifi_up(keep_ap ? WIFI_MODE_APSTA : WIFI_MODE_STA, 1) != ESP_OK) {
@@ -555,6 +586,48 @@ static netmgr_test_t do_test(const char *ssid, const char *pass)
     return r;
 }
 
+/* A saved network for a sync, without the AP: ESP_OK on it, ESP_ERR_NOT_FOUND with none saved,
+ * ESP_FAIL if none joined, ESP_ERR_INVALID_STATE while only the AP runs (config mode without a network). */
+static esp_err_t do_join(void)
+{
+    lock();
+    int saved = s_list.count;
+    netmgr_state_t state = s_status.state;
+    unlock();
+    if (state == NETMGR_STATION) {
+        return ESP_OK;
+    }
+    if (state == NETMGR_AP || state == NETMGR_JOINING) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (saved == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    set_state(NETMGR_JOINING, false);
+    if (wifi_up(WIFI_MODE_STA, 1) == ESP_OK && join_saved(false)) {
+        return ESP_OK;
+    }
+    wifi_down();
+    set_state(NETMGR_OFF, false);
+    return ESP_FAIL;
+}
+
+static void do_ap_off(void)
+{
+    lock();
+    netmgr_state_t state = s_status.state;
+    unlock();
+    if (state == NETMGR_STATION) {
+        ap_services(false);
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        set_state(NETMGR_STATION, false);
+    } else {
+        wifi_down();
+        set_test(NETMGR_TEST_NONE, "");
+        set_state(NETMGR_OFF, false);
+    }
+}
+
 static void netmgr_task(void *arg)
 {
     (void)arg;
@@ -577,6 +650,13 @@ static void netmgr_task(void *arg)
         case CMD_TEST:
             set_test(do_test(cmd.ssid, cmd.pass), cmd.ssid);
             break;
+        case CMD_JOIN:
+            s_join_result = do_join();
+            xSemaphoreGive(s_joined);
+            break;
+        case CMD_AP_OFF:
+            do_ap_off();
+            break;
         }
         memset(&cmd, 0, sizeof(cmd)); /* a test's password doesn't linger */
     }
@@ -591,9 +671,12 @@ esp_err_t netmgr_init(void (*changed)(void))
     s_lock = xSemaphoreCreateMutex();
     s_done = xSemaphoreCreateBinary();
     s_scan_lock = xSemaphoreCreateMutex();
+    s_joined = xSemaphoreCreateBinary();
+    s_join_lock = xSemaphoreCreateMutex();
     s_events = xEventGroupCreate();
     QueueHandle_t cmds = xQueueCreate(4, sizeof(cmd_t));
-    if (s_lock == NULL || s_done == NULL || s_scan_lock == NULL || s_events == NULL || cmds == NULL) {
+    if (s_lock == NULL || s_done == NULL || s_scan_lock == NULL || s_joined == NULL || s_join_lock == NULL ||
+        s_events == NULL || cmds == NULL) {
         return ESP_ERR_NO_MEM;
     }
     s_cmds = cmds;
@@ -635,6 +718,21 @@ void netmgr_start(bool keep_ap)
 void netmgr_stop(void)
 {
     post(&(cmd_t){ .kind = CMD_STOP });
+}
+
+esp_err_t netmgr_join(void)
+{
+    xSemaphoreTake(s_join_lock, portMAX_DELAY);
+    post(&(cmd_t){ .kind = CMD_JOIN });
+    xSemaphoreTake(s_joined, portMAX_DELAY); /* join_saved() gives up within 16 s a network */
+    esp_err_t err = s_join_result;
+    xSemaphoreGive(s_join_lock);
+    return err;
+}
+
+void netmgr_ap_off(void)
+{
+    post(&(cmd_t){ .kind = CMD_AP_OFF });
 }
 
 void netmgr_status(netmgr_status_t *out)

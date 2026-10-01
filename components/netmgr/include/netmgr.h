@@ -8,9 +8,9 @@
 #include "netmgr_scan.h"
 
 /*
- * The Wi-Fi manager (spec §10.1, §10.2). Wi-Fi is on only in config mode: netmgr_start() joins a
- * saved network, or starts the device's own AP with a captive portal when none is saved or none
- * answers. It runs in its own task; the calls return at once, except netmgr_scan(), which waits
+ * The Wi-Fi manager (spec §10.1, §10.2, §9.3). In config mode netmgr_start() joins a saved network,
+ * or starts the device's own AP with a captive portal when none is saved or none answers; a sync and
+ * sync mode `always` join a saved network with netmgr_join() and never start the AP. It runs in its own task; the calls return at once, except netmgr_scan(), which waits
  * for its result. Any task may call them.
  */
 
@@ -57,6 +57,14 @@ esp_err_t netmgr_init(void (*changed)(void));
  * while no web password is set (D18). */
 void netmgr_start(bool keep_ap);
 void netmgr_stop(void); /* Wi-Fi off */
+/* A saved network for a sync or sync mode `always` (spec §9.3), never the AP. Waits for the result:
+ * ESP_OK once on a network (at once if already), ESP_ERR_NOT_FOUND with none saved, ESP_FAIL if none
+ * joined (Wi-Fi is off again), ESP_ERR_INVALID_STATE while only the AP runs. Not from the app task,
+ * which netmgr's callbacks reach. */
+esp_err_t netmgr_join(void);
+/* Config mode ended while a sync or `always` keeps the station: the AP goes, the station stays; with
+ * no station, Wi-Fi goes off. */
+void netmgr_ap_off(void);
 void netmgr_status(netmgr_status_t *out);
 /* Visible networks, strongest first, one entry per SSID; returns how many (up to `max`). */
 int netmgr_scan(netmgr_ap_t *out, int max);

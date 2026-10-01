@@ -21,6 +21,8 @@
 #include "nvs.h"
 #include "sdkconfig.h"
 #include "util_json.h"
+#include "weather.h"
+#include "weather_http.h"
 #include "webui_auth.h"
 #include "webui_http.h"
 
@@ -123,6 +125,7 @@ bool webui_session_active(void)
         return false;
     }
     xSemaphoreTake(s_auth_lock, portMAX_DELAY);
+    webui_sessions_expire(&s_sessions, now_s()); /* an idle hour ends a session (spec §10.4) */
     bool any = webui_sessions_any(&s_sessions);
     xSemaphoreGive(s_auth_lock);
     return any;
@@ -150,12 +153,13 @@ esp_err_t webui_reset_password(void)
     return err;
 }
 
-/* The client is on the device's own AP: 192.168.4.0/24, maybe as an IPv4-mapped IPv6 address. */
+/* The client is on the device's own AP: it reached the AP's address, 192.168.4.1 (maybe as an
+ * IPv4-mapped IPv6 address). Its own address proves nothing: a LAN may use 192.168.4.0/24 too. */
 static bool peer_on_ap(httpd_req_t *req)
 {
     struct sockaddr_storage addr;
     socklen_t len = sizeof(addr);
-    if (getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&addr, &len) != 0) {
+    if (getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&addr, &len) != 0) {
         return false;
     }
     uint32_t ip = 0;
@@ -169,7 +173,7 @@ static bool peer_on_ap(httpd_req_t *req)
         }
         ip = (uint32_t)b[12] << 24 | (uint32_t)b[13] << 16 | (uint32_t)b[14] << 8 | b[15];
     }
-    return (ip & 0xFFFFFF00u) == 0xC0A80400u;
+    return ip == 0xC0A80401u; /* 192.168.4.1, NETMGR_AP_IP */
 }
 
 /* The request names this device; a captive-portal probe names someone else's host. */
@@ -181,9 +185,8 @@ static bool for_us(httpd_req_t *req)
     }
     netmgr_status_t st;
     netmgr_status(&st);
-    char local[sizeof(st.host) + 8];
-    snprintf(local, sizeof(local), "%s.local", st.host);
-    return webui_host_is(host, NETMGR_AP_IP) || webui_host_is(host, st.host) || webui_host_is(host, local) ||
+    /* spec §10.4: the address, reflbo-XXXX, reflbo-XXXX.local, or reflbo-XXXX under a router's domain */
+    return webui_host_is(host, NETMGR_AP_IP) || webui_host_under(host, st.host) ||
            (st.ip[0] != '\0' && webui_host_is(host, st.ip));
 }
 
@@ -593,6 +596,80 @@ static esp_err_t ota_status(httpd_req_t *req)
     return send_cjson(req, 200, o);
 }
 
+/* GET /api/geocode?q= (spec §10.3): Open-Meteo's place search, over the device's network. The TLS
+ * handshake runs on a task of its own, as the server's stack is too small for it. */
+#define GEOCODE_STACK 10240
+#define GEOCODE_BODY_MAX 8192
+
+typedef struct {
+    char url[WEATHER_URL_MAX];
+    esp_err_t err;
+    int status, count;
+    weather_place_t places[5];
+    SemaphoreHandle_t done;
+} geocode_job_t;
+
+static void geocode_task(void *arg)
+{
+    geocode_job_t *job = arg;
+    char *body = heap_caps_malloc(GEOCODE_BODY_MAX, MALLOC_CAP_SPIRAM);
+    size_t len = 0;
+    job->err = body != NULL ? weather_http_get(job->url, body, GEOCODE_BODY_MAX, &len, 8000, &job->status)
+                            : ESP_ERR_NO_MEM;
+    job->count = job->err == ESP_OK ? weather_parse_places(body, len, job->places, 5) : -1;
+    heap_caps_free(body);
+    xSemaphoreGive(job->done);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t geocode(httpd_req_t *req, const char *query)
+{
+    if (req->method != HTTP_GET) {
+        return send_error(req, 405, "use GET");
+    }
+    char q[96] = "", lang[8] = "en";
+    httpd_query_key_value(query, "q", q, sizeof(q));
+    httpd_query_key_value(query, "lang", lang, sizeof(lang));
+    if (q[0] == '\0') {
+        return send_error(req, 400, "name a place: ?q=");
+    }
+    netmgr_status_t st;
+    netmgr_status(&st);
+    if (st.state != NETMGR_STATION) {
+        return send_error(req, 503, "the device isn't on a network with internet: enter the place's coordinates");
+    }
+    static geocode_job_t job; /* one at a time: the server handles one request at a time */
+    memset(&job, 0, sizeof(job));
+    char decoded[96];
+    webui_url_decode(q, decoded, sizeof(decoded));
+    weather_geocode_url(job.url, sizeof(job.url), decoded, lang);
+    job.done = xSemaphoreCreateBinary();
+    if (job.done == NULL || xTaskCreatePinnedToCore(geocode_task, "geocode", GEOCODE_STACK, &job, 3, NULL, 0) != pdPASS) {
+        if (job.done != NULL) {
+            vSemaphoreDelete(job.done);
+        }
+        return send_error(req, 503, "no memory for the search");
+    }
+    xSemaphoreTake(job.done, portMAX_DELAY); /* the request's own 8 s timeout ends it */
+    vSemaphoreDelete(job.done);
+    if (job.count < 0) {
+        return send_error(req, 502, job.status ? "the place search answered with an error" : "the place search didn't answer");
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON *list = cJSON_AddArrayToObject(o, "places");
+    for (int i = 0; i < job.count; i++) {
+        cJSON *p = cJSON_CreateObject();
+        cJSON_AddStringToObject(p, "name", job.places[i].name);
+        cJSON_AddStringToObject(p, "region", job.places[i].region);
+        cJSON_AddStringToObject(p, "country", job.places[i].country);
+        cJSON_AddNumberToObject(p, "lat", job.places[i].lat_e4 / 1e4);
+        cJSON_AddNumberToObject(p, "lon", job.places[i].lon_e4 / 1e4);
+        cJSON_AddStringToObject(p, "timezone", job.places[i].timezone);
+        cJSON_AddItemToArray(list, p);
+    }
+    return send_cjson(req, 200, o);
+}
+
 typedef struct {
     const char *method, *path, *query, *body;
     webui_reply_t reply;
@@ -618,6 +695,9 @@ static const char *method_name(int method)
 
 static esp_err_t api_handler(httpd_req_t *req)
 {
+    if (!for_us(req)) { /* spec §10.4: a page from elsewhere pointing its own name at us (DNS rebinding) */
+        return send_error(req, 421, "this device answers to its own name only");
+    }
     touch();
     char path[64], query[160];
     size_t len = strcspn(req->uri, "?");
@@ -656,6 +736,9 @@ static esp_err_t api_handler(httpd_req_t *req)
     }
     if (strncmp(path, "/api/wifi/", 10) == 0) {
         return wifi_routes(req, path, has_query ? query : NULL);
+    }
+    if (strcmp(path, "/api/geocode") == 0) {
+        return geocode(req, has_query ? query : "");
     }
     static const struct {
         const char *path;

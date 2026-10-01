@@ -25,6 +25,11 @@ typedef enum {
     UI_MI_CONFIG_MODE,     /* action */
     UI_MI_FORGET_NETWORKS, /* action, confirmed first */
     UI_MI_RESET_PASSWORD,  /* action, confirmed first (D18) */
+    UI_MI_SYNC,
+    UI_MI_SYNC_NOW,      /* action */
+    UI_MI_SYNC_MODE,     /* choice: times, interval, always, manual (spec §9.3) */
+    UI_MI_SYNC_INTERVAL, /* choice: interval labels; shown in interval mode */
+    UI_MI_QUIET_HOURS,   /* toggle (D25) */
     UI_MI_TIME,
     UI_MI_SET_DATETIME, /* the date-time editor */
     UI_MI_CLOCK_24H,    /* toggle */
@@ -42,6 +47,7 @@ typedef enum {
     UI_MI_INFO_DEVICE,
     UI_MI_INFO_IP,
     UI_MI_INFO_MAC,
+    UI_MI_INFO_SYNC, /* the last sync's result (spec §5.7) */
     UI_MI_INFO_UPTIME,
     UI_MI_INFO_MEMORY,
     UI_MI_SYSTEM,
@@ -72,7 +78,7 @@ typedef enum {
     UI_MENU_NONE,     /* only the menu changed: redraw it */
     UI_MENU_SET,      /* item = value */
     UI_MENU_SET_TIME, /* the local date and time in `local` */
-    UI_MENU_ACTION,   /* run item: config mode, forget networks, reset the password, reboot, factory reset */
+    UI_MENU_ACTION,   /* run item: config mode, forget networks, reset the password, sync now, reboot, reset */
     UI_MENU_CLOSE,
 } ui_menu_intent_kind_t;
 

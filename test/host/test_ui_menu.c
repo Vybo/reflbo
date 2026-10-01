@@ -40,18 +40,18 @@ static ui_menu_intent_t open_item(ui_menu_item_t item)
 
 static void test_the_root_lists_the_sections_in_order(void)
 {
-    const ui_menu_item_t expected[] = { UI_MI_PRESETS, UI_MI_WIFI, UI_MI_TIME, UI_MI_DISPLAY, UI_MI_SENSORS,
-                                        UI_MI_INFO, UI_MI_SYSTEM };
+    const ui_menu_item_t expected[] = { UI_MI_PRESETS, UI_MI_WIFI,    UI_MI_SYNC, UI_MI_TIME,
+                                        UI_MI_DISPLAY, UI_MI_SENSORS, UI_MI_INFO, UI_MI_SYSTEM };
     ui_menu_item_t items[UI_MI_COUNT];
     int n = ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT);
-    TEST_ASSERT_EQUAL_INT(7, n);
-    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 7);
+    TEST_ASSERT_EQUAL_INT(8, n);
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 8);
     TEST_ASSERT_EQUAL_INT(UI_MI_PRESETS, ui_menu_current(&s_m, &s_model));
 }
 
 static void test_next_wraps_select_enters_and_back_returns_to_the_section(void)
 {
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 8; i++) {
         press(UI_MENU_KEY_NEXT);
     }
     TEST_ASSERT_EQUAL_INT(UI_MI_PRESETS, ui_menu_current(&s_m, &s_model)); /* wrapped */
@@ -186,7 +186,8 @@ static void test_hidden_items_are_skipped_and_info_does_nothing(void)
 {
     s_model.hidden[UI_MI_DISPLAY] = true;
     ui_menu_item_t items[UI_MI_COUNT];
-    TEST_ASSERT_EQUAL_INT(6, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT(7, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    press(UI_MENU_KEY_NEXT);
     press(UI_MENU_KEY_NEXT);
     press(UI_MENU_KEY_NEXT);
     press(UI_MENU_KEY_NEXT);
@@ -225,15 +226,16 @@ static void test_the_wifi_section_asks_before_it_forgets_anything(void)
     TEST_ASSERT_NULL(ui_menu_question(UI_MI_REBOOT, en));
 }
 
-/* Spec §5.7: Info gains the IP address and the MAC with M4. */
+/* Spec §5.7: Info gains the IP address and the MAC with M4, the last sync with M5. */
 static void test_info_shows_the_network_addresses(void)
 {
     open_item(UI_MI_INFO);
     ui_menu_item_t items[UI_MI_COUNT];
-    const ui_menu_item_t expected[] = { UI_MI_INFO_BATTERY, UI_MI_INFO_FIRMWARE, UI_MI_INFO_DEVICE, UI_MI_INFO_IP,
-                                        UI_MI_INFO_MAC, UI_MI_INFO_UPTIME, UI_MI_INFO_MEMORY };
-    TEST_ASSERT_EQUAL_INT(7, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
-    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 7);
+    const ui_menu_item_t expected[] = { UI_MI_INFO_BATTERY, UI_MI_INFO_FIRMWARE, UI_MI_INFO_DEVICE,
+                                        UI_MI_INFO_IP,      UI_MI_INFO_MAC,      UI_MI_INFO_SYNC,
+                                        UI_MI_INFO_UPTIME,  UI_MI_INFO_MEMORY };
+    TEST_ASSERT_EQUAL_INT(8, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 8);
     TEST_ASSERT_TRUE(ui_menu_is_section(UI_MI_WIFI));
     TEST_ASSERT_FALSE(ui_menu_is_section(UI_MI_INFO_IP));
 }
@@ -291,9 +293,28 @@ static void test_a_long_value_leaves_the_label_alone(void)
     }
 }
 
+/* Spec §5.7, D25: the Sync section; Interval shows in interval mode only. */
+static void test_the_sync_section_offers_its_mode_and_quiet_hours(void)
+{
+    s_model.hidden[UI_MI_SYNC_INTERVAL] = true; /* the app hides it outside interval mode */
+    open_item(UI_MI_SYNC);
+    ui_menu_item_t items[UI_MI_COUNT];
+    const ui_menu_item_t expected[] = { UI_MI_SYNC_NOW, UI_MI_SYNC_MODE, UI_MI_QUIET_HOURS };
+    TEST_ASSERT_EQUAL_INT(3, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 3);
+    ui_menu_intent_t in = open_item(UI_MI_SYNC_NOW);
+    TEST_ASSERT_EQUAL(UI_MENU_ACTION, in.kind); /* no question: a sync loses nothing */
+    TEST_ASSERT_EQUAL_INT(UI_MI_SYNC_NOW, in.item);
+    s_model.value[UI_MI_QUIET_HOURS] = 0;
+    in = open_item(UI_MI_QUIET_HOURS);
+    TEST_ASSERT_EQUAL(UI_MENU_SET, in.kind);
+    TEST_ASSERT_EQUAL_INT(1, in.value);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_the_sync_section_offers_its_mode_and_quiet_hours);
     RUN_TEST(test_the_root_lists_the_sections_in_order);
     RUN_TEST(test_next_wraps_select_enters_and_back_returns_to_the_section);
     RUN_TEST(test_back_at_the_root_and_exit_anywhere_close_the_menu);

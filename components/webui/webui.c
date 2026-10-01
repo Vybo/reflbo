@@ -621,7 +621,9 @@ static esp_err_t geocode(httpd_req_t *req, const char *query)
     static geocode_job_t job; /* one at a time: the server handles one request at a time */
     memset(&job, 0, sizeof(job));
     char decoded[96];
-    webui_url_decode(q, decoded, sizeof(decoded));
+    if (webui_url_decode(q, decoded, sizeof(decoded)) <= 0) { /* a bad escape leaves no string to send */
+        return send_error(req, 400, "name a place: ?q=");
+    }
     weather_geocode_url(job.url, sizeof(job.url), decoded, lang);
     job.done = xSemaphoreCreateBinary();
     if (job.done == NULL || xTaskCreatePinnedToCore(geocode_task, "geocode", GEOCODE_STACK, &job, 3, NULL, 0) != pdPASS) {

@@ -1014,10 +1014,42 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
 | M4 | Accepted (D18): a web UI password, instead of the admin PIN. Accepted (D19): config mode after a web restart, the clock set from the phone when lost, changing the password and logging out, a Device page. Still deferred: web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
+| After M5 | ADS-B flight radar (owner request, 2026-10-01): §19.1. About the size of M3b |
 | M6 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
 | M7 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
 | M8 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots |
 | Later | IDS JMK departures; a remote 1-bit image slot; the VBUS-sense hardware mod; external I²C sensors on the header; BLE or ESP-NOW sources |
+
+### 19.1 ADS-B flight radar (proposal)
+
+Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. An extra feature (D10): nothing is built until the owner decides the questions below at M5 planning.
+
+**Findings** (checked 2026-10-01)
+
+- **No reception on the board.** The ESP32-S3 has no 1090 MHz radio. A UART receiver module on the header would draw about 100 mA all the time, which a battery-first device can't afford. The data comes over Wi-Fi.
+- **viz1090** (github.com/nmatsuda/viz1090) is a desktop SDL2 app for a Raspberry Pi with an RTL-SDR running dump1090; it can't run on the ESP32, and its licence isn't stated. Worth borrowing as an idea: its map pipeline (`mapconverter.py`: Natural Earth and FAA shapefiles, simplified).
+- **MeteoPlaneRadar** (github.com/petus/MeteoPlaneRadar, MIT; Arduino on ESP32 core 3; a round 480×480 colour ST7701; USB power only):
+  - polls adsb.fi every 5, 10 or 15 s for ranges up to 25 km, up to 50 km and beyond (10–100 km selectable), doubling the interval after a failure;
+  - keeps at most 100 airborne aircraft, parsed through an ArduinoJson filter to bound memory;
+  - fetches a flight's route from adsb.lol (`https://api.adsb.lol/api/0/route`) only when its detail opens; adsb.lol answers 403 without a descriptive User-Agent;
+  - draws EU borders (about 31 000 points) and 1100 cities from a 518 KB embedded header.
+- **adsb.fi open data**: `https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}`, up to 250 NM, readsb JSON compatible with ADS-B Exchange v2. At most 1 request a second; non-commercial use only; adsb.fi must be credited with a link to its site.
+- **A local receiver** (an RTL-SDR with readsb, dump1090-fa or tar1090 on a Pi) serves the same JSON as `aircraft.json` over plain HTTP: no rate limit, no internet.
+
+**Sketch**
+
+- **Data.** One parser for readsb / ADS-B Exchange v2 JSON (`ac[]`: `hex`, `flight`, `lat`, `lon`, `alt_baro`, `gs`, `track`), fed by adsb.fi by default or by a local `aircraft.json` URL. Bounded: a size cap and `util_json_depth()` before parsing (hardware gotcha 30), into a fixed aircraft table in PSRAM. Pure and host-tested: the parser, the distance and bearing projection, label placement.
+- **View.** A full-screen 1-bit radar: range rings around home; aircraft as arrows turned to their track (pre-rendered rotations) with callsign and altitude; a nearest-aircraft panel; an optional underlay of borders and towns, generated at build time by a `tools/` script like the fonts and icons (Natural Earth is public domain). Goldens and device screenshots verify it. LPM at 1–2 Hz suits updates every 5–15 s.
+- **Power, the main constraint.** The radar needs Wi-Fi on the whole time it shows. Estimate, to be measured: about 1 % of the battery per hour; nonstop it would cut the battery life from about a week to 2–3 days. So a time-boxed radar mode like config mode, started from a button, the menu, a schedule or the web UI, with Wi-Fi off afterwards; perhaps continuous on USB power, which the firmware can only tell reliably with the VBUS-sense mod (hardware gotcha 3).
+- **Settings.** `adsb.source` (adsb.fi or a local URL), range, maximum aircraft, filters (minimum altitude, aircraft on the ground). The adsb.fi credit goes in the web UI and the README.
+- **From MeteoPlaneRadar:** range-dependent polling with back-off, the User-Agent, routes on demand, the borders and cities. Rewritten in C for ESP-IDF rather than ported; adapted code would be credited in `THIRD_PARTY.md`.
+- **Fit.** It needs M5's HTTPS client, the certificate bundle and the sync framework, so its slot is right after M5.
+
+**For the owner at M5 planning**
+
+1. Data source: adsb.fi only, or also the owner's own receiver? Recommended: both, through the same parser.
+2. When it runs: time-boxed sessions only, or also continuously on USB power?
+3. Map: range rings only, or borders and towns built in for the owner's region?
 
 ## 20. Risks and open items
 
@@ -1059,3 +1091,4 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | r16 | 2026-09-30 | M4 review: long menu values are cut (§5.7); leaving a network for a test is never its failure (§10.1); config mode doesn't watch the battery, and the resume flag is in NVS (§10.2, §14.2); bodies are read once, nested at most 18 levels, and a stalled client gets 408 (§10.3); 2 KB of headers for other gadgets' cookies (§10.4); an image that fails to start rolls back at once (§10.5) |
 | r17 | 2026-09-30 | M4 acceptance (D20): the globe in the status bar and the dashboard in config mode while a phone is logged in (§5.2, §10.2); the running clock's phase and the seconds' refresh rate (§7); battery samples in config mode and the battery calibration (§8, §14.3); the Device page's battery card and the preset editor's slot names, new presets in the cycle and Undo (§10.3); two open items (§20) |
 | r18 | 2026-09-30 | D21: learning the battery curve from a full discharge (§8), `POST /api/battery/learn` (§10.3), `battery.learned_mv` (§14.3); the open item on a learned curve is closed (§20) |
+| r19 | 2026-10-01 | ADS-B flight radar proposal, for after M5, with three owner questions (§19, §19.1) |

@@ -8,6 +8,7 @@
 #include "board.h"
 #include "board_buttons.h"
 #include "board_pins.h"
+#include "cJSON.h"
 #include "diag.h"
 #include "lang.h"
 #include "display.h"
@@ -16,6 +17,7 @@
 #include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_core_dump.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -47,7 +49,7 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      5 /* 5: the battery gauge keeps its calibration */
+#define SNAP_VERSION      6 /* 6: the weather, the air quality and the syncs' state */
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */
@@ -254,6 +256,7 @@ void app_clock_moved(int64_t delta_s)
     sensors_shift_time(delta_s); /* the battery history keeps its spacing on the new clock */
     app_state()->sched_checked = time(NULL); /* entries the jump skipped don't run late */
     app_state()->cycle_at = 0; /* the next tick starts the cycle interval again, rather than switching at once */
+    app_sync_schedule(); /* the next sync by the new clock */
     on_tick(true, false); /* show the new time now, not at the next slot */
 }
 
@@ -369,14 +372,16 @@ static void handle_event(const app_event_t *ev)
         break;
     case EV_CALL: {
         bool was_valid = timekeeping_valid();
-        int64_t before = now_ms();
+        int64_t before = now_ms(), mono_before = app_uptime_ms();
         ev->call.fn(ev->call.arg);
         if (ev->call.done != NULL) {
             xSemaphoreGive(ev->call.done);
         }
-        int64_t moved = now_ms() - before;
-        if (timekeeping_valid() != was_valid || moved < 0 || moved > 2000) {
-            app_clock_moved(moved / 1000); /* `rtc set` and friends */
+        /* how far the wall clock jumped, beside the time the call took: a long command (`panel fps 5`,
+         * a sync's report) is no clock move */
+        int64_t moved = (now_ms() - before) - (app_uptime_ms() - mono_before);
+        if (timekeeping_valid() != was_valid || moved < -1000 || moved > 1000) {
+            app_clock_moved(moved / 1000); /* `rtc set`, a sync, and friends */
         }
         power_hold_awake_ms(GRACE_MS);
         break;
@@ -528,6 +533,16 @@ static void come_alive(void)
     }
 }
 
+void app_alive(void)
+{
+    come_alive();
+}
+
+static void *json_malloc(size_t size)
+{
+    return heap_caps_malloc(size, MALLOC_CAP_SPIRAM); /* Wi-Fi and TLS need the internal RAM */
+}
+
 static esp_err_t boot(void)
 {
     esp_err_t err = power_init();
@@ -553,10 +568,17 @@ static esp_err_t boot(void)
     } else {
         app_ui_defaults();
         app_ui_load();
+        app_ui_restore_forecast(); /* spec §6: shown as stale by its age */
     }
 
     ESP_RETURN_ON_ERROR(board_init(wake == POWER_WAKE_COLD), TAG, "board");
     ESP_RETURN_ON_ERROR(pcf85063_init(board_i2c()), TAG, "RTC");
+    if (wake == POWER_WAKE_COLD) {
+        err = timekeeping_trim_start(); /* the RTC lost its trim with its power, or a reset kept it: write it */
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "RTC trim: %s", esp_err_to_name(err));
+        }
+    }
     ESP_RETURN_ON_ERROR(timekeeping_init(app_settings()->tz_posix), TAG, "time zone");
     err = timekeeping_load_from_rtc(wake == POWER_WAKE_RTC);
     if (err != ESP_OK) {
@@ -588,6 +610,9 @@ static esp_err_t boot(void)
     ESP_RETURN_ON_ERROR(start_rtc_int(), TAG, "RTC INT");
     ignore_held_buttons();
 
+    if (!warm) {
+        app_sync_schedule(); /* a warm wake keeps the due sync in its snapshot; NVS may not be up then */
+    }
     bool button_wake = wake == POWER_WAKE_KEY || wake == POWER_WAKE_BOOT;
     board_button_t woke_by = wake == POWER_WAKE_KEY ? BOARD_BUTTON_KEY : BOARD_BUTTON_BOOT;
     if (wake == POWER_WAKE_COLD || button_wake) {
@@ -647,7 +672,7 @@ static void app_task(void *arg)
         /* Config mode and a new image waiting to prove itself keep the chip awake: sleep would
          * drop Wi-Fi, and a deep-sleep wake would roll the image back (spec §10.5). */
         bool pending = uxQueueMessagesWaiting(s_queue) > 0 || board_buttons_busy() || app_config_active() ||
-                       s_ota_pending;
+                       s_ota_pending || app_sync_active() || app_sync_holds_wifi(); /* neither sleep keeps Wi-Fi */
         if (err == ESP_OK) {
             check_clock_jump();
             check_ota();
@@ -718,6 +743,7 @@ static void app_task(void *arg)
 
 esp_err_t app_start(void)
 {
+    cJSON_InitHooks(&(cJSON_Hooks){ .malloc_fn = json_malloc, .free_fn = heap_caps_free });
     s_queue = xQueueCreate(QUEUE_DEPTH, sizeof(app_event_t));
     ESP_RETURN_ON_FALSE(s_queue != NULL, ESP_ERR_NO_MEM, TAG, "queue");
     BaseType_t ok = xTaskCreatePinnedToCore(app_task, "app", APP_STACK, NULL, APP_PRIORITY, NULL, APP_CORE);

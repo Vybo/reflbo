@@ -9,6 +9,8 @@
 #include "esp_err.h"
 #include "scheduler.h"
 #include "settings.h"
+#include "sync.h"
+#include "sync_plan.h"
 #include "ui_fields.h"
 #include "ui_menu.h"
 #include "ui_preset.h"
@@ -16,6 +18,16 @@
 
 /* The dashboard's state and behaviour (main/app_ui.c, main/app_menu.c). All of it belongs to the
  * app task. */
+
+/* The syncs' state (main/app_sync.c, spec §9.3): kept through deep sleep with the rest. */
+typedef struct {
+    sync_history_t history;
+    sync_due_t due;             /* the next automatic sync; at 0 = none */
+    uint32_t last_at;           /* when the last sync started (UTC); 0 = none since the cold boot */
+    uint8_t last_result[SYNC_STEP_COUNT]; /* sync_step_result_t */
+    uint8_t last_failed_step;   /* the first step that failed; SYNC_STEP_COUNT if none */
+    char last_detail[SYNC_DETAIL_LEN];
+} app_sync_state_t;
 
 typedef struct {
     ds_t ds;
@@ -28,6 +40,7 @@ typedef struct {
     time_t cold_boot_at;  /* for Info > Uptime; 0 while the clock is unset */
     bool critical;        /* the critical-battery screen is up (spec §8) */
     bool first_run;       /* settings.json didn't exist at boot: the first-run screen (spec §5.5) */
+    app_sync_state_t sync;
 } app_ui_state_t;
 
 /* Kconfig settings, the built-in presets and an empty datastore. */
@@ -102,8 +115,27 @@ void app_menu_key(ui_menu_key_t key);
 void app_menu_render(void);
 int64_t app_menu_deadline_ms(void); /* the menu closes at this time without input */
 
+/* The weather and air quality in /fs/state/datastore.bin (spec §6): saved after a sync that fetched
+ * them, restored at a cold boot, when they show as stale by their age. */
+void app_ui_save_forecast(void);
+void app_ui_restore_forecast(void);
+
+/* Syncs (main/app_sync.c, spec §9.3). */
+void app_sync_schedule(void);    /* the next automatic sync, after a sync, a settings change or a clock move */
+time_t app_sync_due(void);       /* for the wake scheduler; 0 = none */
+void app_sync_tick(void);        /* starts a sync that is due; quiet hours in sync mode `always` */
+esp_err_t app_sync_now(void);    /* on demand: ESP_ERR_NOT_FOUND with no network saved */
+bool app_sync_active(void);      /* a sync runs */
+bool app_sync_failed(void);      /* the last sync failed a step */
+bool app_sync_holds_wifi(void);  /* sync mode `always` keeps Wi-Fi now */
+bool app_sync_lan_ui(void);      /* sync mode `always` is on a network: the web UI runs on the LAN (spec §10.4) */
+uint32_t app_sync_expected_s(void);
+/* Info ▸ Last sync: "12:05 OK", "05:30 Weather: HTTP 503", "Running", "Never". */
+void app_sync_summary(char *out, size_t size);
+
 /* Config mode (main/app_config.c, spec §10.2). */
 esp_err_t app_net_init(void); /* the Wi-Fi manager, started on first use */
+bool app_net_ready(void);     /* it started: netmgr_status() may be called */
 void app_config_enter(void);
 void app_config_exit(void);
 bool app_config_active(void);
@@ -113,6 +145,8 @@ void app_config_tick(void);      /* the timeout and the minutes left; call from 
 int64_t app_config_deadline_ms(void); /* app_uptime_ms() at which config mode ends; 0 when off */
 int64_t app_config_redraw_ms(void);   /* when the minutes left change next; 0 when off */
 void app_config_draw(gfx_fb_t *fb, const lang_t *lang);
+/* The web UI runs while config mode or sync mode `always` wants it (spec §10.4). */
+void app_net_refresh(void);
 /* The API routes the app answers (main/app_web.c); a webui_api_fn. */
 void app_web_api(const char *method, const char *path, const char *query, const char *body, uint8_t *out,
                  size_t size, webui_reply_t *reply);
@@ -128,6 +162,8 @@ void app_factory_reset(void);
 /* Implemented in main/app.c for the menu: the clock was set, and moved by delta_s. */
 void app_clock_moved(int64_t delta_s);
 int64_t app_uptime_ms(void); /* milliseconds since boot, unmoved by clock changes: toasts, menu */
+/* Logs, NVS and the console, as a board that stays awake has them (spec §3.3): a sync needs NVS. */
+void app_alive(void);
 
 /* The `field`, `preset` and `night` console commands (main/app_cmds.c); call after diag_start(). */
 void app_register_commands(void);

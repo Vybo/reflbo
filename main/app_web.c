@@ -155,6 +155,48 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
     cJSON_AddStringToObject(wifi, "ap_ssid", net.ap_ssid);
     cJSON_AddNumberToObject(wifi, "ap_clients", net.ap_clients);
 
+    /* spec §10.3, M5: the sync, the RTC's trim and the forecast's age */
+    cJSON *sync = cJSON_AddObjectToObject(o, "sync");
+    static const char *const k_modes[] = { "times", "interval", "always", "manual" };
+    cJSON_AddStringToObject(sync, "mode", k_modes[st->settings.sync_mode <= SETTINGS_SYNC_MANUAL
+                                                       ? st->settings.sync_mode : 0]);
+    cJSON_AddBoolToObject(sync, "running", app_sync_active());
+    if (app_sync_active()) {
+        cJSON_AddStringToObject(sync, "step", sync_step_name(sync_step()));
+    }
+    if (st->sync.last_at != 0) {
+        cJSON *last = cJSON_AddObjectToObject(sync, "last");
+        cJSON_AddNumberToObject(last, "at", st->sync.last_at);
+        cJSON *steps = cJSON_AddObjectToObject(last, "steps");
+        static const char *const k_results[] = { "skipped", "ok", "failed" };
+        for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+            uint8_t r = st->sync.last_result[i];
+            cJSON_AddStringToObject(steps, sync_step_name((sync_step_t)i), k_results[r <= SYNC_STEP_FAILED ? r : 0]);
+        }
+        if (st->sync.last_failed_step < SYNC_STEP_COUNT) {
+            cJSON_AddStringToObject(last, "failed", sync_step_name((sync_step_t)st->sync.last_failed_step));
+            cJSON_AddStringToObject(last, "detail", st->sync.last_detail);
+        }
+    }
+    if (st->sync.due.at != 0) {
+        cJSON_AddNumberToObject(sync, "next", (double)st->sync.due.at);
+        cJSON_AddBoolToObject(sync, "next_retry", st->sync.due.retry);
+    }
+    const ds_weather_t *w = ds_weather(app_ds());
+    if (w != NULL) {
+        cJSON_AddNumberToObject(sync, "weather_at", w->fetched);
+    }
+    const ds_air_t *a = ds_air(app_ds());
+    if (a != NULL) {
+        cJSON_AddNumberToObject(sync, "air_at", a->fetched);
+    }
+    const rtc_trim_t *trim = timekeeping_trim();
+    cJSON *rtc = cJSON_AddObjectToObject(t, "rtc");
+    cJSON_AddNumberToObject(rtc, "trim_steps", trim->offset);
+    if (trim->drift_ppb != TRIM_NO_DRIFT) {
+        cJSON_AddNumberToObject(rtc, "drift_s_per_day", timekeeping_trim_drift_s10_per_day(trim) / 10.0);
+    }
+
     const ui_preset_t *active = &st->presets.presets[st->presets.active];
     cJSON *preset = cJSON_AddObjectToObject(o, "preset");
     cJSON_AddStringToObject(preset, "active", active->id);
@@ -390,6 +432,18 @@ void app_web_api(const char *method, const char *path, const char *query, const 
         set_time(body, out, size, reply);
     } else if (strcmp(path, "/api/battery/learn") == 0 && strcmp(method, "POST") == 0) {
         learn(body, out, size, reply);
+    } else if (strcmp(path, "/api/sync") == 0 && strcmp(method, "POST") == 0) { /* spec §10.3, M5 */
+        esp_err_t e = app_sync_now();
+        if (e == ESP_OK) {
+            reply_text(reply, out, size, (size_t)snprintf((char *)out, size, "{\"started\":true}"));
+            reply->status = 202; /* the page follows it in GET /api/status */
+        } else {
+            reply_error(reply, out, size, 409,
+                        e == ESP_ERR_NOT_FOUND       ? "no Wi-Fi network is saved"
+                        : e == ESP_ERR_INVALID_STATE ? "not now: a sync runs, the battery is critical, or the device "
+                                                       "is on its own network only"
+                                                     : "the sync didn't start");
+        }
     } else if (strcmp(path, "/api/backup") == 0 && get) {
         backup(out, size, reply);
     } else if (strcmp(path, "/api/restore") == 0 && strcmp(method, "POST") == 0) {

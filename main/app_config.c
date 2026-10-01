@@ -43,6 +43,11 @@ static void net_changed(void) /* on the netmgr task or the event loop */
     app_post(net_changed_on_app, NULL);
 }
 
+bool app_net_ready(void)
+{
+    return s_net_ready;
+}
+
 esp_err_t app_net_init(void)
 {
     if (s_net_ready) {
@@ -104,11 +109,7 @@ void app_config_enter(void)
     }
     bool no_password = !webui_password_set();
     netmgr_start(no_password); /* D18: only a phone on the AP may choose the password */
-    const webui_config_t web = { .run = app_execute, .api = app_web_api, .event = web_event };
-    err = webui_start(&web);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "web configurator: %s", esp_err_to_name(err));
-    }
+    app_net_refresh();
     ESP_LOGI(TAG, "config mode on%s", no_password ? ", no web password yet" : "");
     app_ui_render();
 }
@@ -119,8 +120,12 @@ void app_config_exit(void)
         return;
     }
     s_on = false;
-    webui_stop();
-    netmgr_stop();
+    if (app_sync_holds_wifi() || app_sync_active()) {
+        netmgr_ap_off(); /* spec §9.3: the station stays for the sync or sync mode `always` */
+    } else {
+        netmgr_stop();
+    }
+    app_net_refresh();
     board_buttons_set_config(k_app_dashboard_buttons);
     esp_err_t err = st7305_set_mode(ST7305_MODE_LPM);
     if (err != ESP_OK) {
@@ -133,6 +138,20 @@ void app_config_exit(void)
 bool app_config_active(void)
 {
     return s_on;
+}
+
+void app_net_refresh(void)
+{
+    bool want = s_on || app_sync_lan_ui();
+    if (want && !webui_running()) {
+        const webui_config_t web = { .run = app_execute, .api = app_web_api, .event = web_event };
+        esp_err_t err = webui_start(&web);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "web configurator: %s", esp_err_to_name(err));
+        }
+    } else if (!want && webui_running()) {
+        webui_stop();
+    }
 }
 
 bool app_config_shows_setup(void)
@@ -177,6 +196,7 @@ int64_t app_config_redraw_ms(void)
 
 void app_config_tick(void)
 {
+    app_net_refresh(); /* a server still stopping when it was wanted again starts now (an M4 minor) */
     if (!s_on) {
         return;
     }

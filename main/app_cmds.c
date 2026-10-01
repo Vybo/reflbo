@@ -293,6 +293,68 @@ static int cmd_wifi(int argc, char **argv)
     return usage(k_usage);
 }
 
+static void print_time(const char *label, time_t t)
+{
+    if (t == 0) {
+        printf("%s none\n", label);
+        return;
+    }
+    struct tm local;
+    localtime_r(&t, &local);
+    char text[32];
+    strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &local);
+    printf("%s %s\n", label, text);
+}
+
+/* `sync now | status` (spec §15). */
+static int sync_body(int argc, char **argv)
+{
+    static const char *const k_usage = "sync now | sync status";
+    if (argc == 2 && strcmp(argv[1], "now") == 0) {
+        esp_err_t err = app_sync_now();
+        printf("sync: %s\n", err == ESP_OK                  ? "started; `sync status` follows it"
+                              : err == ESP_ERR_NOT_FOUND     ? "no Wi-Fi network saved"
+                              : err == ESP_ERR_INVALID_STATE ? "one runs already, or the battery is critical"
+                                                             : esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
+    if (argc == 2 && strcmp(argv[1], "status") == 0) {
+        static const char *const k_modes[] = { "times", "interval", "always", "manual" };
+        const settings_t *s = app_settings();
+        printf("mode %s", k_modes[s->sync_mode <= SETTINGS_SYNC_MANUAL ? s->sync_mode : 0]);
+        if (s->sync_mode == SETTINGS_SYNC_TIMES) {
+            for (int i = 0; i < s->sync_time_count; i++) {
+                printf(" %02d:%02d", s->sync_times[i] / 60, s->sync_times[i] % 60);
+            }
+        } else if (s->sync_mode == SETTINGS_SYNC_INTERVAL) {
+            printf(" every %u min", s->sync_interval_min);
+        }
+        printf("; quiet hours %02d:%02d-%02d:%02d %s; expected every %lu s\n", s->quiet_from / 60, s->quiet_from % 60,
+               s->quiet_to / 60, s->quiet_to % 60, s->quiet ? "on" : "off", (unsigned long)app_sync_expected_s());
+        const app_sync_state_t *st = &app_state()->sync;
+        if (app_sync_active()) {
+            printf("running: %s\n", sync_running() ? sync_step_name(sync_step()) : "applying its report");
+        }
+        print_time("last", st->last_at);
+        if (st->last_at != 0) {
+            static const char *const k_results[] = { "skipped", "ok", "failed" };
+            for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+                printf("  %-8s %s%s%s\n", sync_step_name((sync_step_t)i),
+                       k_results[st->last_result[i] <= SYNC_STEP_FAILED ? st->last_result[i] : 0],
+                       i == st->last_failed_step ? ": " : "", i == st->last_failed_step ? st->last_detail : "");
+            }
+        }
+        print_time(st->due.retry ? "next (a retry)" : "next", st->due.at);
+        return 0;
+    }
+    return usage(k_usage);
+}
+
+static int cmd_sync(int argc, char **argv)
+{
+    return diag_on_owner(sync_body, argc, argv);
+}
+
 void app_register_commands(void)
 {
     const esp_console_cmd_t cmds[] = {
@@ -302,6 +364,7 @@ void app_register_commands(void)
         { .command = "schedule", .help = "schedule list | on | off | clear | add <HH:MM> preset <id> [days] | "
                                          "add <HH:MM> night <HH:MM> [days]", .func = &cmd_schedule },
         { .command = "wifi", .help = "wifi status | scan", .func = &cmd_wifi },
+        { .command = "sync", .help = "sync now | status (spec §9.3)", .func = &cmd_sync },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_err_t err = esp_console_cmd_register(&cmds[i]);

@@ -6,6 +6,7 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "lang.h"
+#include "netmgr.h"
 #include "power.h"
 #include "sdkconfig.h"
 #include "sensors.h"
@@ -15,6 +16,7 @@
 #include "ui_dashboard.h"
 #include "ui_screens.h"
 #include "util_base64.h"
+#include "util_snapshot.h"
 #include "util_time.h"
 #include "webui.h"
 
@@ -31,6 +33,9 @@ static char s_toast[64];
 static int64_t s_toast_until_ms;
 
 #define LEARN_PATH "/fs/state/battery_learn.txt" /* the battery learning session in base64 (D21) */
+#define FORECAST_PATH "/fs/state/datastore.bin"    /* the last weather and air quality (spec §6) */
+#define FORECAST_MAGIC 0x72666366u /* "rfcf" */
+#define FORECAST_VERSION 1
 #define LEARN_TEXT_MAX ((BATTERY_LEARN_PACKED_MAX + 2) / 3 * 4 + 1)
 _Static_assert(SETTINGS_BAT_CURVE_POINTS == BATTERY_CURVE_POINTS, "settings keep a learned curve whole");
 
@@ -200,7 +205,16 @@ void app_ui_context(ui_context_t *ctx)
     *ctx = (ui_context_t){ .now = now, .time_valid = timekeeping_valid(), .ds = &s.ds,
                            .lang = lang_get(s.settings.language), .clock_24h = s.settings.clock_24h,
                            .fahrenheit = s.settings.fahrenheit,
-                           .web_session = app_config_active() && webui_session_active() };
+                           .web_session = (app_config_active() || app_sync_lan_ui()) && webui_session_active(),
+                           .lat_e4 = s.settings.lat_e4, .lon_e4 = s.settings.lon_e4,
+                           .sync = app_sync_active()   ? UI_SYNC_RUNNING
+                                   : app_sync_failed() ? UI_SYNC_FAILED
+                                                       : UI_SYNC_IDLE };
+    if (app_sync_holds_wifi() && !app_config_active()) { /* spec §5.2: sync mode `always` */
+        netmgr_status_t ns;
+        netmgr_status(&ns);
+        ctx->wifi = ns.state == NETMGR_STATION && ns.ip[0] != '\0' ? UI_WIFI_ON : UI_WIFI_REJOINING;
+    }
     localtime_r(&now, &ctx->local);
     ctx->local_day = local_day(&ctx->local);
 }
@@ -318,6 +332,59 @@ static void save_learning(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "battery learning not saved: %s", esp_err_to_name(err));
     }
+}
+
+typedef struct {
+    util_snapshot_hdr_t hdr;
+    ds_weather_t weather;
+    ds_air_t air;
+} forecast_file_t;
+
+void app_ui_save_forecast(void)
+{
+    static forecast_file_t f;
+    if (storage_init() != ESP_OK) {
+        return;
+    }
+    const ds_weather_t *w = ds_weather(&s.ds);
+    const ds_air_t *a = ds_air(&s.ds);
+    memset(&f, 0, sizeof(f));
+    if (w != NULL) {
+        f.weather = *w;
+    }
+    if (a != NULL) {
+        f.air = *a;
+    }
+    util_snapshot_seal(&f, sizeof(f), FORECAST_MAGIC, FORECAST_VERSION);
+    esp_err_t err = storage_write_atomic(FORECAST_PATH, (const char *)&f, sizeof(f));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "forecast not saved: %s", esp_err_to_name(err));
+    }
+}
+
+void app_ui_restore_forecast(void)
+{
+    static forecast_file_t f;
+    if (!storage_ready()) {
+        return;
+    }
+    FILE *file = fopen(FORECAST_PATH, "rb");
+    if (file == NULL) {
+        return;
+    }
+    size_t n = fread(&f, 1, sizeof(f), file);
+    fclose(file);
+    if (n != sizeof(f) || !util_snapshot_valid(&f, sizeof(f), FORECAST_MAGIC, FORECAST_VERSION)) {
+        ESP_LOGW(TAG, "%s: not a forecast of this firmware; left out", FORECAST_PATH);
+        return;
+    }
+    if (f.weather.fetched != 0) {
+        ds_set_weather(&s.ds, &f.weather);
+    }
+    if (f.air.fetched != 0) {
+        ds_set_air(&s.ds, &f.air);
+    }
+    ESP_LOGI(TAG, "forecast from %lu restored", (unsigned long)f.weather.fetched);
 }
 
 void app_ui_learn(bool start)
@@ -531,6 +598,7 @@ void app_ui_tick(bool force)
     }
     s.done_slot = slot;
     run_schedule(now);
+    app_sync_tick();
     if (s.presets.cycle_enabled && (s.cycle_at == 0 || s.cycle_at - now > s.presets.cycle_interval_s)) {
         s.cycle_at = now + s.presets.cycle_interval_s; /* the first tick, or the clock moved back */
     }
@@ -553,6 +621,7 @@ sched_wake_t app_ui_next_wake(time_t now)
         .cycle_at = s.presets.cycle_enabled ? s.cycle_at : 0,
         .every_second = s.presets.presets[s.presets.active].seconds,
         .schedule_at = schedule_runs() ? ui_schedule_next(&s.presets.schedule, now, &index) : 0,
+        .sync_at = s.critical || s.night_until != 0 ? 0 : app_sync_due(),
     };
     return scheduler_next_wake(&in);
 }

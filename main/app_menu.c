@@ -44,6 +44,9 @@ static const char *const k_cycle_labels[] = { "10 s", "15 s", "30 s", "1 min", "
 static const uint8_t k_quarter_hz[] = { 1, 2, 4, 8, 16, 32 }; /* 0.25 to 8 Hz (D12) */
 #define RATE_COUNT ((int)(sizeof(k_quarter_hz) / sizeof(k_quarter_hz[0])))
 static const char *const k_units[] = { "°C", "°F" };
+static const uint16_t k_sync_min[] = { 15, 30, 60, 120, 180, 360, 720, 1440 }; /* spec §9.3: 15-1440 */
+static const char *const k_sync_labels[] = { "15 min", "30 min", "1 h", "2 h", "3 h", "6 h", "12 h", "24 h" };
+#define SYNC_STEPS ((int)(sizeof(k_sync_min) / sizeof(k_sync_min[0])))
 static const char *const k_languages[] = { "en", "cs" };
 #define LANGUAGE_COUNT ((int)(sizeof(k_languages) / sizeof(k_languages[0])))
 
@@ -56,7 +59,8 @@ static const char *s_zone_names[ZONES_MAX];
 static const char *s_language_names[LANGUAGE_COUNT];
 static char s_rate_text[RATE_COUNT][12];
 static const char *s_rates[RATE_COUNT];
-static char s_info[7][80];
+static char s_info[8][80];
+static const char *s_sync_modes[4];
 
 static const lang_t *lang(void)
 {
@@ -146,6 +150,19 @@ static void build_model(void)
     m->choices[UI_MI_TIME_ZONE] = s_zone_names;
     m->value[UI_MI_TIME_ZONE] = zone;
 
+    static const lang_str_t k_modes[4] = { LS_SYNC_TIMES, LS_SYNC_INTERVAL, LS_SYNC_ALWAYS, LS_SYNC_MANUAL };
+    for (int i = 0; i < 4; i++) {
+        s_sync_modes[i] = lang_str(l, k_modes[i]);
+    }
+    m->choices[UI_MI_SYNC_MODE] = s_sync_modes;
+    m->choice_count[UI_MI_SYNC_MODE] = 4;
+    m->value[UI_MI_SYNC_MODE] = set->sync_mode;
+    m->choices[UI_MI_SYNC_INTERVAL] = k_sync_labels;
+    m->choice_count[UI_MI_SYNC_INTERVAL] = SYNC_STEPS;
+    m->value[UI_MI_SYNC_INTERVAL] = nearest_index(k_sync_min, SYNC_STEPS, set->sync_interval_min);
+    m->hidden[UI_MI_SYNC_INTERVAL] = set->sync_mode != SETTINGS_SYNC_INTERVAL;
+    m->value[UI_MI_QUIET_HOURS] = set->quiet;
+
     m->value[UI_MI_UPDATE_INTERVAL] = set->display_every_min;
     int rate = 0;
     for (int i = 0; i < RATE_COUNT; i++) {
@@ -198,16 +215,18 @@ static void build_model(void)
     lang_format_decimal(l, (long)(esp_get_free_heap_size() / (1024 * 1024 / 10)), 1, mb, sizeof(mb));
     snprintf(s_info[4], sizeof(s_info[4]), "%s MB", mb);
     netmgr_status_t net = { 0 };
-    if (app_config_active()) {
-        netmgr_status(&net); /* Wi-Fi is off otherwise */
+    if (app_net_ready()) {
+        netmgr_status(&net); /* off: no address */
     }
     snprintf(s_info[5], sizeof(s_info[5]), "%s",
              net.ip[0] ? net.ip : net.state == NETMGR_AP ? NETMGR_AP_IP : "\xE2\x80\x94");
     snprintf(s_info[6], sizeof(s_info[6]), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4],
              mac[5]);
+    app_sync_summary(s_info[7], sizeof(s_info[7]));
     const ui_menu_item_t info_items[] = { UI_MI_INFO_BATTERY, UI_MI_INFO_FIRMWARE, UI_MI_INFO_DEVICE,
-                                          UI_MI_INFO_UPTIME, UI_MI_INFO_MEMORY, UI_MI_INFO_IP, UI_MI_INFO_MAC };
-    for (int i = 0; i < 7; i++) {
+                                          UI_MI_INFO_UPTIME,  UI_MI_INFO_MEMORY,   UI_MI_INFO_IP,
+                                          UI_MI_INFO_MAC,     UI_MI_INFO_SYNC };
+    for (int i = 0; i < 8; i++) {
         m->info[info_items[i]] = s_info[i];
     }
 }
@@ -260,6 +279,18 @@ static void apply(const ui_menu_intent_t *in)
             break;
         case UI_MI_UPDATE_INTERVAL:
             set->display_every_min = (uint8_t)in->value;
+            save_settings = retime = true;
+            break;
+        case UI_MI_SYNC_MODE:
+            set->sync_mode = (uint8_t)(in->value >= 0 && in->value <= SETTINGS_SYNC_MANUAL ? in->value : 0);
+            save_settings = retime = true; /* retime schedules the next sync */
+            break;
+        case UI_MI_SYNC_INTERVAL:
+            set->sync_interval_min = k_sync_min[in->value >= 0 && in->value < SYNC_STEPS ? in->value : 2];
+            save_settings = retime = true;
+            break;
+        case UI_MI_QUIET_HOURS:
+            set->quiet = in->value != 0;
             save_settings = retime = true;
             break;
         case UI_MI_REFRESH_RATE:
@@ -316,6 +347,12 @@ static void apply(const ui_menu_intent_t *in)
                 app_ui_toast(lang_str(lang(), LS_T_PASSWORD_CLEARED));
             }
             return;
+        case UI_MI_SYNC_NOW: {
+            app_menu_close();
+            esp_err_t err = app_sync_now();
+            app_ui_toast(lang_str(lang(), err == ESP_ERR_NOT_FOUND ? LS_T_NO_NETWORK : LS_T_SYNC_STARTED));
+            return;
+        }
         case UI_MI_REBOOT:
             app_restart(LS_T_REBOOTING, false);
             break;

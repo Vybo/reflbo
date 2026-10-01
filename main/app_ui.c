@@ -56,6 +56,7 @@ static void default_settings(settings_t *out)
         .bat_full_mv = BATTERY_FULL_MV,
     };
     settings_sync_defaults(out);
+    settings_radar_defaults(out);
     snprintf(out->place, sizeof(out->place), "%s", CONFIG_REFLBO_LOCATION_NAME);
     snprintf(out->tz_posix, sizeof(out->tz_posix), "%s", CONFIG_REFLBO_TZ);
     snprintf(out->tz_iana, sizeof(out->tz_iana), "%s", CONFIG_REFLBO_TZ_NAME);

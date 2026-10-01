@@ -291,3 +291,87 @@ test('a discharge being learned shows its hours and can be stopped', async () =>
   await settle();
   assert.deepEqual(learnCalls, [{ stop: true }]);
 });
+
+/* ---- sync (spec §9.3, D25) ---- */
+
+const SYNC_SETTINGS = { schema: 1, sync: { mode: 'times', times: ['05:30'], interval_min: 60,
+                                           quiet: { enabled: false, from: '23:00', to: '06:00' } } };
+const syncStatus = (sync) => ({ device: {}, time: { valid: true, rtc: { trim_steps: -9, drift_s_per_day: -0.2 } },
+                                battery: {}, sensors: {}, preset: {}, sync,
+                                wifi: { state: sync.mode === 'always' ? 'station' : 'off', ap_on: false } });
+
+test('the Sync page saves the mode, the times and the quiet hours', async () => {
+  const patches = [];
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, SYNC_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'times', running: false })),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, SYNC_SETTINGS); },
+  });
+  await ctx.syncPage();
+  const inputs = below(main).filter((e) => e.tag === 'input');
+  const time = inputs.find((e) => e.attrs.type === 'time' && e.value === '05:30');
+  time.value = '04:45';
+  await Promise.all((time.listeners.change || []).map((fn) => fn({ target: time })));
+  inputs.find((e) => e.attrs.type === 'checkbox').checked = true; /* quiet hours 23:00-06:00 */
+  await buttonNamed(main, 'Save').click();
+  assert.deepEqual(patches.at(-1), { sync: { mode: 'times', times: ['04:45'], interval_min: 60,
+                                             quiet: { enabled: true, from: '23:00', to: '06:00' } } });
+  assert.match(text(main), /04:45 falls in the quiet hours: it runs at 06:00/);
+});
+
+test('the Balanced shortcut syncs every hour', async () => {
+  const patches = [];
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, SYNC_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'times', running: false })),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, SYNC_SETTINGS); },
+  });
+  await ctx.syncPage();
+  await buttonNamed(main, 'Balanced').click();
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.at(-1).sync.mode, 'interval');
+  assert.equal(patches.at(-1).sync.interval_min, 60);
+});
+
+test('Sync now follows the sync to its end', async () => {
+  let polls = 0;
+  const done = { mode: 'times', running: false, last: { at: 1790859600, failed: 'weather', detail: 'HTTP 503',
+                 steps: { wifi: 'ok', time: 'ok', weather: 'failed', air: 'ok' } } };
+  const { ctx, calls, main } = await load({
+    'GET /api/settings': () => reply(200, SYNC_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus(++polls < 3 ? { mode: 'times', running: true, step: 'weather' } : done)),
+    'POST /api/sync': () => reply(202, { started: true }),
+  });
+  ctx.setTimeout = (fn) => { fn(); return 0; }; /* sleep() returns at once */
+  await ctx.syncPage();
+  await buttonNamed(main, 'Sync now').click();
+  await settle();
+  assert.ok(calls.some((c) => c.path === '/api/sync' && c.init.method === 'POST'));
+  assert.match(text(main), /The sync failed/);
+  assert.match(text(main), /failed: HTTP 503/);
+});
+
+test('the place search fills in the name and the coordinates', async () => {
+  const { ctx, calls, main } = await load({
+    'GET /api/settings': () => reply(200, { schema: 1, location: { name: 'Brno', lat: 49.1951, lon: 16.6068 }, time: {} }),
+    'GET /api/geocode': () => reply(200, { places: [{ name: 'Olomouc', region: 'Olomoucký', country: 'CZ', lat: 49.5938,
+                                                      lon: 17.2509, timezone: 'Europe/Prague' }] }),
+  });
+  await ctx.placePage();
+  const query = below(main).find((e) => e.tag === 'input' && e.attrs.type === 'search' && e.attrs.placeholder === 'A town or city');
+  query.value = 'Olomouc';
+  await buttonNamed(main, 'Search').click();
+  assert.equal(calls.at(-1).path, '/api/geocode?q=Olomouc');
+  await buttonNamed(main, 'Olomouc, Olomoucký, CZ').click();
+  const values = below(main).filter((e) => e.tag === 'input').map((e) => e.value);
+  assert.ok(values.includes('Olomouc') && values.includes('49.5938') && values.includes('17.2509'), values.join(' '));
+});
+
+test('Done keeps the page when sync mode Always on keeps the network', async () => {
+  const { byId } = await load({
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'always', running: false })),
+    'POST /api/done': () => reply(200, { ok: true }),
+  });
+  await byId.done.onclick();
+  assert.doesNotMatch(text(byId.main), /Wi-Fi is off/);
+});

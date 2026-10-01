@@ -200,10 +200,19 @@ function loginPage() {
 }
 
 document.getElementById('done').onclick = async () => {
+  let lan = false; /* sync mode Always on keeps the device on the network, and this page with it (spec §9.3) */
+  try {
+    const s = await api('GET', '/api/status');
+    lan = !!s.sync && s.sync.mode === 'always' && s.wifi.state === 'station' && !s.wifi.ap_on;
+  } catch (e) { /* the page decides below */ }
   try {
     await api('POST', '/api/done');
   } catch (e) {
     toast(e.message);
+    return;
+  }
+  if (lan) {
+    toast('Done. Sync mode Always on keeps the device on your network, so this page still works.');
     return;
   }
   document.getElementById('nav').hidden = true;
@@ -214,8 +223,8 @@ document.getElementById('done').onclick = async () => {
 
 /* ---- pages ---- */
 
-const pages = { status: statusPage, wifi: wifiPage, place: placePage, device: devicePage, presets: presetsPage,
-                firmware: firmwarePage, backup: backupPage };
+const pages = { status: statusPage, wifi: wifiPage, place: placePage, sync: syncPage, device: devicePage,
+                presets: presetsPage, firmware: firmwarePage, backup: backupPage };
 
 function route() {
   const name = location.hash.slice(1) || 'status';
@@ -278,6 +287,7 @@ async function statusPage() {
       env.age_s !== undefined ? ['Measured', `${duration(env.age_s)} ago`] : null,
     ])),
     card('Wi-Fi', facts([['Now', wifiText(s.wifi)], s.wifi.ap_on ? ['On its network', `${s.wifi.ap_clients} device(s)`] : null])),
+    card('Sync', facts(syncFacts(s.sync)), actions(h('a', { class: 'btn', href: '#sync' }, 'Sync settings'))),
     card('This page', passwordForm('Change password', null, async (password, old, note, form) => {
       await api('POST', '/api/auth/password', { old, password });
       form.reset();
@@ -292,6 +302,143 @@ async function statusPage() {
       waitForRestart('Restarting…');
     }))),
   );
+}
+
+/* ---- Sync (spec §9.3, D25) ---- */
+
+const SYNC_STEPS = [['wifi', 'Wi-Fi'], ['time', 'Time'], ['weather', 'Weather'], ['air', 'Air quality']];
+const SYNC_INTERVALS = [15, 30, 60, 120, 180, 360, 720, 1440];
+const intervalLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} h`);
+
+function when(epoch) {
+  if (!epoch) return '—';
+  const d = new Date(epoch * 1000), now = new Date();
+  const hm = d.toTimeString().slice(0, 5);
+  const day = d.toDateString() === now.toDateString() ? 'today'
+    : d.toDateString() === new Date(now.getTime() + 86400000).toDateString() ? 'tomorrow' : d.toISOString().slice(0, 10);
+  return `${hm} ${day}`;
+}
+
+function syncFacts(sync) {
+  if (!sync) return [];
+  const last = sync.last;
+  return [
+    ['Last sync', sync.running ? `running: ${(SYNC_STEPS.find(([k]) => k === sync.step) || [0, '…'])[1]}`
+      : !last ? 'not since the device started'
+        : last.failed ? `${when(last.at)}: ${(SYNC_STEPS.find(([k]) => k === last.failed) || [0, last.failed])[1]} failed (${last.detail})`
+          : `${when(last.at)}, all well`],
+    ['Next', sync.next ? `${when(sync.next)}${sync.next_retry ? ', a retry' : ''}` : sync.mode === 'manual' ? 'when you ask' : '—'],
+    sync.weather_at ? ['Weather from', when(sync.weather_at)] : null,
+  ];
+}
+
+async function syncPage() {
+  const [s, st] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status')]);
+  const sync = s.sync || {}, quiet = sync.quiet || {};
+  const steps = h('dl', { class: 'facts' });
+  const showSteps = (status) => {
+    const last = status.sync.last;
+    steps.replaceChildren(...SYNC_STEPS.flatMap(([k, name]) => [h('dt', { text: name }),
+      h('dd', { class: !last ? '' : last.steps[k] === 'ok' ? 'good' : last.steps[k] === 'failed' ? 'bad' : 'muted',
+                text: !last ? '—' : last.steps[k] === 'failed' && last.failed === k ? `failed: ${last.detail}` : last.steps[k] })]));
+  };
+  const summary = h('div');
+  const rtc = h('p', { class: 'muted small' });
+  const showStatus = (status) => {
+    summary.replaceChildren(facts(syncFacts(status.sync)));
+    showSteps(status);
+    const r = status.time.rtc || {};
+    rtc.textContent = `The clock chip's trim: ${r.trim_steps ?? 0} steps` +
+      (r.drift_s_per_day !== undefined ? `; it drifted ${r.drift_s_per_day > 0 ? '+' : ''}${r.drift_s_per_day} s a day before the last sync.` : '.');
+  };
+  showStatus(st);
+  const nowNote = h('p');
+  const nowCard = card('Now', summary, steps, rtc, nowNote, actions(button('Sync now', () => busy(nowCard, nowNote, async () => {
+    await api('POST', '/api/sync');
+    nowNote.className = 'muted';
+    nowNote.textContent = 'Syncing…';
+    for (let i = 0; i < 60; i++) { /* a sync takes some seconds, 45 s at most (spec §9.3) */
+      await sleep(1500);
+      const now = await api('GET', '/api/status');
+      showStatus(now);
+      if (!now.sync.running) {
+        nowNote.className = now.sync.last && !now.sync.last.failed ? 'good' : 'bad';
+        nowNote.textContent = now.sync.last && !now.sync.last.failed ? 'Synced.' : 'The sync failed; see above.';
+        return;
+      }
+    }
+  }), 'primary')));
+
+  const modes = [['times', 'At set times'], ['interval', 'Every interval'], ['always', 'Always on'], ['manual', 'Only when asked']];
+  let mode = modes.some(([m]) => m === sync.mode) ? sync.mode : 'times';
+  const radios = modes.map(([m, label]) => h('input', { type: 'radio', name: 'mode', value: m, checked: m === mode,
+                                                       onchange: () => { mode = m; showMode(); } }));
+  let times = Array.isArray(sync.times) && sync.times.length ? [...sync.times] : ['05:30'];
+  const timeList = h('div');
+  const showTimes = () => timeList.replaceChildren(...times.map((v, i) => h('div', { class: 'row' },
+    h('input', { type: 'time', value: v, onchange: (ev) => { times[i] = ev.target.value; } }),
+    times.length > 1 ? button('Remove', () => { times.splice(i, 1); showTimes(); }) : null)),
+  times.length < 8 ? button('Add a time', () => { times.push('12:00'); showTimes(); }) : null);
+  showTimes();
+  const interval = h('select', {}, SYNC_INTERVALS.map((m) => h('option', { value: String(m), selected: m === (sync.interval_min ?? 60) },
+    intervalLabel(m))));
+  interval.value = String(SYNC_INTERVALS.includes(sync.interval_min) ? sync.interval_min : 60);
+  const timesBox = h('div', {}, h('label', {}, 'Times'), timeList);
+  const intervalBox = h('div', {}, field('Every', interval));
+  const alwaysNote = h('p', { class: 'muted small', text: 'Wi-Fi stays on and the device stays awake: meant for USB ' +
+    'power, as it drains the battery in days. This page stays reachable on your network.' });
+  const manualNote = h('p', { class: 'muted small', text: 'No sync starts by itself; the weather shows its age.' });
+  const showMode = () => {
+    timesBox.hidden = mode !== 'times';
+    intervalBox.hidden = mode !== 'interval';
+    alwaysNote.hidden = mode !== 'always';
+    manualNote.hidden = mode !== 'manual';
+  };
+  showMode();
+  const shortcut = (label, m, set) => button(label, () => {
+    mode = m;
+    radios.forEach((r) => (r.checked = r.value === m));
+    set();
+    showTimes();
+    showMode();
+  });
+  const quietOn = h('input', { type: 'checkbox', checked: !!quiet.enabled });
+  const from = h('input', { type: 'time', value: quiet.from || '23:00' });
+  const to = h('input', { type: 'time', value: quiet.to || '06:00' });
+  const minutes = (v) => Number(v.slice(0, 2)) * 60 + Number(v.slice(3, 5));
+  const inQuiet = (v) => {
+    const a = minutes(from.value), b = minutes(to.value), m = minutes(v);
+    return a < b ? m >= a && m < b : a > b ? m >= a || m < b : false;
+  };
+  const note = h('p');
+  const schedCard = card('Schedule',
+    h('div', { class: 'actions' }, shortcut('Battery saver', 'times', () => { times = ['05:30']; }),
+      shortcut('Balanced', 'interval', () => { interval.value = '60'; }), shortcut('Always connected', 'always', () => {})),
+    ...modes.map(([m, label], i) => h('label', { class: 'check' }, radios[i], label)),
+    timesBox, intervalBox, alwaysNote, manualNote,
+    h('h3', { text: 'Quiet hours' }),
+    h('p', { class: 'muted small', text: 'No sync starts by itself in these hours; one runs as they end. In "Always on", ' +
+      'Wi-Fi goes off for them.' }),
+    h('label', { class: 'check' }, quietOn, 'Quiet hours'),
+    h('div', { class: 'row' }, h('div', {}, field('From', from)), h('div', {}, field('To', to))),
+    note,
+    actions(button('Save', () => busy(schedCard, note, async () => {
+      const valid = (v) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+      const list = [...new Set(times.filter(valid))].sort();
+      if (mode === 'times' && !list.length) throw new ApiError('Add a time.');
+      if (quietOn.checked && (!valid(from.value) || !valid(to.value) || from.value === to.value)) {
+        throw new ApiError('Quiet hours need a start and an end that differ.');
+      }
+      await api('PATCH', '/api/settings', { sync: { mode, times: list.length ? list : ['05:30'],
+        interval_min: Number(interval.value), quiet: { enabled: quietOn.checked, from: from.value, to: to.value } } });
+      times = list.length ? list : ['05:30'];
+      showTimes();
+      const moved = mode === 'times' && quietOn.checked ? list.filter(inQuiet) : [];
+      note.className = moved.length ? 'muted' : 'good';
+      note.textContent = moved.length ? `Saved. ${moved.join(', ')} falls in the quiet hours: it runs at ${to.value}.` : 'Saved.';
+      toast('Saved');
+    }), 'primary')));
+  main.replaceChildren(h('h1', { text: 'Sync' }), nowCard, schedCard);
 }
 
 /* ---- Wi-Fi (spec §10.1, §10.2) ---- */
@@ -425,8 +572,22 @@ async function placePage() {
   const lat = h('input', { type: 'number', step: 'any', min: -90, max: 90, value: loc.lat ?? '' });
   const lon = h('input', { type: 'number', step: 'any', min: -180, max: 180, value: loc.lon ?? '' });
   const locNote = h('p');
+  const query = h('input', { type: 'search', placeholder: 'A town or city' });
+  const found = h('div');
+  const search = () => busy(locCard, locNote, async () => { /* spec §10.3: through the device, which is online */
+    if (!query.value.trim()) throw new ApiError('Type a place to look for.');
+    const r = await api('GET', '/api/geocode?q=' + encodeURIComponent(query.value.trim()));
+    found.replaceChildren(...(r.places.length ? r.places.map((pl) => button(
+      `${pl.name}${pl.region ? ', ' + pl.region : ''}${pl.country ? ', ' + pl.country : ''}`, () => {
+        name.value = pl.name.slice(0, 31);
+        lat.value = String(pl.lat);
+        lon.value = String(pl.lon);
+        found.replaceChildren(h('p', { class: 'muted small', text: `${pl.name}: ${pl.lat}, ${pl.lon}. Save it below.` }));
+      })) : [h('p', { class: 'muted small', text: 'Nothing found by that name.' })]));
+  });
   const locCard = card('Location', h('p', { class: 'muted small', text: 'For sunrise, sunset and the weather. ' +
     'Decimal degrees: north and east are positive.' }),
+  h('div', { class: 'row' }, h('div', {}, field('Find a place', query)), actions(button('Search', search))), found,
   field('Name', name), h('div', { class: 'row' }, h('div', {}, field('Latitude', lat)), h('div', {}, field('Longitude', lon))),
   locNote, actions(button('Save location', () => busy(locCard, locNote, async () => {
     const la = Number(lat.value), lo = Number(lon.value);

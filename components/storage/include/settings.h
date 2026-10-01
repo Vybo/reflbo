@@ -62,6 +62,11 @@ typedef struct {
     char ntp[SETTINGS_NTP_MAX][SETTINGS_HOST_LEN];      /* time.ntp; "" for an unused entry */
 } settings_t;
 
+/* The sync's and the NTP servers' defaults (spec §14.3): times mode at 05:30, a 60 min interval,
+ * quiet hours 23:00-06:00 but off, cz.pool.ntp.org and pool.ntp.org. The app's defaults include
+ * them, so a settings.json from before M5 syncs. */
+void settings_sync_defaults(settings_t *out);
+
 /* Fails only if the text is not a JSON object with "schema": 1. */
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size);
 /* `base_json` (the file as read, or NULL) with the known keys replaced by `s`. Returns the

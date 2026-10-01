@@ -313,6 +313,28 @@ static void test_sync_settings_fall_back_one_by_one(void)
     TEST_ASSERT_EQUAL_UINT16(1440, s_out.sync_interval_min);
 }
 
+static void test_the_sync_defaults_are_the_specs(void)
+{
+    settings_t defaults;
+    memset(&defaults, 0, sizeof(defaults));
+    settings_sync_defaults(&defaults); /* spec §14.3 */
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_TIMES, defaults.sync_mode);
+    TEST_ASSERT_EQUAL_UINT8(1, defaults.sync_time_count);
+    TEST_ASSERT_EQUAL_UINT16(330, defaults.sync_times[0]);
+    TEST_ASSERT_EQUAL_UINT16(60, defaults.sync_interval_min);
+    TEST_ASSERT_FALSE(defaults.quiet);
+    TEST_ASSERT_EQUAL_UINT16(1380, defaults.quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(360, defaults.quiet_to);
+    TEST_ASSERT_EQUAL_STRING("cz.pool.ntp.org", defaults.ntp[0]);
+    TEST_ASSERT_EQUAL_STRING("pool.ntp.org", defaults.ntp[1]);
+    /* A file saved before M5 has neither sync.* nor time.ntp: it syncs at 05:30 */
+    const char *json = "{\"schema\":1,\"language\":\"cs\",\"time\":{\"clock_24h\":false}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(1, s_out.sync_time_count);
+    TEST_ASSERT_EQUAL_UINT16(330, s_out.sync_times[0]);
+    TEST_ASSERT_EQUAL_STRING("cz.pool.ntp.org", s_out.ntp[0]);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -335,5 +357,6 @@ int main(void)
     RUN_TEST(test_the_sync_settings_parse_and_round_trip);
     RUN_TEST(test_sync_times_are_sorted_without_repeats_or_bad_ones);
     RUN_TEST(test_sync_settings_fall_back_one_by_one);
+    RUN_TEST(test_the_sync_defaults_are_the_specs);
     return UNITY_END();
 }

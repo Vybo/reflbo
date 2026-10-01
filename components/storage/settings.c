@@ -198,6 +198,21 @@ static void read_sync(const cJSON *sync, settings_t *out)
     out->quiet_to = to >= 0 ? (uint16_t)to : out->quiet_to;
 }
 
+void settings_sync_defaults(settings_t *out)
+{
+    out->sync_mode = SETTINGS_SYNC_TIMES;
+    out->sync_time_count = 1;
+    memset(out->sync_times, 0, sizeof(out->sync_times));
+    out->sync_times[0] = 5 * 60 + 30;
+    out->sync_interval_min = 60;
+    out->quiet = false;
+    out->quiet_from = 23 * 60;
+    out->quiet_to = 6 * 60;
+    memset(out->ntp, 0, sizeof(out->ntp));
+    snprintf(out->ntp[0], SETTINGS_HOST_LEN, "%s", "cz.pool.ntp.org");
+    snprintf(out->ntp[1], SETTINGS_HOST_LEN, "%s", "pool.ntp.org");
+}
+
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size)
 {
     if (util_json_depth(json) > SETTINGS_JSON_MAX_DEPTH) {

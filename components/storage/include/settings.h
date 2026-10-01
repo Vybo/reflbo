@@ -24,6 +24,18 @@ typedef enum {
 
 #define SETTINGS_BAT_CURVE_POINTS 21 /* BATTERY_CURVE_POINTS: 0 %, 5 %, ... 100 % */
 
+/* sync.mode (spec §9.3); the values match sync_mode_t in the sync component. */
+typedef enum {
+    SETTINGS_SYNC_TIMES,
+    SETTINGS_SYNC_INTERVAL,
+    SETTINGS_SYNC_ALWAYS,
+    SETTINGS_SYNC_MANUAL,
+} settings_sync_mode_t;
+
+#define SETTINGS_SYNC_TIMES_MAX 8
+#define SETTINGS_NTP_MAX 2
+#define SETTINGS_HOST_LEN 64
+
 typedef struct {
     char language[4];                    /* "en" */
     bool clock_24h;
@@ -41,6 +53,13 @@ typedef struct {
     uint16_t bat_empty_mv, bat_full_mv; /* 0 % and 100 % for SETTINGS_BAT_MANUAL: 3000-4000, 3600-4400 */
     uint16_t bat_learned_mv[SETTINGS_BAT_CURVE_POINTS]; /* all 0 until a discharge was learned */
     uint32_t bat_learned_at;                            /* UTC seconds, 0 for never */
+    uint8_t sync_mode;                                  /* settings_sync_mode_t */
+    uint8_t sync_time_count;                            /* 1..SETTINGS_SYNC_TIMES_MAX */
+    uint16_t sync_times[SETTINGS_SYNC_TIMES_MAX];       /* minutes after midnight, ascending, no repeats */
+    uint16_t sync_interval_min;                         /* 15..1440 */
+    bool quiet;                                         /* quiet hours (D25) */
+    uint16_t quiet_from, quiet_to;                      /* minutes after midnight */
+    char ntp[SETTINGS_NTP_MAX][SETTINGS_HOST_LEN];      /* time.ntp; "" for an unused entry */
 } settings_t;
 
 /* Fails only if the text is not a JSON object with "schema": 1. */

@@ -13,7 +13,10 @@ void setUp(void)
     s_defaults = (settings_t){ .language = "en", .clock_24h = true, .tz_posix = "CET-1CEST,M3.5.0,M10.5.0/3",
                                .tz_iana = "Europe/Prague", .sensors_every_min = 5, .display_every_min = 1,
                                .lpm_quarter_hz = 4, .place = "Brno", .lat_e4 = 491951, .lon_e4 = 166068,
-                               .bat_cal = SETTINGS_BAT_CURVE, .bat_empty_mv = 3270, .bat_full_mv = 4200 };
+                               .bat_cal = SETTINGS_BAT_CURVE, .bat_empty_mv = 3270, .bat_full_mv = 4200,
+                               .sync_mode = SETTINGS_SYNC_TIMES, .sync_time_count = 1, .sync_times = { 330 },
+                               .sync_interval_min = 60, .quiet = false, .quiet_from = 1380, .quiet_to = 360,
+                               .ntp = { "cz.pool.ntp.org", "pool.ntp.org" } };
     memset(&s_out, 0xAA, sizeof(s_out));
     s_err[0] = '\0';
 }
@@ -255,6 +258,61 @@ static void test_learned_without_a_usable_curve_keeps_the_built_in_one(void)
     TEST_ASSERT_EQUAL_UINT16(0, s_out.bat_learned_mv[0]); /* not taken */
 }
 
+static void test_the_sync_settings_parse_and_round_trip(void)
+{
+    const char *json = "{\"schema\":1,\"time\":{\"ntp\":[\"ntp.nic.cz\"]},"
+                       "\"sync\":{\"mode\":\"interval\",\"times\":[\"07:15\",\"19:45\"],\"interval_min\":30,"
+                       "\"quiet\":{\"enabled\":true,\"from\":\"22:30\",\"to\":\"06:15\"}}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_INTERVAL, s_out.sync_mode);
+    TEST_ASSERT_EQUAL_UINT8(2, s_out.sync_time_count);
+    TEST_ASSERT_EQUAL_UINT16(435, s_out.sync_times[0]);
+    TEST_ASSERT_EQUAL_UINT16(1185, s_out.sync_times[1]);
+    TEST_ASSERT_EQUAL_UINT16(30, s_out.sync_interval_min);
+    TEST_ASSERT_TRUE(s_out.quiet);
+    TEST_ASSERT_EQUAL_UINT16(1350, s_out.quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(375, s_out.quiet_to);
+    TEST_ASSERT_EQUAL_STRING("ntp.nic.cz", s_out.ntp[0]);
+    TEST_ASSERT_EQUAL_STRING("", s_out.ntp[1]);
+
+    TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
+    settings_t again;
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &again, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_out, &again, sizeof(again));
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"from\":\t\"22:30\""));
+}
+
+static void test_sync_times_are_sorted_without_repeats_or_bad_ones(void)
+{
+    const char *json = "{\"schema\":1,\"sync\":{\"times\":[\"23:00\",\"05:30\",\"05:30\",\"25:00\",\"7:5\",5,"
+                       "\"07:05\",\"00:00\",\"01:00\",\"02:00\",\"03:00\",\"04:00\",\"06:00\",\"08:00\"]}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    static const uint16_t k_kept[] = { 0, 60, 120, 180, 240, 330, 360, 425 }; /* the first 8 of the day */
+    TEST_ASSERT_EQUAL_UINT8(8, s_out.sync_time_count);
+    TEST_ASSERT_EQUAL_UINT16_ARRAY(k_kept, s_out.sync_times, 8);
+}
+
+static void test_sync_settings_fall_back_one_by_one(void)
+{
+    const char *json = "{\"schema\":1,\"time\":{\"ntp\":[\"\",\"bad host\",17]},"
+                       "\"sync\":{\"mode\":\"sometimes\",\"times\":[],\"interval_min\":5,"
+                       "\"quiet\":{\"enabled\":\"yes\",\"from\":\"later\",\"to\":\"07:00\"}}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_TIMES, s_out.sync_mode);
+    TEST_ASSERT_EQUAL_UINT8(1, s_out.sync_time_count);
+    TEST_ASSERT_EQUAL_UINT16(330, s_out.sync_times[0]);
+    TEST_ASSERT_EQUAL_UINT16(15, s_out.sync_interval_min);
+    TEST_ASSERT_FALSE(s_out.quiet);
+    TEST_ASSERT_EQUAL_UINT16(1380, s_out.quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(420, s_out.quiet_to);
+    TEST_ASSERT_EQUAL_STRING("cz.pool.ntp.org", s_out.ntp[0]); /* no usable server: the defaults */
+    TEST_ASSERT_EQUAL_STRING("pool.ntp.org", s_out.ntp[1]);
+    json = "{\"schema\":1,\"sync\":{\"mode\":\"always\",\"interval_min\":99999}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_ALWAYS, s_out.sync_mode);
+    TEST_ASSERT_EQUAL_UINT16(1440, s_out.sync_interval_min);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -274,5 +332,8 @@ int main(void)
     RUN_TEST(test_a_battery_calibration_without_room_keeps_the_curve);
     RUN_TEST(test_a_learned_battery_curve_parses_and_round_trips);
     RUN_TEST(test_learned_without_a_usable_curve_keeps_the_built_in_one);
+    RUN_TEST(test_the_sync_settings_parse_and_round_trip);
+    RUN_TEST(test_sync_times_are_sorted_without_repeats_or_bad_ones);
+    RUN_TEST(test_sync_settings_fall_back_one_by_one);
     return UNITY_END();
 }

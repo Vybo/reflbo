@@ -93,6 +93,111 @@ static bool read_curve(const cJSON *arr, uint16_t out[SETTINGS_BAT_CURVE_POINTS]
     return true;
 }
 
+/* "HH:MM" to minutes after midnight; -1 for anything else. */
+static int hhmm(const cJSON *item)
+{
+    const char *s = cJSON_IsString(item) ? item->valuestring : "";
+    if (strlen(s) != 5 || s[2] != ':') {
+        return -1;
+    }
+    for (int i = 0; i < 5; i++) {
+        if (i != 2 && (s[i] < '0' || s[i] > '9')) {
+            return -1;
+        }
+    }
+    int h = (s[0] - '0') * 10 + (s[1] - '0'), m = (s[3] - '0') * 10 + (s[4] - '0');
+    return h < 24 && m < 60 ? h * 60 + m : -1;
+}
+
+static cJSON *hhmm_json(int minutes)
+{
+    char text[12]; /* room for any int, so GCC can see nothing is cut */
+    snprintf(text, sizeof(text), "%02d:%02d", minutes / 60 % 24, minutes % 60);
+    return cJSON_CreateString(text);
+}
+
+static const char *const k_sync_modes[] = { [SETTINGS_SYNC_TIMES] = "times", [SETTINGS_SYNC_INTERVAL] = "interval",
+                                            [SETTINGS_SYNC_ALWAYS] = "always", [SETTINGS_SYNC_MANUAL] = "manual" };
+
+/* sync.times: the valid ones, sorted and without repeats, at most 8 (the first of the day); none
+ * valid keeps the default. */
+static void read_times(const cJSON *arr, settings_t *out)
+{
+    bool minute[24 * 60] = { false };
+    const cJSON *list = cJSON_IsArray(arr) ? arr : NULL;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, list)
+    {
+        int m = hhmm(item);
+        if (m >= 0) {
+            minute[m] = true;
+        }
+    }
+    uint8_t n = 0;
+    for (int m = 0; m < 24 * 60 && n < SETTINGS_SYNC_TIMES_MAX; m++) {
+        if (minute[m]) {
+            out->sync_times[n++] = (uint16_t)m;
+        }
+    }
+    if (n > 0) {
+        for (uint8_t i = n; i < SETTINGS_SYNC_TIMES_MAX; i++) {
+            out->sync_times[i] = 0;
+        }
+        out->sync_time_count = n;
+    }
+}
+
+/* A host name: letters, digits, dots and hyphens. */
+static bool host_name(const char *s)
+{
+    size_t n = strlen(s);
+    if (n == 0 || n >= SETTINGS_HOST_LEN) {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* time.ntp: up to two usable host names; none usable keeps the default. */
+static void read_ntp(const cJSON *arr, settings_t *out)
+{
+    char hosts[SETTINGS_NTP_MAX][SETTINGS_HOST_LEN] = { "" };
+    int n = 0;
+    const cJSON *list = cJSON_IsArray(arr) ? arr : NULL;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, list)
+    {
+        if (n < SETTINGS_NTP_MAX && cJSON_IsString(item) && host_name(item->valuestring)) {
+            snprintf(hosts[n++], SETTINGS_HOST_LEN, "%s", item->valuestring);
+        }
+    }
+    if (n > 0) {
+        memcpy(out->ntp, hosts, sizeof(hosts));
+    }
+}
+
+static void read_sync(const cJSON *sync, settings_t *out)
+{
+    const cJSON *mode = child(sync, "mode");
+    for (size_t i = 0; cJSON_IsString(mode) && i < sizeof(k_sync_modes) / sizeof(k_sync_modes[0]); i++) {
+        if (strcmp(mode->valuestring, k_sync_modes[i]) == 0) {
+            out->sync_mode = (uint8_t)i;
+        }
+    }
+    read_times(child(sync, "times"), out);
+    out->sync_interval_min = (uint16_t)read_scaled(sync, "interval_min", out->sync_interval_min, 1, 15, 1440);
+    const cJSON *quiet = child(sync, "quiet");
+    read_bool(quiet, "enabled", &out->quiet);
+    int from = hhmm(child(quiet, "from")), to = hhmm(child(quiet, "to"));
+    out->quiet_from = from >= 0 ? (uint16_t)from : out->quiet_from;
+    out->quiet_to = to >= 0 ? (uint16_t)to : out->quiet_to;
+}
+
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size)
 {
     if (util_json_depth(json) > SETTINGS_JSON_MAX_DEPTH) {
@@ -145,6 +250,8 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
                        : strcmp(from->valuestring, "learned") == 0 && learned ? SETTINGS_BAT_LEARNED
                                                                               : SETTINGS_BAT_CURVE;
     }
+    read_ntp(child(time, "ntp"), out);
+    read_sync(child(root, "sync"), out);
     cJSON_Delete(root);
     return true;
 }
@@ -215,6 +322,26 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
         put(battery, "learned_mv", curve);
         put(battery, "learned_at", cJSON_CreateNumber(s->bat_learned_at));
     }
+    cJSON *ntp = cJSON_CreateArray();
+    for (int i = 0; i < SETTINGS_NTP_MAX; i++) {
+        if (s->ntp[i][0] != '\0') {
+            cJSON_AddItemToArray(ntp, cJSON_CreateString(s->ntp[i]));
+        }
+    }
+    put(time, "ntp", ntp);
+    cJSON *sync = object_at(root, "sync");
+    put(sync, "mode", cJSON_CreateString(k_sync_modes[s->sync_mode < SETTINGS_SYNC_MANUAL ? s->sync_mode
+                                                                                         : SETTINGS_SYNC_MANUAL]));
+    cJSON *times = cJSON_CreateArray();
+    for (int i = 0; i < s->sync_time_count && i < SETTINGS_SYNC_TIMES_MAX; i++) {
+        cJSON_AddItemToArray(times, hhmm_json(s->sync_times[i]));
+    }
+    put(sync, "times", times);
+    put(sync, "interval_min", cJSON_CreateNumber(s->sync_interval_min));
+    cJSON *quiet = object_at(sync, "quiet");
+    put(quiet, "enabled", cJSON_CreateBool(s->quiet));
+    put(quiet, "from", hhmm_json(s->quiet_from));
+    put(quiet, "to", hhmm_json(s->quiet_to));
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;

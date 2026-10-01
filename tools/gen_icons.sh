@@ -7,4 +7,5 @@ mkdir -p components/gfx/icons
 
 uv run --quiet --python 3.13 --with-requirements tools/requirements.txt tools/imggen.py \
     --ttf assets/icons/MaterialIcons-Regular.ttf --codepoints assets/icons/MaterialIcons-Regular.codepoints \
-    --manifest assets/icons/icons.txt --licence assets/icons/LICENSE-MaterialIcons.txt
+    --manifest assets/icons/icons.txt --licence assets/icons/LICENSE-MaterialIcons.txt \
+    --font wi=assets/icons/WeatherIcons-Regular.ttf,assets/icons/WeatherIcons-Regular.codepoints,assets/icons/LICENSE-WeatherIcons.txt

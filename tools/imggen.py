@@ -8,6 +8,10 @@ Run it through tools/gen_icons.sh, which supplies the pinned Pillow via uv:
 Writes components/gfx/icons/gfx_icons.c and components/gfx/include/gfx_icons.h. Each icon is a
 square bitmap of its size (the font's em box), so icons of one size line up. Glyphs are rendered
 with FreeType's monochrome hinting, like tools/fontgen.py.
+
+More fonts come with --font PREFIX=TTF,CODEPOINTS,LICENCE; a manifest source "PREFIX:name" is drawn
+from that font, its ink fitted to the square inside Material's 2/24 padding, as such fonts don't fill
+their em box the way Material Icons does.
 """
 import argparse
 import pathlib
@@ -44,6 +48,57 @@ def pack_rows(rows):
                     byte |= 0x80 >> i
             out.append(byte)
     return bytes(out)
+
+
+def split_source(source):
+    """'wi:day-sunny' -> ('wi', 'day-sunny'); 'bolt' -> (None, 'bolt')."""
+    prefix, sep, name = source.partition(":")
+    return (prefix, name) if sep else (None, source)
+
+
+def parse_font_spec(spec):
+    """'wi=a.ttf,a.codepoints,LICENCE.txt' -> ('wi', 'a.ttf', 'a.codepoints', 'LICENCE.txt')."""
+    prefix, sep, rest = spec.partition("=")
+    parts = rest.split(",")
+    if not sep or not prefix.isidentifier() or len(parts) != 3 or not all(parts):
+        raise ValueError(f"--font wants PREFIX=TTF,CODEPOINTS,LICENCE: {spec!r}")
+    return (prefix, *parts)
+
+
+def fit_pad(size):
+    """Material Icons leave 2/24 of the em box free on each side; fitted glyphs keep the same margin."""
+    return max(1, round(size * 2 / 24))
+
+
+def fit_font_size(ink_w, ink_h, measured_size, size):
+    """The font size that makes ink of ink_w x ink_h (measured at measured_size) fit size minus padding."""
+    room = size - 2 * fit_pad(size)
+    return max(1, int(measured_size * room / max(ink_w, ink_h)))
+
+
+def render_fitted(ttf, codepoint, size):
+    """size x size rows of 0/1: the glyph's ink scaled to the padded square and centred."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    def ink(font_size):
+        font = ImageFont.truetype(ttf, font_size, layout_engine=ImageFont.Layout.BASIC)
+        canvas = Image.new("1", (font_size * 3, font_size * 3), 0)
+        draw = ImageDraw.Draw(canvas)
+        draw.fontmode = "1"
+        draw.text((font_size, font_size), chr(codepoint), font=font, fill=1)
+        box = canvas.getbbox()
+        if box is None:
+            raise SystemExit(f"U+{codepoint:04X}: no ink in {ttf}")
+        return canvas.crop(box)
+
+    probe = ink(size * 4)
+    glyph = ink(fit_font_size(probe.width, probe.height, size * 4, size))
+    while max(glyph.width, glyph.height) > size - 2 * fit_pad(size):  # hinting may round up a pixel
+        glyph = glyph.resize((max(1, glyph.width - 1), max(1, glyph.height - 1)))
+    img = Image.new("1", (size, size), 0)
+    img.paste(glyph, ((size - glyph.width) // 2, (size - glyph.height) // 2))
+    px = img.load()
+    return [[1 if px[x, y] else 0 for x in range(size)] for y in range(size)]
 
 
 def render_icon(font, codepoint, size):
@@ -93,6 +148,8 @@ def main(argv=None):
     parser.add_argument("--codepoints", required=True, help="the font's 'name hex' codepoint list")
     parser.add_argument("--manifest", required=True, help="icons to render: 'c_name source_name size...'")
     parser.add_argument("--licence", help="licence file of the icons, named in the generated source")
+    parser.add_argument("--font", action="append", default=[], metavar="PREFIX=TTF,CODEPOINTS,LICENCE",
+                        help="another icon font for manifest sources 'PREFIX:name'")
     parser.add_argument("--out-c", default="components/gfx/icons/gfx_icons.c")
     parser.add_argument("--out-h", default="components/gfx/include/gfx_icons.h")
     args = parser.parse_args(argv)
@@ -100,15 +157,28 @@ def main(argv=None):
     from PIL import ImageFont
 
     codepoints = parse_codepoints(pathlib.Path(args.codepoints).read_text())
+    extra = {}
+    for spec in args.font:
+        prefix, ttf, cps, licence = parse_font_spec(spec)
+        extra[prefix] = (ttf, parse_codepoints(pathlib.Path(cps).read_text()), licence)
     rendered = []
     for c_name, source_name, sizes in parse_manifest(pathlib.Path(args.manifest).read_text()):
-        if source_name not in codepoints:
-            raise SystemExit(f"{source_name}: not in {args.codepoints}")
+        prefix, name = split_source(source_name)
+        if prefix is not None and prefix not in extra:
+            raise SystemExit(f"{source_name}: no --font {prefix}=...")
+        table = extra[prefix][1] if prefix is not None else codepoints
+        if name not in table:
+            raise SystemExit(f"{source_name}: not in its codepoint list")
         for size in sizes:
-            font = ImageFont.truetype(args.ttf, size, layout_engine=ImageFont.Layout.BASIC)
-            rendered.append((f"{c_name}_{size}", size, render_icon(font, codepoints[source_name], size)))
-    source = pathlib.Path(args.ttf).name
-    pathlib.Path(args.out_c).write_text(emit_c(rendered, source, args.licence), encoding="utf-8")
+            if prefix is not None:
+                rows = render_fitted(extra[prefix][0], table[name], size)
+            else:
+                font = ImageFont.truetype(args.ttf, size, layout_engine=ImageFont.Layout.BASIC)
+                rows = render_icon(font, table[name], size)
+            rendered.append((f"{c_name}_{size}", size, rows))
+    source = ", ".join([pathlib.Path(args.ttf).name] + [pathlib.Path(e[0]).name for e in extra.values()])
+    licence = "; ".join(x for x in [args.licence] + [e[2] for e in extra.values()] if x)
+    pathlib.Path(args.out_c).write_text(emit_c(rendered, source, licence or None), encoding="utf-8")
     pathlib.Path(args.out_h).write_text(emit_h(rendered, source), encoding="utf-8")
     print(f"{args.out_c}: {len(rendered)} icons")
     return 0

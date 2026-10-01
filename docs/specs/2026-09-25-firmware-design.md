@@ -60,6 +60,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D21 | Owner, 2026-09-30: the battery curve is learned from one full discharge, not a charge (§8) | The firmware can't see charging, and the charger's current lifts VBAT, so a charge maps poorly to the resting level; this board's steady load makes time a fair measure of charge |
 | D22 | Owner, 2026-10-01 (ADS-B radar proposal, §19.1): adsb.fi is the only source; the radar runs only in sync mode `always` (D11), with no time-boxed sessions and no separate switch; the map is centred on a point and zoomed from the web UI, with towns and airports built in | Still a proposal for after M5 (D10). One always-on Wi-Fi mode serves both the radar and the LAN configurator (§10.4) |
 | D23 | Owner, 2026-10-01 (weather radar, §19.2): ČHMÚ by default, with RainViewer outside its coverage; both a full-screen radar layout and a slot widget; aircraft stay a separate view, never over the rain; the radar never turns Wi-Fi on itself: it takes a frame with each normal sync, and every 5 minutes in sync mode `always`; both radars join the roadmap | M7 follows M6, which brings sync mode `always`; Audio and microSD move to M8 and M9 |
+| D24 | Owner, 2026-10-01: the radars come sooner. Sync mode `always` moves from the MQTT milestone into M5, the radars follow as M6, and MQTT and Home Assistant become M7 | Nothing in the radars needs MQTT; `always` belongs with the sync framework anyway |
 
 ### 1.3 Out of scope for v1
 
@@ -292,7 +293,7 @@ Every layout has a status bar (top 20 px):
 - Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale. After either, a globe while a phone is logged in to the web UI (D20).
 - Middle: a small clock, if the preset sets `status_clock`. It is meant for data-first presets (owner request, 2026-09-28).
 - Right: the charging bolt and the battery icon, with the parts `status_battery` lists: level %, voltage, days left. The default is the level.
-- Later: the sync state (M5), the Wi-Fi state (M5 and M6, the first times Wi-Fi runs under the dashboard, D19) and the next alarm (M8).
+- Later: the sync state (M5), the Wi-Fi state (M5 and later, the first times Wi-Fi runs under the dashboard, D19) and the next alarm (M8).
 
 | Layout | Slots |
 |---|---|
@@ -460,7 +461,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
 ## 6. Datastore
 
-- **Table.** An entry for each measured or fetched field: `env.*` and `bat.*` since M3a, weather from M5, and up to 32 dynamic `mqtt.<key>` entries from M6. Fields that follow from the clock (`time.*`, `date.*`, `moon.phase`) are computed by `ui` at render time and never stored.
+- **Table.** An entry for each measured or fetched field: `env.*` and `bat.*` since M3a, weather from M5, and up to 32 dynamic `mqtt.<key>` entries from M7. Fields that follow from the clock (`time.*`, `date.*`, `moon.phase`) are computed by `ui` at render time and never stored.
 - **Entry contents.**
   - A fixed-point value: 0.01 °C, 0.01 %, whole %, or 0.1 days. Short text (at most 48 bytes of UTF-8), times and weather structs arrive with the fields that need them.
   - The trend and `updated` (UTC); a `ttl_s` per field. The battery entry also holds the voltage and the charging state.
@@ -617,9 +618,9 @@ On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync
 - Estimate battery-side current as `I_bat ≈ I_5V × 5 V / V_bat`. This ignores converter losses; say so when reporting.
 - Scenarios:
   - M2: deep sleep vs light sleep while idle.
-  - M5: energy per sync.
+  - M5: energy per sync, and sync mode `always`.
   - Config mode.
-  - M7: a radar frame per sync, and sync mode `always`.
+  - M6: a radar frame per sync.
   - M8: radio.
 - Record results in `docs/power.md` with the date, commit, settings and meter model. Many USB meters are inaccurate below 1 mA, so long accumulation windows matter.
 
@@ -665,7 +666,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 ### 10.3 Web UI and REST API
 
 - **Tech.** Plain HTML/CSS/JS, mobile-first. The files are gzipped and **embedded in the app image**, so OTA updates them and flashing never touches user data.
-- **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), MQTT/HA (M6), Radar (M7), Alarms and Radio (M8) join later.
+- **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), Radar (M6), MQTT/HA (M7), Alarms and Radio (M8) join later.
   - Status sets the device's clock from the phone at once when the device has lost the time (D9, D19).
   - Device holds the menu's language, units, sensor offsets, sensor interval, update interval and refresh rate (D19), and the battery calibration (§8).
   - Presets: the preview names each slot at its corner as the slot fields call it; a new preset joins the cycle; "Undo changes" asks first, as the save bar can float over other buttons (D20).
@@ -1003,9 +1004,9 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M2 | `st7305` warm init for deep-sleep wakes (moved from M1), `board` (I²C, buttons, gestures), `rtc`, `sensors` (SHTC3, battery), `timekeeping` (RTC → system time; manual set through the console), Classic clock screen, `power` with both idle strategies, `scheduler` minute wakes | Screen values match the console (3); owner measures deep vs light sleep with the USB meter; the idle strategy is chosen and recorded (4) |
 | M3 | Two plans. **M3a:** `storage` (LittleFS config files), `datastore` with the extra fields, `locale` (en), fonts and icons, 4 layouts, widgets, status bar, presets JSON and defaults, cycling. **M3b:** menu v1, special screens, settings, schedule and night sleep, the LPM rate setting, the `cs` pack | Owner reviews golden renders (2); presets switch with KEY/`btn` and survive a reboot (3); owner measures night sleep (4); owner reviews the Czech renders (2) |
 | M4 | `netmgr` (STA/AP, captive portal, mDNS), config screen with QR, `webui` and REST API, preset editor with preview, set time from phone, OTA with rollback | Owner sets up Wi-Fi from a phone in AP mode (4); the preview matches a device screenshot (3); OTA upload and rollback work (3) |
-| M5 | SNTP → RTC, `weather`, `astro`, `sync` with the configurable schedule and backoff, weather widgets, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); sync energy and the daily average are measured and `docs/power.md` is updated (4) |
-| M6 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings, `always` sync mode | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
-| M7 | Radar views (D22, D23; §19.1, §19.2): one web-Mercator map renderer (centre and zoom from the web UI, built-in borders, towns and airports); the weather radar (ČHMÚ, RainViewer outside its coverage; a full-screen layout and a slot widget; a frame at each sync, every 5 min in sync mode `always`); the ADS-B flight radar (adsb.fi; its own view; sync mode `always` only) | Goldens of both radars (2); a ČHMÚ frame renders after a sync (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
+| M5 | SNTP → RTC, `weather`, `astro`, `sync` with the configurable schedule and backoff, sync mode `always` (D24), weather widgets, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); sync energy, `always`'s cost and the daily average are measured and `docs/power.md` is updated (4) |
+| M6 | Radar views (D22, D23, D24; §19.1, §19.2): one web-Mercator map renderer (centre and zoom from the web UI, built-in borders, towns and airports); the weather radar (ČHMÚ, RainViewer outside its coverage; a full-screen layout and a slot widget; a frame at each sync, every 5 min in sync mode `always`); the ADS-B flight radar (adsb.fi; its own view; sync mode `always` only) | Goldens of both radars (2); a ČHMÚ frame renders after a sync (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
+| M7 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
 | M8 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
 | M9 | microSD features agreed at the start of M9 | Per the agreed list |
 
@@ -1018,15 +1019,15 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M3 | Accepted (D15): the LPM refresh rate as a display setting; the preset schedule, with timed night sleep; extra fields (dew point, today's min/max, trends, week number, moon phase, battery days left); the Czech pack with name days and public holidays (name days deferred, D16). Still deferred: the Night layout; the change in day length (needs `astro`, M5) |
 | M4 | Accepted (D18): a web UI password, instead of the admin PIN. Accepted (D19): config mode after a web restart, the clock set from the phone when lost, changing the password and logging out, a Device page. Still deferred: web UI translations |
 | M5 | Quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration; static IP |
-| M6 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
-| M7 | Accepted (D22, D23): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b |
+| M6 | Accepted (D22, D23, D24): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b |
+| M7 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
 | M8 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
 | M9 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots |
 | Later | IDS JMK departures; a remote 1-bit image slot; the VBUS-sense hardware mod; external I²C sensors on the header; BLE or ESP-NOW sources |
 
-### 19.1 ADS-B flight radar (M7)
+### 19.1 ADS-B flight radar (M6)
 
-Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. Accepted for M7 with the weather radar (D23); the owner answered the design questions the same day (D22, below). The milestone's plan settles the details.
+Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. Accepted for M6 with the weather radar (D23, D24); the owner answered the design questions the same day (D22, below). The milestone's plan settles the details.
 
 **Findings** (checked 2026-10-01)
 
@@ -1047,7 +1048,7 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. Accepted for M7 w
 - **Power, the main constraint.** The radar needs Wi-Fi on the whole time it shows, which is what sync mode `always` gives (D22). Estimate, to be measured: about 1 % of the battery per hour; nonstop it would cut the battery life from about a week to 2–3 days, so `always` suits USB power best (the firmware can only tell USB power reliably with the VBUS-sense mod, hardware gotcha 3).
 - **Settings.** `adsb.source` (adsb.fi or a local URL), range, maximum aircraft, filters (minimum altitude, aircraft on the ground). The adsb.fi credit goes in the web UI and the README.
 - **From MeteoPlaneRadar:** range-dependent polling with back-off, the User-Agent, routes on demand, the borders and cities. Rewritten in C for ESP-IDF rather than ported; adapted code would be credited in `THIRD_PARTY.md`.
-- **Fit.** It needs M5's HTTPS client, the certificate bundle and the sync framework, and M6's sync mode `always`, so it comes in M7 (D23).
+- **Fit.** It needs M5's HTTPS client, the certificate bundle and the sync framework, and sync mode `always`, which moves into M5 (D24), so it comes in M6.
 
 **Owner's answers** (2026-10-01, D22)
 
@@ -1060,9 +1061,9 @@ Owner request, 2026-10-01, naming viz1090 and MeteoPlaneRadar. Accepted for M7 w
    - Settings this implies: the radar's centre (latitude and longitude) and zoom or range, and the filters above.
 
 
-### 19.2 Weather radar (M7)
+### 19.2 Weather radar (M6)
 
-Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one too. Accepted for M7 (D23, below).
+Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one too. Accepted for M6 (D23, D24, below).
 
 **Sources** (checked 2026-10-01)
 
@@ -1128,3 +1129,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r21 | 2026-10-01 | The ADS-B radar runs in sync mode `always` (D22); its last question is closed (§19.1) |
 | r22 | 2026-10-01 | Weather radar proposal: ČHMÚ and RainViewer, a map shared with the ADS-B radar, three owner questions (§19, §19.2) |
 | r23 | 2026-10-01 | Both radars join the roadmap as M7 (D23): the milestone table (§18), the weather radar's answers and power (§19.2), the flight radar's slot (§19.1); Audio becomes M8 and microSD M9 (§5.2, §5.7, §9.4, §10.3, §10.5, §13, §14, §15, §19, §20) |
+| r24 | 2026-10-01 | D24: sync mode `always` moves into M5, the radars become M6 and MQTT/HA M7 (§5.1, §5.2, §9.4, §10.3, §18, §19) |

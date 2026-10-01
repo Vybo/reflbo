@@ -75,9 +75,26 @@ static void test_alarm_matches_minute_hour_and_day(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, a, 5);
 }
 
+static void test_the_offset_register_holds_seven_bit_twos_complement(void)
+{
+    TEST_ASSERT_EQUAL_HEX8(0x00, pcf85063_encode_offset(0));
+    TEST_ASSERT_EQUAL_HEX8(0x01, pcf85063_encode_offset(1));
+    TEST_ASSERT_EQUAL_HEX8(0x7F, pcf85063_encode_offset(-1)); /* datasheet Table 13: 1111111 is -1 */
+    TEST_ASSERT_EQUAL_HEX8(0x77, pcf85063_encode_offset(-9));
+    TEST_ASSERT_EQUAL_HEX8(0x3F, pcf85063_encode_offset(63));
+    TEST_ASSERT_EQUAL_HEX8(0x40, pcf85063_encode_offset(-64));
+    TEST_ASSERT_EQUAL_HEX8(0x3F, pcf85063_encode_offset(200)); /* clamped */
+    TEST_ASSERT_EQUAL_HEX8(0x40, pcf85063_encode_offset(-200));
+    TEST_ASSERT_EQUAL_INT(-9, pcf85063_decode_offset(0x77));
+    TEST_ASSERT_EQUAL_INT(-9, pcf85063_decode_offset(0xF7)); /* MODE 1 set: the same steps */
+    TEST_ASSERT_EQUAL_INT(63, pcf85063_decode_offset(0x3F));
+    TEST_ASSERT_EQUAL_INT(-64, pcf85063_decode_offset(0x40));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_the_offset_register_holds_seven_bit_twos_complement);
     RUN_TEST(test_encodes_a_known_time);
     RUN_TEST(test_decodes_a_known_time);
     RUN_TEST(test_reports_the_oscillator_stop_flag);

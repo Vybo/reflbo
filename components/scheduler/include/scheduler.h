@@ -7,7 +7,7 @@
  * Wake scheduler (spec §9.2): when to wake next and why. Pure C, host-buildable. Periodic jobs run
  * at local wall-clock slots (minute of day divisible by their period), so DST shifts nothing.
  * Local time comes from the TZ environment variable (tzset()). Preset cycling and the seconds
- * display add wakes between minutes; M5 adds syncs, M8 user alarms.
+ * display add wakes between minutes; syncs wake on their minute (M5), M8 adds user alarms.
  */
 
 typedef enum {
@@ -16,6 +16,7 @@ typedef enum {
     SCHED_CYCLE = 1u << 2,   /* the next auto-cycle preset switch */
     SCHED_SECOND = 1u << 3,  /* the active preset shows seconds */
     SCHED_ENTRY = 1u << 4,   /* a schedule entry (spec §5.4) */
+    SCHED_SYNC = 1u << 5,    /* a sync (spec §9.3) */
 } sched_reason_t;
 
 typedef struct {
@@ -25,12 +26,13 @@ typedef struct {
     time_t cycle_at;       /* next auto-cycle switch (UTC); 0 = cycling is off */
     bool every_second;
     time_t schedule_at;    /* next schedule entry (UTC, on a minute); 0 = none */
+    time_t sync_at;        /* next automatic sync (UTC, on a minute); 0 = none */
 } sched_input_t;
 
 typedef struct {
     time_t when;      /* UTC; the earliest wake, after `now` */
     unsigned reasons; /* sched_reason_t bits due at `when` */
-    time_t alarm;     /* the next minute-aligned wake (display, sensors or an entry), for the RTC alarm */
+    time_t alarm;     /* the next minute-aligned wake (display, sensors, an entry or a sync), for the RTC alarm */
 } sched_wake_t;
 
 sched_wake_t scheduler_next_wake(const sched_input_t *in);

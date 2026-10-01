@@ -172,9 +172,24 @@ static void test_the_next_schedule_entry_sets_the_alarm(void)
     TEST_ASSERT_EQUAL_UINT(SCHED_DISPLAY | SCHED_SENSORS, w.reasons);
 }
 
+static void test_a_sync_between_display_slots_wakes_the_board(void)
+{
+    /* updates every 15 min (05:30 next), a sync at 05:25 local */
+    time_t now = sched_local_to_utc(2026, 7, 1, 5 * 60 + 20);
+    time_t sync = sched_local_to_utc(2026, 7, 1, 5 * 60 + 25);
+    sched_input_t in = { .now = now, .display_every_min = 15, .sensors_every_min = 30, .sync_at = sync };
+    sched_wake_t w = scheduler_next_wake(&in);
+    TEST_ASSERT_EQUAL_INT64(sync, w.when);
+    TEST_ASSERT_EQUAL_INT64(sync, w.alarm);
+    TEST_ASSERT_EQUAL_UINT(SCHED_SYNC, w.reasons);
+    in.sync_at = now; /* due already: no wake for it */
+    TEST_ASSERT_EQUAL_UINT(SCHED_DISPLAY | SCHED_SENSORS, scheduler_next_wake(&in).reasons); /* 05:30 */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_a_sync_between_display_slots_wakes_the_board);
     RUN_TEST(test_next_minute_for_every_minute_updates);
     RUN_TEST(test_a_wake_exactly_on_a_minute_moves_to_the_next_one);
     RUN_TEST(test_sensor_slots_align_to_local_five_minutes);

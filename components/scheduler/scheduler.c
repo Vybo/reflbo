@@ -75,12 +75,16 @@ sched_wake_t scheduler_next_wake(const sched_input_t *in)
     time_t display = next_slot(in->now, in->display_every_min);
     time_t sensors = next_slot(in->now, in->sensors_every_min);
     time_t entry = in->schedule_at > in->now ? in->schedule_at : 0;
+    time_t sync = in->sync_at > in->now ? in->sync_at : 0;
     time_t cycle = in->cycle_at == 0 ? 0 : in->cycle_at > in->now ? in->cycle_at : in->now + 1; /* overdue: now */
     time_t second = in->every_second ? in->now + 1 : 0;
 
     sched_wake_t wake = { .alarm = display < sensors ? display : sensors };
     if (entry != 0 && entry < wake.alarm) {
         wake.alarm = entry;
+    }
+    if (sync != 0 && sync < wake.alarm) {
+        wake.alarm = sync;
     }
     wake.when = wake.alarm;
     if (cycle != 0 && cycle < wake.when) {
@@ -91,6 +95,6 @@ sched_wake_t scheduler_next_wake(const sched_input_t *in)
     }
     wake.reasons = (display == wake.when ? SCHED_DISPLAY : 0) | (sensors == wake.when ? SCHED_SENSORS : 0) |
                    (cycle == wake.when ? SCHED_CYCLE : 0) | (second == wake.when ? SCHED_SECOND : 0) |
-                   (entry == wake.when ? SCHED_ENTRY : 0);
+                   (entry == wake.when ? SCHED_ENTRY : 0) | (sync == wake.when ? SCHED_SYNC : 0);
     return wake;
 }

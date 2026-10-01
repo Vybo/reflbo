@@ -76,3 +76,15 @@ void pcf85063_encode_alarm(time_t wake, uint8_t regs[PCF85063_ALARM_LEN])
     regs[3] = t[3];                /* day */
     regs[4] = AEN_DISABLED;        /* weekday: any */
 }
+
+uint8_t pcf85063_encode_offset(int steps)
+{
+    steps = steps < -64 ? -64 : steps > 63 ? 63 : steps;
+    return (uint8_t)(steps & 0x7F); /* MODE (bit 7) = 0 */
+}
+
+int pcf85063_decode_offset(uint8_t reg)
+{
+    int v = reg & 0x7F;
+    return v >= 64 ? v - 128 : v;
+}

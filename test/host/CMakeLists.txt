@@ -81,9 +81,11 @@ target_include_directories(rtc_logic PUBLIC ${REPO_ROOT}/components/rtc/include)
 target_compile_options(rtc_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(rtc_logic PUBLIC util)
 
-# timekeeping: the ISO 8601 parser, the zone list and the RTC sync rule build on the host.
+# timekeeping: the ISO 8601 parser, the zone list, the RTC sync rule and the trim build on the host.
 add_library(timekeeping_logic STATIC ${REPO_ROOT}/components/timekeeping/timekeeping_iso.c
-            ${REPO_ROOT}/components/timekeeping/timekeeping_zones.c ${REPO_ROOT}/components/timekeeping/timekeeping_sync.c)
+            ${REPO_ROOT}/components/timekeeping/timekeeping_zones.c
+            ${REPO_ROOT}/components/timekeeping/timekeeping_sync.c
+            ${REPO_ROOT}/components/timekeeping/timekeeping_trim.c)
 target_include_directories(timekeeping_logic PUBLIC ${REPO_ROOT}/components/timekeeping/include)
 target_compile_options(timekeeping_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(timekeeping_logic PUBLIC util)
@@ -185,6 +187,7 @@ reflbo_host_test(test_pcf85063_regs rtc_logic)
 reflbo_host_test(test_timekeeping_iso timekeeping_logic)
 reflbo_host_test(test_timekeeping_zones timekeeping_logic)
 reflbo_host_test(test_timekeeping_sync timekeeping_logic)
+reflbo_host_test(test_timekeeping_trim timekeeping_logic)
 reflbo_host_test(test_power_policy power_logic)
 reflbo_host_test(test_netmgr_dns netmgr_logic)
 reflbo_host_test(test_netmgr_list netmgr_logic)

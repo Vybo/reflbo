@@ -8,7 +8,7 @@
 /* Layouts (spec §5.2): fixed slot rectangles below a 20 px status bar. Pure C, host-buildable. */
 
 #define UI_STATUS_H 20
-#define UI_SLOT_MAX 6
+#define UI_SLOT_MAX 8 /* the split layout's cells (ui_split.h); the fixed layouts use up to 6 */
 
 typedef enum {
     UI_LAYOUT_CLASSIC,
@@ -17,6 +17,7 @@ typedef enum {
     UI_LAYOUT_FOCUS,
     UI_LAYOUT_RADAR,   /* M6: the weather radar's map, without slots (spec §5.2) */
     UI_LAYOUT_FLIGHTS, /* M6: the flight radar's map and panel, without slots */
+    UI_LAYOUT_SPLIT,   /* M6b: cells from the preset's own tree (ui_split.h, D31), without fixed slots */
     UI_LAYOUT_COUNT,
 } ui_layout_id_t;
 

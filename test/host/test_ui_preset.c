@@ -3,11 +3,12 @@
 
 #include "ui_fields.h"
 #include "ui_preset.h"
+#include "ui_split.h"
 #include "unity.h"
 
 static ui_presets_t s_p;
 static char s_err[128];
-static char s_json[8192];
+static char s_json[UI_PRESETS_JSON_MAX];
 
 void setUp(void)
 {
@@ -368,6 +369,169 @@ static void test_a_full_set_fits_the_save_buffer(void)
     TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(s_p));
 }
 
+
+/* Spec §5.2's example as presets.json has it (spec §5.4): Weather with smaller bottom cells. */
+#define SPLIT_WEATHER                                                                                              \
+    "{\"schema\": 1, \"presets\": [{\"id\": \"wx\", \"name\": \"Weather\", \"layout\": \"split\", \"split\": "        \
+    "{\"split\": \"rows\", \"ratio\": \"3/4\", \"line\": true,"                                                      \
+    " \"a\": {\"split\": \"columns\", \"ratio\": \"1/2\","                                                           \
+    "        \"a\": {\"field\": \"wx.now\"},"                                                                        \
+    "        \"b\": {\"split\": \"rows\", \"ratio\": \"1/2\", \"a\": {\"field\": \"wx.today\"},"                      \
+    "               \"b\": {\"field\": \"wx.hourly\"}}},"                                                            \
+    " \"b\": {\"split\": \"columns\", \"ratio\": \"1/2\", \"line\": false, \"a\": {\"field\": \"env.temp\"},"         \
+    "        \"b\": {\"field\": \"env.hum\"}}}}]}"
+
+static void test_the_spec_split_example_parses(void)
+{
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(SPLIT_WEATHER, &s_p, s_err, sizeof(s_err)), s_err);
+    const ui_preset_t *p = &s_p.presets[0];
+    TEST_ASSERT_EQUAL(UI_LAYOUT_SPLIT, p->layout);
+    static const uint8_t k_tree[UI_SPLIT_NODES] = { UI_RATIO_3_4, UI_RATIO_1_2 | UI_SPLIT_COLUMNS, 0, UI_RATIO_1_2, 0,
+                                                    0, UI_RATIO_1_2 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, 0 };
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(k_tree, p->split, UI_SPLIT_NODES); /* a missing line is shown */
+    static const uint8_t k_fields[UI_SLOT_MAX] = { UI_FIELD_WX_NOW, UI_FIELD_WX_TODAY, UI_FIELD_WX_HOURLY,
+                                                   UI_FIELD_ENV_TEMP, UI_FIELD_ENV_HUM };
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(k_fields, p->slots, UI_SLOT_MAX); /* the cells' fields, in preorder */
+    TEST_ASSERT_EQUAL_INT(5, ui_preset_slots(p));
+}
+
+static void test_a_split_preset_survives_a_round_trip(void)
+{
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(SPLIT_WEATHER, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_json, "\"layout\":\"split\",\"in_cycle\":true,\"split\":{\"split\":\"rows\","
+                                                "\"ratio\":\"3/4\",\"line\":true,\"a\":{\"split\":\"columns\""),
+                                 s_json);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_json, "\"line\":false,\"a\":{\"field\":\"env.temp\"},\"b\":{\"field\":"
+                                                "\"env.hum\"}}},\"options\""),
+                                 s_json);
+    TEST_ASSERT_NULL_MESSAGE(strstr(s_json, "\"slots\""), s_json); /* a split preset has its tree instead */
+    ui_presets_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(s_p));
+}
+
+static void test_a_split_preset_without_a_tree_is_one_empty_cell(void)
+{
+    const char *json = "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"split\"},"
+                       " {\"id\": \"b\", \"layout\": \"split\", \"split\": {\"field\": \"time.clock\"}},"
+                       " {\"id\": \"c\", \"layout\": \"split\", \"split\": {}}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_INT(1, ui_preset_slots(&s_p.presets[0]));
+    TEST_ASSERT_EQUAL(UI_FIELD_NONE, s_p.presets[0].slots[0]);
+    TEST_ASSERT_EQUAL(UI_FIELD_TIME_CLOCK, s_p.presets[1].slots[0]); /* 400×279: the clock at XL */
+    TEST_ASSERT_EQUAL(UI_FIELD_NONE, s_p.presets[2].slots[0]);
+}
+
+/* A cell of the tree as JSON: `field` or empty; a split of two parts. */
+static int put_split(char *out, size_t size, const char *split, const char *ratio, const char *a, const char *b)
+{
+    return snprintf(out, size, "{\"split\": \"%s\", \"ratio\": \"%s\", \"a\": %s, \"b\": %s}", split, ratio, a, b);
+}
+
+/* presets.json with one split preset of `tree`, in s_json. */
+static const char *split_file(const char *tree)
+{
+    snprintf(s_json, sizeof(s_json),
+             "{\"schema\": 1, \"presets\": [{\"id\": \"t\", \"layout\": \"split\", \"split\": %s}]}", tree);
+    return s_json;
+}
+
+static void check_tree_rejected(const char *tree, const char *reason_part)
+{
+    check_rejected(split_file(tree), reason_part);
+}
+
+static void test_bad_split_trees_are_rejected_with_a_reason(void)
+{
+    static char tree[2048], part[1024];
+    /* nine cells, each at least 90×40: two rows of four, one of them split again */
+    put_split(part, sizeof(part), "columns", "1/2", "{}", "{}");
+    char row[512];
+    snprintf(row, sizeof(row), "{\"split\": \"columns\", \"ratio\": \"1/4\", \"a\": {}, \"b\": {\"split\": \"columns\","
+             " \"ratio\": \"1/3\", \"a\": {}, \"b\": %s}}", part);
+    char split_cell[256];
+    put_split(split_cell, sizeof(split_cell), "rows", "1/2", "{}", "{}");
+    char row9[512];
+    snprintf(row9, sizeof(row9), "{\"split\": \"columns\", \"ratio\": \"1/4\", \"a\": %s,"
+             " \"b\": {\"split\": \"columns\", \"ratio\": \"1/3\", \"a\": {}, \"b\": %s}}", split_cell, part);
+    put_split(tree, sizeof(tree), "rows", "1/2", row, row9);
+    check_tree_rejected(tree, "at most 8 cells");
+    put_split(tree, sizeof(tree), "rows", "1/2", row, row); /* eight are fine */
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(split_file(tree), &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_INT(8, ui_preset_slots(&s_p.presets[0]));
+
+    put_split(part, sizeof(part), "rows", "1/2", "{}", "{}");
+    put_split(tree, sizeof(tree), "rows", "1/4", part, "{}"); /* 69 px split in two: 34 */
+    check_tree_rejected(tree, "90×40");
+    check_tree_rejected("{\"split\": \"diagonal\", \"ratio\": \"1/2\", \"a\": {}, \"b\": {}}", "rows or columns");
+    check_tree_rejected("{\"split\": \"rows\", \"ratio\": \"2/5\", \"a\": {}, \"b\": {}}", "1/4, 1/3, 1/2, 2/3 or 3/4");
+    check_tree_rejected("{\"split\": \"rows\", \"ratio\": \"1/2\", \"a\": {}}", "both parts");
+    check_tree_rejected("{\"split\": \"rows\", \"ratio\": \"1/2\", \"a\": {}, \"b\": \"env.temp\"}", "both parts");
+    check_tree_rejected("{\"field\": \"env.cold\"}", "unknown field");
+    check_tree_rejected("{\"field\": 7}", "field id");
+    check_tree_rejected("[]", "split must be");
+    /* the rain map needs M: the bottom cell is 400×69 */
+    put_split(tree, sizeof(tree), "rows", "3/4", "{\"field\": \"time.clock\"}", "{\"field\": \"rain.map\"}");
+    check_tree_rejected(tree, "cell 2 (400×69) can't show rain.map");
+    check_rejected("{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"split\","
+                   " \"slots\": {\"main\": \"env.temp\"}}]}",
+                   "no slot \"main\"");
+}
+
+/* The largest presets.json there can be: 16 split presets of 8 cells, in columns wherever a tree can
+ * have them, with every line hidden; the longest field ids a cell takes; names of control characters,
+ * which cJSON writes as six bytes each ("\u0001"); every option at its longest; 8 schedule entries
+ * that switch to a preset. */
+static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
+{
+    static const uint8_t k_tree[UI_SPLIT_NODES] = {
+        UI_RATIO_1_2 | UI_SPLIT_NO_LINE,
+        UI_RATIO_1_4 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, UI_RATIO_1_3 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0,
+        UI_RATIO_1_2 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, 0,
+        UI_RATIO_1_4 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, UI_RATIO_1_3 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0,
+        UI_RATIO_1_2 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, 0,
+    };
+    memset(&s_p, 0, sizeof(s_p));
+    for (int i = 0; i < UI_PRESET_MAX; i++) {
+        ui_preset_t *p = &s_p.presets[i];
+        snprintf(p->id, sizeof(p->id), "preset-%08d", i);
+        memset(p->name, 0x01, UI_PRESET_NAME_LEN - 1);
+        p->layout = UI_LAYOUT_SPLIT;
+        memcpy(p->split, k_tree, sizeof(k_tree));
+        for (int k = 0; k < UI_SPLIT_CELLS; k++) {
+            p->slots[k] = (uint8_t)(k % 2 ? UI_FIELD_POLLEN_MUGWORT : UI_FIELD_POLLEN_RAGWEED); /* fit narrow S */
+        }
+        p->clock = UI_CLOCK_12H;
+        p->stale_policy = UI_STALE_PLACEHOLDER;
+        p->status_battery = UI_STATUS_BAT_PERCENT | UI_STATUS_BAT_VOLTAGE | UI_STATUS_BAT_DAYS;
+    }
+    s_p.count = UI_PRESET_MAX;
+    s_p.cycle_interval_s = UI_CYCLE_MAX_S;
+    s_p.offered = UI_OFFERED_ALL;
+    s_p.schedule.count = UI_SCHEDULE_MAX;
+    for (int i = 0; i < UI_SCHEDULE_MAX; i++) {
+        s_p.schedule.entries[i] = (ui_schedule_entry_t){ .at_min = 600, .days = 0x7F, .action = UI_SCHED_PRESET,
+                                                          .preset = (uint8_t)i };
+    }
+    static char buf[UI_PRESETS_JSON_MAX];
+    size_t n = ui_presets_to_json(&s_p, buf, sizeof(buf));
+    TEST_ASSERT_TRUE_MESSAGE(n > 0, "the worst case must fit UI_PRESETS_JSON_MAX");
+    ui_presets_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(buf, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(s_p));
+}
+
+static void test_a_preset_counts_the_slots_its_layout_uses(void)
+{
+    TEST_ASSERT_EQUAL_INT(6, ui_preset_slots(&s_p.presets[0])); /* Home: Classic */
+    TEST_ASSERT_EQUAL_INT(0, ui_preset_slots(&s_p.presets[ui_presets_find(&s_p, "rain")]));
+    ui_preset_t split = { .layout = UI_LAYOUT_SPLIT };
+    TEST_ASSERT_EQUAL_INT(1, ui_preset_slots(&split));
+    memset(split.split, UI_RATIO_1_2, sizeof(split.split)); /* cut short: no cells */
+    TEST_ASSERT_EQUAL_INT(0, ui_preset_slots(&split));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -393,5 +557,11 @@ int main(void)
     RUN_TEST(test_slots_given_as_a_list_are_rejected);
     RUN_TEST(test_deep_nesting_is_rejected_before_parsing);
     RUN_TEST(test_a_full_set_fits_the_save_buffer);
+    RUN_TEST(test_the_spec_split_example_parses);
+    RUN_TEST(test_a_split_preset_survives_a_round_trip);
+    RUN_TEST(test_a_split_preset_without_a_tree_is_one_empty_cell);
+    RUN_TEST(test_bad_split_trees_are_rejected_with_a_reason);
+    RUN_TEST(test_a_full_set_of_split_presets_fits_the_save_buffer);
+    RUN_TEST(test_a_preset_counts_the_slots_its_layout_uses);
     return UNITY_END();
 }

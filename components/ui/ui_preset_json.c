@@ -5,6 +5,7 @@
 #include "cJSON.h"
 #include "ui_fields.h"
 #include "ui_preset.h"
+#include "ui_split.h"
 #include "util_json.h"
 
 #define SCHEMA 1
@@ -111,6 +112,86 @@ static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_preset
     return true;
 }
 
+typedef struct {
+    ui_preset_t *out;
+    int nodes; /* taken so far, in preorder */
+    int cells;
+    char *err;
+    size_t size;
+} tree_t;
+
+/* A split tree's node and everything under it (spec §5.4). The file's depth is checked before it
+ * parses, so the recursion is at most UI_JSON_MAX_DEPTH deep. */
+static bool parse_node(tree_t *t, const cJSON *node)
+{
+    const char *id = t->out->id;
+    if (t->nodes >= UI_SPLIT_NODES) { /* a tree of n cells has 2n - 1 nodes */
+        return fail(t->err, t->size, "preset \"%s\": a split preset has at most %d cells", id, UI_SPLIT_CELLS);
+    }
+    const cJSON *split = cJSON_GetObjectItemCaseSensitive(node, "split");
+    if (split == NULL) {
+        t->out->split[t->nodes++] = 0;
+        const cJSON *field = cJSON_GetObjectItemCaseSensitive(node, "field");
+        if (field != NULL && !cJSON_IsNull(field) && !(cJSON_IsString(field) && field->valuestring[0] == '\0')) {
+            if (!cJSON_IsString(field)) {
+                return fail(t->err, t->size, "preset \"%s\": a cell's field must be a field id", id);
+            }
+            ui_field_id_t f = ui_field_by_name(field->valuestring);
+            if (f == UI_FIELD_NONE) {
+                return fail(t->err, t->size, "preset \"%s\": unknown field \"%s\"", id, field->valuestring);
+            }
+            t->out->slots[t->cells] = (uint8_t)f;
+        }
+        t->cells++;
+        return true;
+    }
+    const char *dir = cJSON_IsString(split) ? split->valuestring : "";
+    bool columns = strcmp(dir, "columns") == 0;
+    if (!columns && strcmp(dir, "rows") != 0) {
+        return fail(t->err, t->size, "preset \"%s\": a split is rows or columns", id);
+    }
+    const cJSON *ratio = cJSON_GetObjectItemCaseSensitive(node, "ratio");
+    int r = cJSON_IsString(ratio) ? ui_split_ratio_by_name(ratio->valuestring) : 0;
+    if (r == 0) {
+        return fail(t->err, t->size, "preset \"%s\": a split's ratio is 1/4, 1/3, 1/2, 2/3 or 3/4", id);
+    }
+    const cJSON *a = cJSON_GetObjectItemCaseSensitive(node, "a"), *b = cJSON_GetObjectItemCaseSensitive(node, "b");
+    if (!cJSON_IsObject(a) || !cJSON_IsObject(b)) {
+        return fail(t->err, t->size, "preset \"%s\": a split needs both parts, a and b, as objects", id);
+    }
+    t->out->split[t->nodes++] =
+        (uint8_t)(r | (columns ? UI_SPLIT_COLUMNS : 0) | (optional_bool(node, "line", true) ? 0 : UI_SPLIT_NO_LINE));
+    return parse_node(t, a) && parse_node(t, b);
+}
+
+/* The split layout's tree, then its geometry and what each cell can show (spec §5.2). */
+static bool parse_split(const cJSON *split, ui_preset_t *out, char *err, size_t size)
+{
+    if (split == NULL || cJSON_IsNull(split)) {
+        return true; /* one empty cell */
+    }
+    if (!cJSON_IsObject(split)) {
+        return fail(err, size, "preset \"%s\": split must be a tree of splits and cells", out->id);
+    }
+    tree_t t = { .out = out, .err = err, .size = size };
+    if (!parse_node(&t, split)) {
+        return false;
+    }
+    ui_split_geometry_t g;
+    if (!ui_split_layout(out->split, ui_split_area(), &g)) {
+        return fail(err, size, "preset \"%s\": a split's parts must be at least %d×%d", out->id, UI_SPLIT_MIN_W,
+                    UI_SPLIT_MIN_H);
+    }
+    for (int i = 0; i < g.cells; i++) {
+        const ui_field_info_t *info = ui_field_info((ui_field_id_t)out->slots[i]);
+        if (info != NULL && ui_split_field_size(info->kind, g.cell[i].w, g.cell[i].h) < 0) {
+            return fail(err, size, "preset \"%s\": cell %d (%d×%d) can't show %s", out->id, i + 1, g.cell[i].w,
+                        g.cell[i].h, info->id);
+        }
+    }
+    return true;
+}
+
 static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t size)
 {
     memset(out, 0, sizeof(*out));
@@ -135,6 +216,9 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
     const cJSON *slots = cJSON_GetObjectItemCaseSensitive(item, "slots");
     if (slots != NULL && !cJSON_IsNull(slots) &&
         !parse_slots(slots, ui_layout((ui_layout_id_t)layout), out, err, size)) {
+        return false;
+    }
+    if (layout == UI_LAYOUT_SPLIT && !parse_split(cJSON_GetObjectItemCaseSensitive(item, "split"), out, err, size)) {
         return false;
     }
     const cJSON *options = cJSON_GetObjectItemCaseSensitive(item, "options");
@@ -294,6 +378,26 @@ bool ui_presets_from_json(const char *json, ui_presets_t *out, char *err, size_t
     return ok;
 }
 
+/* A split tree's node and everything under it, in preorder: `at` the node, `cell` its first cell. */
+static cJSON *node_json(const ui_preset_t *p, int *at, int *cell)
+{
+    cJSON *obj = cJSON_CreateObject();
+    uint8_t node = p->split[(*at)++];
+    if ((node & UI_SPLIT_RATIO) == 0) {
+        const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[(*cell)++]);
+        if (info != NULL) {
+            cJSON_AddStringToObject(obj, "field", info->id);
+        }
+        return obj;
+    }
+    cJSON_AddStringToObject(obj, "split", node & UI_SPLIT_COLUMNS ? "columns" : "rows");
+    cJSON_AddStringToObject(obj, "ratio", ui_split_ratio_name(node & UI_SPLIT_RATIO));
+    cJSON_AddBoolToObject(obj, "line", !(node & UI_SPLIT_NO_LINE));
+    cJSON_AddItemToObject(obj, "a", node_json(p, at, cell));
+    cJSON_AddItemToObject(obj, "b", node_json(p, at, cell));
+    return obj;
+}
+
 static cJSON *preset_json(const ui_preset_t *p)
 {
     const ui_layout_t *layout = ui_layout((ui_layout_id_t)p->layout);
@@ -302,11 +406,17 @@ static cJSON *preset_json(const ui_preset_t *p)
     cJSON_AddStringToObject(obj, "name", p->name);
     cJSON_AddStringToObject(obj, "layout", layout->id);
     cJSON_AddBoolToObject(obj, "in_cycle", p->in_cycle);
-    cJSON *slots = cJSON_AddObjectToObject(obj, "slots");
-    for (int i = 0; i < layout->slot_count; i++) {
-        const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[i]);
-        if (info != NULL) {
-            cJSON_AddStringToObject(slots, layout->slots[i].name, info->id);
+    if (p->layout == UI_LAYOUT_SPLIT) {
+        int at = 0, cell = 0;
+        bool whole = ui_split_nodes(p->split) > 0; /* a tree cut short can't be walked: one empty cell */
+        cJSON_AddItemToObject(obj, "split", whole ? node_json(p, &at, &cell) : cJSON_CreateObject());
+    } else {
+        cJSON *slots = cJSON_AddObjectToObject(obj, "slots");
+        for (int i = 0; i < layout->slot_count; i++) {
+            const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[i]);
+            if (info != NULL) {
+                cJSON_AddStringToObject(slots, layout->slots[i].name, info->id);
+            }
         }
     }
     cJSON *options = cJSON_AddObjectToObject(obj, "options");

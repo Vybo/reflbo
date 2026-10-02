@@ -72,6 +72,16 @@ bool ui_presets_offer_builtins(ui_presets_t *p)
     return changed;
 }
 
+int ui_preset_slots(const ui_preset_t *p)
+{
+    if (p->layout == UI_LAYOUT_SPLIT) {
+        int nodes = ui_split_nodes(p->split);
+        return nodes > 0 ? (nodes + 1) / 2 : 0; /* a tree of n cells has 2n - 1 nodes */
+    }
+    const ui_layout_t *layout = ui_layout((ui_layout_id_t)p->layout);
+    return layout != NULL ? layout->slot_count : 0;
+}
+
 int ui_presets_find(const ui_presets_t *p, const char *id)
 {
     for (int i = 0; id != NULL && i < p->count; i++) {

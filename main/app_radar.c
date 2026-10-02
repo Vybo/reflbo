@@ -198,14 +198,13 @@ void app_radar_status(app_radar_status_t *out)
     out->source = source_now();
 }
 
-/* The preset draws the weather radar: the Radar layout, or a slot's map. */
+/* The preset draws the weather radar: the Radar layout, or a slot's or a cell's map. */
 static bool shows_weather(const ui_preset_t *p)
 {
     if (p->layout == UI_LAYOUT_RADAR) {
         return true;
     }
-    const ui_layout_t *layout = ui_layout((ui_layout_id_t)p->layout);
-    for (int i = 0; layout != NULL && i < layout->slot_count; i++) {
+    for (int i = 0; i < ui_preset_slots(p); i++) {
         if (p->slots[i] == UI_FIELD_RAIN_MAP) {
             return true;
         }

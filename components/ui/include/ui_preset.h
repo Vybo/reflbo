@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "ui_layout.h"
+#include "ui_split.h"
 
 /*
  * Presets (spec §5.4): a layout, its slot bindings and options, stored in /cfg/presets.json.
@@ -18,8 +19,9 @@
 #define UI_CYCLE_MIN_S 10
 #define UI_CYCLE_MAX_S 3600
 #define UI_SCHEDULE_MAX 8
-#define UI_PRESETS_JSON_MAX 8192 /* presets.json at its largest: 16 presets and 8 schedule entries */
-#define UI_JSON_MAX_DEPTH 16     /* the files nest 5 levels; anything deeper is rejected unparsed */
+#define UI_PRESETS_JSON_MAX 20480 /* presets.json at its largest is 16 253 bytes (test_ui_preset.c) */
+#define UI_JSON_MAX_DEPTH 16      /* presets.json nests 11 levels at most (a split tree's chain of 7 splits),
+                                     settings.json 5; anything deeper is rejected unparsed */
 
 typedef enum {
     UI_STALE_STALE,       /* show the value with its age (the default) */
@@ -45,7 +47,8 @@ typedef struct {
     char name[UI_PRESET_NAME_LEN];
     uint8_t layout; /* ui_layout_id_t */
     bool in_cycle;
-    uint8_t slots[UI_SLOT_MAX]; /* ui_field_id_t per slot, in the layout's slot order */
+    uint8_t slots[UI_SLOT_MAX]; /* ui_field_id_t per slot, in the layout's slot order, or per cell */
+    uint8_t split[UI_SPLIT_NODES]; /* the split layout's tree (ui_split.h); all 0 for the others */
     uint8_t clock;              /* ui_clock_mode_t */
     bool seconds;
     bool invert;
@@ -106,6 +109,10 @@ typedef struct {
     ui_schedule_t schedule;
     uint8_t offered; /* UI_OFFERED_* */
 } ui_presets_t;
+
+/* How many of `p`'s slots its layout uses: a fixed layout's slots, or the cells of its split tree
+ * (0 for a tree cut short). */
+int ui_preset_slots(const ui_preset_t *p);
 
 /* The built-in presets (spec §5.4): used when presets.json is missing or invalid. */
 void ui_presets_defaults(ui_presets_t *p);

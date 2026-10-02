@@ -184,6 +184,17 @@ typedef enum {
     LS_RAIN_MODERATE,
     LS_RAIN_HEAVY,
     LS_AGO, /* "%s ago": the one "%s" is an age, "3 h" */
+    LS_FLIGHTS_NEED_ALWAYS, /* the Flights view outside sync mode `always` (spec §5.4) */
+    LS_NO_AIRCRAFT,         /* "No aircraft within %s": the one "%s" is the range, "50 km" */
+    LS_NO_AIRCRAFT_DATA,    /* followed by " (20:40)", the last good poll, when there was one */
+    LS_DIR_N,               /* the 8 directions, clockwise from north */
+    LS_DIR_NE,
+    LS_DIR_E,
+    LS_DIR_SE,
+    LS_DIR_S,
+    LS_DIR_SW,
+    LS_DIR_W,
+    LS_DIR_NW,
     LS_COUNT,
 } lang_str_t;
 

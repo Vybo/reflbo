@@ -13,6 +13,8 @@
 void ui_clock_text(const ui_context_t *ctx, time_t t, char *out, size_t size);
 /* An age as the stale mark shows it: "45 min", "3 h", "2 d" (ui_widget.c). */
 void ui_format_age(const lang_t *lang, uint32_t age_s, char *out, size_t size);
+/* The pattern's one "%s" replaced by `value`, as the packs' LS_AGO has it ("%s ago", "před %s"). */
+void ui_fill(const char *pattern, const char *value, char *out, size_t size);
 /* rain.map (ui_radar.c, M6); false for any other field. */
 bool ui_resolve_radar(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);
 /* Its widget in an M or L slot; false for any other kind. */

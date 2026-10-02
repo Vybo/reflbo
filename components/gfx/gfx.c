@@ -1,6 +1,7 @@
 #include "gfx.h"
 
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int min_int(int a, int b)
@@ -267,6 +268,46 @@ void gfx_fill_circle(gfx_fb_t *fb, int cx, int cy, int r, gfx_color_t color)
             half++;
         }
         gfx_hline(fb, cx - half, cy + dy, 2 * half + 1, color);
+    }
+}
+
+static long floor_div(long a, long b) /* b > 0 */
+{
+    long q = a / b;
+    return a % b != 0 && a < 0 ? q - 1 : q;
+}
+
+/* Where the edge from (ax, ay) down to (bx, by) crosses row y, to the nearest pixel. */
+static int edge_x(int ax, int ay, int bx, int by, int y)
+{
+    if (by == ay) {
+        return ax;
+    }
+    long dy = by - ay;
+    return ax + (int)floor_div(2L * (y - ay) * (bx - ax) + dy, 2 * dy);
+}
+
+void gfx_fill_triangle(gfx_fb_t *fb, int x0, int y0, int x1, int y1, int x2, int y2, gfx_color_t color)
+{
+    int t;
+#define SWAP_IF(a, b)                                                                                                  \
+    if (y##a > y##b) {                                                                                                 \
+        t = x##a, x##a = x##b, x##b = t;                                                                               \
+        t = y##a, y##a = y##b, y##b = t;                                                                               \
+    }
+    SWAP_IF(0, 1)
+    SWAP_IF(1, 2)
+    SWAP_IF(0, 1)
+#undef SWAP_IF
+    int top = max_int(y0, fb->clip.y), bottom = min_int(y2, fb->clip.y + fb->clip.h - 1);
+    for (int y = top; y <= bottom; y++) {
+        int a = edge_x(x0, y0, x2, y2, y);                                          /* the long edge */
+        int b = y < y1 ? edge_x(x0, y0, x1, y1, y) : edge_x(x1, y1, x2, y2, y);   /* the two short ones */
+        if (y0 == y2) { /* flat: from the leftmost vertex to the rightmost */
+            a = min_int(x0, min_int(x1, x2));
+            b = max_int(x0, max_int(x1, x2));
+        }
+        gfx_hline(fb, min_int(a, b), y, abs(b - a) + 1, color);
     }
 }
 

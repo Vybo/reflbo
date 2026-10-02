@@ -16,8 +16,7 @@ static bool frame_old(time_t now, const radar_frame_t *f)
     return now > (time_t)f->time && now - (time_t)f->time > UI_RADAR_OLD_S;
 }
 
-/* The pattern's "%s" replaced by `value`, as the packs' LS_AGO has it ("%s ago", "před %s"). */
-static void fill(const char *pattern, const char *value, char *out, size_t size)
+void ui_fill(const char *pattern, const char *value, char *out, size_t size)
 {
     const char *at = strstr(pattern, "%s");
     if (at == NULL) {
@@ -37,7 +36,7 @@ static void caption_text(const ui_context_t *ctx, const radar_frame_t *f, bool b
     } else if (frame_old(ctx->now, f)) {
         char age[16], ago[32];
         ui_format_age(ctx->lang, (uint32_t)(ctx->now - (time_t)f->time), age, sizeof(age));
-        fill(lang_str(ctx->lang, LS_AGO), age, ago, sizeof(ago));
+        ui_fill(lang_str(ctx->lang, LS_AGO), age, ago, sizeof(ago));
         snprintf(out, size, "%s \xC2\xB7 %s", at, ago);
     } else {
         snprintf(out, size, "%s \xC2\xB7 %s", at, f->source == RADAR_SOURCE_CHMU ? "\xC4\x8CHM\xC3\x9A" : "RainViewer");

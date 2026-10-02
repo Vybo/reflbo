@@ -209,6 +209,31 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         preset->slots[0] = UI_FIELD_RAIN_MAP;
         fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
         ctx->radar = fixture_radar(fixture_chmu(FIX_NOW - 8 * 60));
+    } else if (strcmp(name, "flights") == 0) { /* M6: the Flights preset at 50 km, the nearest's route known */
+        *preset = fixture_preset("flights");
+        ctx->radar = fixture_flights(50, fixture_aircraft(50), fixture_route(), ctx->now);
+    } else if (strcmp(name, "flights_100") == 0) { /* 100 km: more aircraft, labels that must give way */
+        *preset = fixture_preset("flights");
+        ctx->radar = fixture_flights(100, fixture_aircraft(100), NULL, ctx->now);
+    } else if (strcmp(name, "flights_cs") == 0) {
+        fixture_dashboard("flights", ctx, preset);
+        ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "flights_none") == 0) { /* a poll with nobody in the sky */
+        *preset = fixture_preset("flights");
+        static const adsb_list_t k_empty;
+        ctx->radar = fixture_flights(50, &k_empty, NULL, ctx->now);
+    } else if (strcmp(name, "flights_failed") == 0) { /* the last good poll at 20:40 */
+        *preset = fixture_preset("flights");
+        ui_radar_t *radar = fixture_flights(50, fixture_aircraft(50), NULL, ctx->now);
+        radar->fl_updated = ctx->now - 8 * 60;
+        radar->fl_failed = true;
+        ctx->radar = radar;
+    } else if (strcmp(name, "flights_off") == 0) { /* not sync mode `always` (spec §5.4) */
+        *preset = fixture_preset("flights");
+        ui_radar_t *radar = fixture_flights(50, NULL, NULL, ctx->now);
+        radar->fl_always = false;
+        radar->fl_updated = 0;
+        ctx->radar = radar;
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -226,9 +251,12 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "indoor_hot_f", "indoor_frost", "home_frost", "grid_clock_12h",
                                                     "home_cs", "indoor_cs", "home_holiday_cs", "home_low_battery",
                                                     "home_web", "home_stale_web", "weather_now",
-                                                    "weather_noon_cs", "weather_stale", "air_grid", "air_grid_cs", "grid_sun_uv", "home_forecast",
+                                                    "weather_noon_cs", "weather_stale", "air_grid", "air_grid_cs",
+                                                    "grid_sun_uv", "home_forecast",
                                                     "focus_forecast", "home_syncing", "home_sync_failed",
                                                     "home_always", "home_always_rejoining", "weather_rain",
                                                     "focus_rain_now", "grid_rain_cs", "radar", "radar_stale",
                                                     "radar_stale_cs", "radar_loop", "radar_none",
-                                                    "radar_rainviewer", "grid_rain_map", "weather_rain_map" };
+                                                    "radar_rainviewer", "grid_rain_map", "weather_rain_map",
+                                                    "flights", "flights_100", "flights_cs", "flights_none",
+                                                    "flights_failed", "flights_off" };

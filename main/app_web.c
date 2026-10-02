@@ -223,6 +223,12 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
         cJSON_AddNumberToObject(flights, "updated", (double)fs.updated);
     }
     cJSON_AddBoolToObject(flights, "failed", fs.failed);
+    if (fs.failed && fs.error[0] != '\0') {
+        cJSON_AddStringToObject(flights, "error", fs.error);
+    }
+    if (fs.routes_paused_until != 0) {
+        cJSON_AddNumberToObject(flights, "routes_paused_until", (double)fs.routes_paused_until);
+    }
 
     const ui_preset_t *active = &st->presets.presets[st->presets.active];
     cJSON *preset = cJSON_AddObjectToObject(o, "preset");

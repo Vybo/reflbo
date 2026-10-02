@@ -372,9 +372,12 @@ static int radar_body(int argc, char **argv)
         }
         app_flights_status_t f;
         app_flights_status(&f);
-        printf("flights: %s, %u aircraft%s\n", f.on ? "polling" : "off", f.aircraft,
-               f.failed ? ", the last poll failed" : "");
+        printf("flights: %s, %u aircraft%s%s\n", f.on ? "polling" : "off", f.aircraft,
+               f.failed ? ", the last poll failed: " : "", f.failed ? f.error : "");
         print_time("  updated", f.updated);
+        if (f.routes_paused_until != 0) {
+            print_time("  routes paused until", f.routes_paused_until); /* adsb.lol asked for it */
+        }
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "loop") == 0) {

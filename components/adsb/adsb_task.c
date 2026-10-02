@@ -120,6 +120,8 @@ static void adsb_task(void *arg)
         adsb_report_t *r = heap_caps_calloc(1, sizeof(*r), MALLOC_CAP_SPIRAM);
         if (r != NULL) {
             poll(&fi, &req, r);
+            time_t now = time(NULL);
+            r->routes_paused_until = s_routes_paused_until > now ? (uint32_t)s_routes_paused_until : 0;
             failures = r->ok ? 0 : failures + 1;
             if (!r->ok) {
                 ESP_LOGW(TAG, "poll: %s", r->detail);

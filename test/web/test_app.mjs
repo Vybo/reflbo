@@ -456,6 +456,16 @@ test('the flight radar says it runs only in sync mode Always on', async () => {
   assert.doesNotMatch(text(again.main), /runs only in sync mode Always on/);
 });
 
+test('the flight radar says why its last poll failed and when routes come back', async () => {
+  const device = radarDevice({ ...RADAR_SETTINGS, sync: { mode: 'always' } }, [], []);
+  device['GET /api/status'] = () => reply(200, radarStatus({ weather: { source: 'chmu', frames: 1, frame_at: 1790880000 },
+    flights: { on: true, aircraft: 0, failed: true, error: 'HTTP 429', routes_paused_until: 1790883600 } }));
+  const { ctx, main } = await load(device);
+  await ctx.radarPage();
+  assert.match(text(main), /Last pollfailed: HTTP 429/);
+  assert.match(text(main), /Routespaused by adsb\.lol until /);
+});
+
 test('the Radar page previews both radars and credits their sources', async () => {
   const previews = [];
   const { ctx, main } = await load(radarDevice(RADAR_SETTINGS, [], previews));

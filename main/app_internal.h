@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "adsb_task.h"
 #include "board_buttons.h"
 #include "datastore.h"
 #include "esp_err.h"
@@ -171,7 +172,9 @@ typedef struct {
     bool on;          /* its task polls */
     time_t updated;   /* the last good poll (UTC); 0 = none since the view came up */
     bool failed;      /* the last poll failed */
+    char error[ADSB_DETAIL_LEN];  /* and why: "HTTP 429", "too big" */
     uint8_t aircraft; /* on the map at the last good poll */
+    time_t routes_paused_until; /* UTC: adsb.lol asked for a pause until then; 0 = none */
 } app_flights_status_t;
 /* Starts or stops the polling: `shown` says the Flights view is on screen; call before each render. */
 void app_flights_tick(bool shown);

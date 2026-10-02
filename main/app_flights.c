@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "adsb_task.h"
@@ -13,6 +14,8 @@ static const char *TAG = "app_flights";
 static adsb_report_t *s_last; /* the last good poll's report; the app task's */
 static time_t s_updated;      /* when it came (UTC); 0 = none since the view came up */
 static bool s_failed;         /* the last poll failed */
+static char s_error[ADSB_DETAIL_LEN]; /* and why: kept, as its report is freed */
+static time_t s_routes_paused_until;  /* adsb.lol's pause after a 403 or 429 */
 static adsb_task_req_t s_asked; /* what the task polls now */
 static bool s_on;
 
@@ -24,6 +27,8 @@ static void apply(void *arg) /* on the app task */
         return;
     }
     s_failed = !r->ok;
+    snprintf(s_error, sizeof(s_error), "%s", r->ok ? "" : r->detail);
+    s_routes_paused_until = r->routes_paused_until;
     if (r->ok) {
         adsb_report_free(s_last);
         s_last = r;
@@ -83,6 +88,7 @@ void app_flights_tick(bool shown)
         s_last = NULL;
         s_updated = 0;
         s_failed = false;
+        s_error[0] = '\0';
     }
     if (adsb_task_start(&req, done) == ESP_OK) {
         s_asked = req;
@@ -100,6 +106,9 @@ void app_flights_fill(ui_radar_t *ui)
 
 void app_flights_status(app_flights_status_t *out)
 {
+    time_t now = time(NULL);
     *out = (app_flights_status_t){ .on = s_on, .updated = s_updated, .failed = s_failed,
-                                   .aircraft = s_last != NULL ? (uint8_t)s_last->list.count : 0 };
+                                   .aircraft = s_last != NULL ? (uint8_t)s_last->list.count : 0,
+                                   .routes_paused_until = s_routes_paused_until > now ? s_routes_paused_until : 0 };
+    snprintf(out->error, sizeof(out->error), "%s", s_error);
 }

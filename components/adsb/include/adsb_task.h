@@ -23,7 +23,8 @@ typedef struct {
     char detail[ADSB_DETAIL_LEN]; /* why the poll failed: "HTTP 429", "too big" */
     adsb_list_t list;             /* when ok: the nearest first */
     bool has_route;
-    adsb_route_t route; /* the nearest one's, when the cache has it */
+    adsb_route_t route;           /* the nearest one's, when the cache has it */
+    uint32_t routes_paused_until; /* UTC: when adsb.lol's pause after a 403 or 429 ends; 0 = none */
 } adsb_report_t;
 
 /* Starts polling, or changes what the running task polls; `done` runs on the adsb task after each

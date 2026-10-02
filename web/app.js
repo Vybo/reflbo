@@ -735,7 +735,9 @@ async function radarPage() {
     always ? null : h('p', { class: 'bad small' }, 'It runs only in sync mode Always on, set on the ',
       h('a', { href: '#sync' }, 'Sync'), ' page.'),
     flImg, facts([['Now', f.on ? `${f.aircraft} aircraft${f.updated ? ' at ' + when(f.updated) : ''}`
-      : 'resting: it asks while the Flights view is on the screen']]),
+      : 'resting: it asks while the Flights view is on the screen'],
+    f.failed ? ['Last poll', `failed: ${f.error || 'no reason given'}`] : null,
+    f.routes_paused_until ? ['Routes', `paused by adsb.lol until ${when(f.routes_paused_until)}`] : null]),
     h('p', { class: 'muted small', text: 'While the Flights view shows, it asks adsb.fi every 5 to 15 s, more often for ' +
       'a smaller range, and the nearest aircraft\'s route comes from adsb.lol.' }),
     flCentre.els, field('Range', range, 'From the centre to the map\'s top edge.'),

@@ -233,5 +233,6 @@ const ui_radar_t *app_radar_ui(void)
                          .fl_lat_e4 = set->fl_lat_e4, .fl_lon_e4 = set->fl_lon_e4,
                          .fl_range_km = set->fl_range_km,
                          .fl_always = set->sync_mode == SETTINGS_SYNC_ALWAYS };
+    app_flights_fill(&s_ui);
     return &s_ui;
 }

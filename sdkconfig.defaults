@@ -51,3 +51,8 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # the captive DNS one more: the default 10 sockets run out, and accept() fails with ENFILE.
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 CONFIG_LWIP_MAX_SOCKETS=16
+
+# TLS (M6): mbedTLS takes its buffers from PSRAM. In sync mode `always` the flight radar keeps a
+# connection to adsb.fi open while radar refreshes and syncs open their own; on internal RAM their
+# 20-40 KB each would leave Wi-Fi and the web server short (M5's lowest was 80 KB free).
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

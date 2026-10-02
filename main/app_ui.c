@@ -229,6 +229,10 @@ void app_ui_context(ui_context_t *ctx)
 void app_ui_render(void)
 {
     gfx_fb_t *fb = display_fb();
+    const ui_preset_t *active = &s.presets.presets[s.presets.active];
+    bool flights = fb != NULL && !display_asleep() && !app_menu_is_open() && !s.critical &&
+                   !app_config_shows_setup() && !s.first_run && active->layout == UI_LAYOUT_FLIGHTS;
+    app_flights_tick(flights); /* spec §11.3: it polls only while the Flights view shows */
     if (fb == NULL || display_asleep()) {
         return; /* night sleep: nothing is drawn (spec §9.1) */
     }
@@ -236,7 +240,7 @@ void app_ui_render(void)
         app_menu_render();
         return;
     }
-    app_radar_prepare(&s.presets.presets[s.presets.active]);
+    app_radar_prepare(active);
     ui_context_t ctx;
     app_ui_context(&ctx);
     if (s.critical) {

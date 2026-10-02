@@ -2,6 +2,7 @@
 
 #include "ui_internal.h"
 #include "ui_radar.h"
+#include "ui_split.h"
 
 static void draw_separators(gfx_fb_t *fb, ui_layout_id_t layout)
 {
@@ -32,6 +33,47 @@ static void draw_separators(gfx_fb_t *fb, ui_layout_id_t layout)
     }
 }
 
+bool ui_draw_cell(gfx_fb_t *fb, gfx_rect_t cell, const ui_context_t *ctx, ui_field_id_t field,
+                  ui_stale_policy_t policy)
+{
+    const ui_field_info_t *info = ui_field_info(field);
+    int size = info != NULL ? ui_split_field_size(info->kind, cell.w, cell.h) : -1;
+    if (size < 0) {
+        return false;
+    }
+    ui_value_t v;
+    ui_resolve(ctx, field, &v);
+    ui_widget_draw(fb, cell, (ui_size_t)size, &v, policy, ctx->lang);
+    return v.state == UI_VALUE_STALE;
+}
+
+/* The split layout (spec §5.2): each split's separator unless it is hidden, then each cell's field.
+ * Returns whether any value shown is stale. */
+static bool draw_split(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset)
+{
+    ui_split_geometry_t g;
+    if (!ui_split_layout(preset->split, ui_split_area(), &g)) {
+        return false; /* presets.json checks its trees: nothing to draw for one cut short */
+    }
+    for (int i = 0; i < g.lines; i++) {
+        const ui_split_line_t *l = &g.line[i];
+        if (l->node & UI_SPLIT_NO_LINE) {
+            continue;
+        }
+        if (l->node & UI_SPLIT_COLUMNS) {
+            gfx_vline(fb, l->at, l->rect.y + UI_SPLIT_INSET, l->rect.h - 2 * UI_SPLIT_INSET, GFX_BLACK);
+        } else {
+            gfx_hline(fb, l->rect.x + UI_SPLIT_INSET, l->at, l->rect.w - 2 * UI_SPLIT_INSET, GFX_BLACK);
+        }
+    }
+    bool any_stale = false;
+    for (int i = 0; i < g.cells; i++) {
+        any_stale |= ui_draw_cell(fb, g.cell[i], ctx, (ui_field_id_t)preset->slots[i],
+                                  (ui_stale_policy_t)preset->stale_policy);
+    }
+    return any_stale;
+}
+
 void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset)
 {
     ui_context_t c = *ctx;
@@ -49,6 +91,8 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
         ui_draw_radar_view(fb, below, &c);
     } else if (preset->layout == UI_LAYOUT_FLIGHTS) {
         ui_draw_flights_view(fb, below, &c);
+    } else if (preset->layout == UI_LAYOUT_SPLIT) {
+        any_stale = draw_split(fb, &c, preset);
     } else if (layout != NULL) {
         draw_separators(fb, (ui_layout_id_t)preset->layout);
         for (int i = 0; i < layout->slot_count; i++) {

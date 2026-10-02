@@ -718,9 +718,17 @@ static void draw_sun(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_
     const gfx_font_t *tf = size == UI_SIZE_S ? &gfx_font_sans_bold_16 : &gfx_font_sans_bold_20;
     int rows = 2 * 28 + (v->detail[0] && size != UI_SIZE_S ? 18 : 0);
     int y = top + (r.y + r.h - top - rows) / 2;
-    int w = 24 + 6 + gfx_text_width(tf, v->text);
-    int w2 = 24 + 6 + gfx_text_width(tf, v->extra);
-    w = w > w2 ? w : w2;
+    /* a 12-hour time ("7:01 AM") in a narrow split cell: smaller faces before it reaches the edges */
+    static const gfx_font_t *const k_smaller[] = { &gfx_font_sans_16, &gfx_font_sans_12 };
+    int w = 0;
+    for (int i = 0; i <= 2; i++) {
+        int w1 = 24 + 6 + gfx_text_width(tf, v->text), w2 = 24 + 6 + gfx_text_width(tf, v->extra);
+        w = w1 > w2 ? w1 : w2;
+        if (w <= r.w - 8 || i == 2) {
+            break;
+        }
+        tf = k_smaller[i];
+    }
     int x = r.x + (r.w - w) / 2;
     gfx_bitmap(fb, x, y, &gfx_icon_sunrise_24, GFX_BLACK);
     gfx_text(fb, tf, x + 30, y + 12 + ink_height(tf) / 2, v->text, GFX_BLACK);

@@ -103,6 +103,31 @@ static const gfx_bitmap_t *field_icon(ui_field_id_t field, int size)
     return size >= 48 ? s48 : s24;
 }
 
+/* How far `text`'s ink reaches below the baseline in `f`: a comma's tail, the "g" of "µg/m³". */
+static int ink_below(const gfx_font_t *f, const char *text)
+{
+    int below = 0;
+    for (const char *s = text; *s != '\0';) {
+        const gfx_glyph_t *g = gfx_font_glyph(f, gfx_utf8_next(&s));
+        if (g != NULL && g->y_offset + g->height > below) {
+            below = g->y_offset + g->height;
+        }
+    }
+    return below;
+}
+
+/* The number's digits centred in max_h, with room below for its tail and its unit's, and 2 px to
+ * each edge. */
+static bool fits_height(const ui_fonts_t *f, const gfx_font_t *vf, const ui_value_t *v, const char *value, int max_h)
+{
+    if (max_h <= 0) {
+        return true;
+    }
+    int below = ink_below(vf, value);
+    int unit_below = v->unit[0] ? ink_below(f->unit, v->unit) : 0;
+    return digit_height(vf) + 2 * (below > unit_below ? below : unit_below) + 4 <= max_h;
+}
+
 /* Draws value, unit and trend arrow as one group centred on cx; returns the group's width. */
 static int group_width(const ui_fonts_t *f, const gfx_font_t *vf, const ui_value_t *v, const char *value)
 {
@@ -128,18 +153,20 @@ static void draw_group(gfx_fb_t *fb, const ui_fonts_t *f, const gfx_font_t *vf, 
     }
 }
 
-/* Picks the font and text for a number group so that it fits `max_w` (with `extra_w` beside it):
- * at each font, largest first, the value as it is, then without its decimals ("101" for "100.8").
+/* Picks the font and text for a number group so that it fits `max_w` (with `extra_w` beside it)
+ * and `max_h` (0: any height): at each font, largest first, the value as it is, then without its
+ * decimals ("101" for "100.8"; in Czech without the comma, whose tail reaches below the digits).
  * If even the smallest font is too wide, the value is cut with an ellipsis into `buf`. */
 static const gfx_font_t *fit_number(const ui_fonts_t *f, const gfx_font_t *const *fonts, int count,
-                                    const ui_value_t *v, const char **value, int max_w, int extra_w, char *buf,
-                                    size_t size)
+                                    const ui_value_t *v, const char **value, int max_w, int extra_w, int max_h,
+                                    char *buf, size_t size)
 {
     for (int i = 0; i < count; i++) {
-        if (group_width(f, fonts[i], v, *value) + extra_w <= max_w) {
+        if (group_width(f, fonts[i], v, *value) + extra_w <= max_w && fits_height(f, fonts[i], v, *value, max_h)) {
             return fonts[i];
         }
-        if (v->short_text[0] && group_width(f, fonts[i], v, v->short_text) + extra_w <= max_w) {
+        if (v->short_text[0] && group_width(f, fonts[i], v, v->short_text) + extra_w <= max_w &&
+            fits_height(f, fonts[i], v, v->short_text, max_h)) {
             *value = v->short_text;
             return fonts[i];
         }
@@ -298,7 +325,7 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
             gfx_text_ellipsize(vf, value, max_w, fit, sizeof(fit));
             value = fit;
         } else {
-            vf = fit_number(f, k_fit_s, 3, &shown, &value, max_w, 0, fit, sizeof(fit));
+            vf = fit_number(f, k_fit_s, 3, &shown, &value, max_w, 0, 0, fit, sizeof(fit));
         }
         int w = group_width(f, vf, &shown, value);
         int baseline = r.y + 12 + f->icon + 14 + digit_height(vf);
@@ -311,7 +338,7 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         gfx_text_ellipsize(vf, value, r.x + r.w - 6 - x, fit, sizeof(fit));
         value = fit;
     } else {
-        vf = fit_number(f, k_fit_s, 3, &shown, &value, r.x + r.w - 6 - x, 0, fit, sizeof(fit));
+        vf = fit_number(f, k_fit_s, 3, &shown, &value, r.x + r.w - 6 - x, 0, 0, fit, sizeof(fit));
     }
     draw_group(fb, f, vf, &shown, value, x, r.y + (r.h + digit_height(vf)) / 2);
 }
@@ -372,11 +399,11 @@ static void draw_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_v
         const gfx_font_t *const *fonts;
         int count;
     } k_fit[] = { [UI_SIZE_M] = { k_fit_m, 3 }, [UI_SIZE_L] = { k_fit_l, 3 }, [UI_SIZE_XL] = { k_fit_xl, 4 } };
-    const gfx_font_t *vf =
-        fit_number(f, k_fit[size].fonts, k_fit[size].count, &shown, &value, body.w - 6, extra_w, fit, sizeof(fit));
+    int extra_lines = v->kind == UI_FK_BATTERY ? f->unit->line_height : 0;
+    const gfx_font_t *vf = fit_number(f, k_fit[size].fonts, k_fit[size].count, &shown, &value, body.w - 6, extra_w,
+                                      body.h - extra_lines, fit, sizeof(fit));
     int w = group_width(f, vf, &shown, value);
     int x = body.x + (body.w - w - extra_w) / 2;
-    int extra_lines = v->kind == UI_FK_BATTERY ? f->unit->line_height : 0;
     int baseline = body.y + (body.h + digit_height(vf) - extra_lines) / 2;
     draw_group(fb, f, vf, &shown, value, x, baseline);
     if (v->kind == UI_FK_TIME) {

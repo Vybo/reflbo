@@ -26,6 +26,16 @@ static inline ui_preset_t fixture_preset(const char *id)
     return all.presets[i < 0 ? 0 : i];
 }
 
+/* A preset on the split layout (M6b): its tree in preorder, and its cells' fields in their order. */
+static inline void fixture_split(ui_preset_t *p, const uint8_t *tree, size_t nodes, const uint8_t *fields, size_t cells)
+{
+    p->layout = UI_LAYOUT_SPLIT;
+    memset(p->split, 0, sizeof(p->split));
+    memcpy(p->split, tree, nodes);
+    memset(p->slots, 0, sizeof(p->slots));
+    memcpy(p->slots, fields, cells);
+}
+
 /* Each fixture: a context and a preset. */
 static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_preset_t *preset)
 {
@@ -234,6 +244,24 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         radar->fl_always = false;
         radar->fl_updated = 0;
         ctx->radar = radar;
+    } else if (strcmp(name, "split_weather") == 0) { /* M6b: spec §5.2's example, its bottom line hidden */
+        *preset = fixture_preset("weather");
+        static const uint8_t k_tree[] = { UI_RATIO_3_4, UI_RATIO_1_2 | UI_SPLIT_COLUMNS, 0, UI_RATIO_1_2, 0, 0,
+                                          UI_RATIO_1_2 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, 0 };
+        static const uint8_t k_fields[] = { UI_FIELD_WX_NOW, UI_FIELD_WX_TODAY, UI_FIELD_WX_HOURLY, UI_FIELD_ENV_TEMP,
+                                            UI_FIELD_ENV_HUM };
+        fixture_split(preset, k_tree, sizeof(k_tree), k_fields, sizeof(k_fields));
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "split_eight") == 0) { /* eight cells: each ratio, both ways, a hidden line */
+        *preset = fixture_preset("home");
+        static const uint8_t k_tree[] = { UI_RATIO_1_3, UI_RATIO_3_4 | UI_SPLIT_COLUMNS, 0, 0,
+                                          UI_RATIO_1_4 | UI_SPLIT_COLUMNS, UI_RATIO_1_2 | UI_SPLIT_NO_LINE, 0, 0,
+                                          UI_RATIO_2_3 | UI_SPLIT_COLUMNS, UI_RATIO_1_2, 0, 0, UI_RATIO_1_2, 0, 0 };
+        static const uint8_t k_fields[] = { UI_FIELD_TIME_CLOCK, UI_FIELD_DATE_DAY, UI_FIELD_ENV_TEMP,
+                                            UI_FIELD_ENV_HUM,    UI_FIELD_WX_NOW,   UI_FIELD_WX_HOURLY,
+                                            UI_FIELD_MOON_PHASE, UI_FIELD_BAT_LEVEL };
+        fixture_split(preset, k_tree, sizeof(k_tree), k_fields, sizeof(k_fields));
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -259,4 +287,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "radar_stale_cs", "radar_loop", "radar_none",
                                                     "radar_rainviewer", "grid_rain_map", "weather_rain_map",
                                                     "flights", "flights_100", "flights_cs", "flights_none",
-                                                    "flights_failed", "flights_off" };
+                                                    "flights_failed", "flights_off", "split_weather",
+                                                    "split_eight" };

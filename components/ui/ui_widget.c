@@ -117,15 +117,19 @@ static int ink_below(const gfx_font_t *f, const char *text)
 }
 
 /* The number's digits centred in max_h, with room below for its tail and its unit's, and 2 px to
- * each edge. */
+ * each edge. Every digit counts as the deepest one ("5" dips 2 px in the 130 px face), so a number
+ * keeps its size as its digits change. */
 static bool fits_height(const ui_fonts_t *f, const gfx_font_t *vf, const ui_value_t *v, const char *value, int max_h)
 {
     if (max_h <= 0) {
         return true;
     }
     int below = ink_below(vf, value);
+    int digits = ink_below(vf, "0123456789");
     int unit_below = v->unit[0] ? ink_below(f->unit, v->unit) : 0;
-    return digit_height(vf) + 2 * (below > unit_below ? below : unit_below) + 4 <= max_h;
+    below = below > digits ? below : digits;
+    below = below > unit_below ? below : unit_below;
+    return digit_height(vf) + 2 * below + 4 <= max_h;
 }
 
 /* Draws value, unit and trend arrow as one group centred on cx; returns the group's width. */

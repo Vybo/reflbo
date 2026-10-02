@@ -262,6 +262,12 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
                                             UI_FIELD_MOON_PHASE, UI_FIELD_BAT_LEVEL };
         fixture_split(preset, k_tree, sizeof(k_tree), k_fields, sizeof(k_fields));
         fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "home_temp_main") == 0) { /* a number in Classic's main slot: 110 px digits fit */
+        *preset = fixture_preset("home");
+        preset->slots[0] = UI_FIELD_ENV_TEMP;
+    } else if (strcmp(name, "home_temp_main_cs") == 0) { /* in Czech the decimals give way to the comma's tail */
+        fixture_dashboard("home_temp_main", ctx, preset);
+        ctx->lang = lang_get("cs");
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -288,4 +294,4 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "radar_rainviewer", "grid_rain_map", "weather_rain_map",
                                                     "flights", "flights_100", "flights_cs", "flights_none",
                                                     "flights_failed", "flights_off", "split_weather",
-                                                    "split_eight" };
+                                                    "split_eight", "home_temp_main", "home_temp_main_cs" };

@@ -142,6 +142,38 @@ static void test_a_czech_number_fits_classics_main_slot(void)
     TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + r.w - 1, r.y + r.h - 2, r.y + r.h - 1), "the slot's bottom edge");
 }
 
+/* How tall the ink in columns [x0, x1] of `r` is: a number's digits where nothing else is drawn. */
+static int ink_height_in(gfx_rect_t r, int x0, int x1)
+{
+    int first = -1, last = -1;
+    for (int y = r.y; y < r.y + r.h; y++) {
+        if (inked(x0, x1, y, y)) {
+            first = first < 0 ? y : first;
+            last = y;
+        }
+    }
+    return first < 0 ? 0 : last - first + 1;
+}
+
+/* A number keeps its size as its digits change: in the 130 px face a "5" dips 2 px below the
+ * baseline and a "1" none, so fitting the height digit by digit made 17.5 °C draw smaller than
+ * 17.1 °C in the same cell. */
+static void test_a_number_keeps_its_size_as_its_digits_change(void)
+{
+    static const int k_temps[] = { 1710, 1750 }; /* 17.1 °C and 17.5 °C */
+    int heights[2];
+    for (int i = 0; i < 2; i++) {
+        ui_context_t ctx = fixture_context();
+        fixture_single(&s_fix_ds, k_temps[i], 3000);
+        gfx_rect_t r = { 0, 21, 400, 127 }; /* XL: 102 px under the label */
+        gfx_fb_init(&s_fb, s_buf, 400, 300);
+        gfx_clear(&s_fb, GFX_WHITE);
+        ui_draw_cell(&s_fb, r, &ctx, UI_FIELD_ENV_TEMP, UI_STALE_STALE);
+        heights[i] = ink_height_in(r, 150, 250);
+    }
+    TEST_ASSERT_EQUAL_INT(heights[0], heights[1]);
+}
+
 /* The data a split cell's field is drawn from: 0 fresh in English, 1 fresh in Czech (its decimal
  * comma and longer words), 2 three hours old in Czech with a forecast two days old, 3 nothing yet,
  * 4 a 12-hour clock, 5 a hot day in °F (100.8 °F), 6 frost in Czech (-12,5 °C, a dew point of
@@ -258,6 +290,7 @@ int main(void)
     RUN_TEST(test_a_12_hour_clock_fits_a_grid_cell);
     RUN_TEST(test_todays_two_digit_high_and_low_show_whole);
     RUN_TEST(test_a_czech_number_fits_classics_main_slot);
+    RUN_TEST(test_a_number_keeps_its_size_as_its_digits_change);
     RUN_TEST(test_every_field_fits_every_cell_a_split_can_make);
     RUN_TEST(test_a_field_without_room_draws_nothing);
     return UNITY_END();

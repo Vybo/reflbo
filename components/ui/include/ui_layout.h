@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "gfx.h"
+#include "ui_fields.h"
 
 /* Layouts (spec §5.2): fixed slot rectangles below a 20 px status bar. Pure C, host-buildable. */
 
@@ -25,6 +26,15 @@ typedef enum {
     UI_SIZE_L,
     UI_SIZE_XL,
 } ui_size_t;
+
+/* The field kinds each size takes (spec §5.1): the fixed layouts' slots and the split layout's cells. */
+#define UI_KINDS_S                                                                                                   \
+    (UI_KIND(UI_FK_TIME) | UI_KIND(UI_FK_DATE) | UI_KIND(UI_FK_NUMBER) | UI_KIND(UI_FK_BATTERY) |                    \
+     UI_KIND(UI_FK_MOON) | UI_KIND(UI_FK_TEXT) | UI_KIND(UI_FK_WEATHER_NOW) | UI_KIND(UI_FK_WEATHER_DAY) |           \
+     UI_KIND(UI_FK_SUN) | UI_KIND(UI_FK_LEVEL) | UI_KIND(UI_FK_POLLEN))
+#define UI_KINDS_M (UI_KINDS_S | UI_KIND(UI_FK_SERIES) | UI_KIND(UI_FK_RAIN_MAP))
+#define UI_KINDS_L (UI_KINDS_S | UI_KIND(UI_FK_RAIN_MAP))
+#define UI_KINDS_XL (UI_KIND(UI_FK_TIME) | UI_KIND(UI_FK_NUMBER))
 
 typedef struct {
     const char *name; /* as in presets.json: "main", "s1" */

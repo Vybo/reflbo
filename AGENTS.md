@@ -220,7 +220,7 @@ components/
   locale/        language packs: en, cs; API prefix lang_             [host]
   astro/         sunrise/sunset, day length                           [host]
   datastore/     fields, freshness, change events, snapshot           [host]
-  ui/            layouts, widgets, presets, screens, menu             [host]
+  ui/            layouts, split trees, widgets, presets, screens, menu [host]
   scheduler/     next-wake computation (display, alarms, sync)        [host]
   sensors/       SHTC3, battery gauge
   rtc/           PCF85063 driver

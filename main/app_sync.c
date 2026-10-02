@@ -308,6 +308,40 @@ void app_sync_now_toast(void)
     app_ui_toast(lang_str(lang, err == ESP_ERR_NOT_FOUND ? LS_T_NO_NETWORK : LS_T_SYNC_STARTED));
 }
 
+void app_sync_toggle_always(void)
+{
+    const lang_t *lang = lang_get(app_settings()->language);
+    settings_t *set = &app_state()->settings;
+    bool on = set->sync_mode != SETTINGS_SYNC_ALWAYS;
+    if (app_state()->critical) {
+        return; /* spec §8: nothing may drain the battery */
+    }
+    if (on && !networks_saved()) {
+        app_ui_toast(lang_str(lang, LS_T_NO_NETWORK));
+        return;
+    }
+    settings_toggle_always(set);
+    app_ui_save_settings();
+    app_clock_moved(0); /* as the menu's mode does: `always` takes Wi-Fi at once; leaving it, it goes */
+    ESP_LOGI(TAG, "BOOT double: sync mode always %s", on ? "on" : "off");
+    char text[64];
+    if (!on) { /* "Sync: At set times": the packs keep the modes in settings_sync_mode_t order */
+        snprintf(text, sizeof(text), "%s: %s", lang_str(lang, LS_T_SYNC_MODE),
+                 lang_str(lang, (lang_str_t)(LS_SYNC_TIMES + set->sync_mode)));
+    } else if (always_wanted(time(NULL))) {
+        snprintf(text, sizeof(text), "%s", lang_str(lang, LS_T_ALWAYS_ON));
+    } else { /* quiet hours (D25) or a night (spec §9.1) keep Wi-Fi off until they end */
+        int from = set->quiet_to;
+        if (app_ui_night()) {
+            struct tm local;
+            localtime_r(&app_state()->night_until, &local);
+            from = local.tm_hour * 60 + local.tm_min;
+        }
+        snprintf(text, sizeof(text), "%s %02d:%02d", lang_str(lang, LS_T_ALWAYS_FROM), from / 60 % 24, from % 60);
+    }
+    app_ui_toast(text);
+}
+
 esp_err_t app_sync_now(void)
 {
     if (app_state()->critical) {

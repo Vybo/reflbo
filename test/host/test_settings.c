@@ -328,6 +328,7 @@ static void test_the_sync_defaults_are_the_specs(void)
     TEST_ASSERT_EQUAL_UINT16(360, defaults.quiet_to);
     TEST_ASSERT_EQUAL_STRING("cz.pool.ntp.org", defaults.ntp[0]);
     TEST_ASSERT_EQUAL_STRING("pool.ntp.org", defaults.ntp[1]);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_TIMES, defaults.sync_mode_before_always); /* M6b (D31) */
     /* A file saved before M5 has neither sync.* nor time.ntp: it syncs at 05:30 */
     const char *json = "{\"schema\":1,\"language\":\"cs\",\"time\":{\"clock_24h\":false}}";
     TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &defaults, &s_out, s_err, sizeof(s_err)), s_err);
@@ -421,6 +422,73 @@ static void test_a_centre_that_follows_the_location_is_not_saved(void)
     TEST_ASSERT_EQUAL_UINT8(28, s_out.wx_zoom_q);
 }
 
+/* sync.mode_before_always (spec §14.3, D31): what BOOT double turns `always` back into; never `always`. */
+static void test_the_mode_before_always_parses_and_round_trips(void)
+{
+    const char *json = "{\"schema\":1,\"sync\":{\"mode\":\"always\",\"mode_before_always\":\"interval\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_ALWAYS, s_out.sync_mode);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_INTERVAL, s_out.sync_mode_before_always);
+    TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_json, "\"mode_before_always\":\t\"interval\""), s_json);
+    settings_t again;
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &again, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_out, &again, sizeof(again));
+    static const char *const k_ignored[] = { "\"always\"", "\"sometimes\"", "3" };
+    for (size_t i = 0; i < sizeof(k_ignored) / sizeof(k_ignored[0]); i++) {
+        snprintf(s_json, sizeof(s_json), "{\"schema\":1,\"sync\":{\"mode_before_always\":%s}}", k_ignored[i]);
+        TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(SETTINGS_SYNC_TIMES, s_out.sync_mode_before_always, k_ignored[i]);
+    }
+}
+
+/* BOOT double on the dashboard (spec §5.6, D31): `always` on, remembering the mode before, then back. */
+static void test_boot_double_toggles_always_and_back(void)
+{
+    settings_t s = s_defaults;
+    s.sync_mode = SETTINGS_SYNC_INTERVAL;
+    settings_toggle_always(&s);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_ALWAYS, s.sync_mode);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_INTERVAL, s.sync_mode_before_always);
+    settings_toggle_always(&s);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_INTERVAL, s.sync_mode);
+    s.sync_mode = SETTINGS_SYNC_MANUAL;
+    settings_toggle_always(&s);
+    settings_toggle_always(&s);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_MANUAL, s.sync_mode);
+}
+
+/* The menu or a page that turns `always` on remembers the mode it left too, so BOOT double returns to it. */
+static void test_entering_always_remembers_the_mode_it_left(void)
+{
+    settings_t s = s_defaults;
+    s.sync_mode = SETTINGS_SYNC_ALWAYS;
+    settings_remember_mode(&s, SETTINGS_SYNC_MANUAL);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_MANUAL, s.sync_mode_before_always);
+    settings_remember_mode(&s, SETTINGS_SYNC_ALWAYS); /* `always` again: nothing left */
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_MANUAL, s.sync_mode_before_always);
+    s.sync_mode = SETTINGS_SYNC_INTERVAL; /* leaving `always` keeps what it remembers */
+    settings_remember_mode(&s, SETTINGS_SYNC_ALWAYS);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_MANUAL, s.sync_mode_before_always);
+}
+
+/* A page's settings or a restored backup replace them whole (spec §14.3): entering `always` remembers
+ * the mode left, unless the document names a mode_before_always of its own. */
+static void test_settings_that_replace_others_remember_the_mode_left(void)
+{
+    settings_t before = s_defaults;
+    before.sync_mode = SETTINGS_SYNC_INTERVAL;
+    settings_t next = before; /* the Sync page: the mode alone, merged into the file */
+    next.sync_mode = SETTINGS_SYNC_ALWAYS;
+    settings_replaced(&next, &before);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_INTERVAL, next.sync_mode_before_always);
+    next = before; /* a backup taken in `always`, with the mode it had left */
+    next.sync_mode = SETTINGS_SYNC_ALWAYS;
+    next.sync_mode_before_always = SETTINGS_SYNC_MANUAL;
+    settings_replaced(&next, &before);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_MANUAL, next.sync_mode_before_always);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -441,6 +509,10 @@ int main(void)
     RUN_TEST(test_a_learned_battery_curve_parses_and_round_trips);
     RUN_TEST(test_learned_without_a_usable_curve_keeps_the_built_in_one);
     RUN_TEST(test_the_sync_settings_parse_and_round_trip);
+    RUN_TEST(test_the_mode_before_always_parses_and_round_trips);
+    RUN_TEST(test_boot_double_toggles_always_and_back);
+    RUN_TEST(test_entering_always_remembers_the_mode_it_left);
+    RUN_TEST(test_settings_that_replace_others_remember_the_mode_left);
     RUN_TEST(test_sync_times_are_sorted_without_repeats_or_bad_ones);
     RUN_TEST(test_sync_settings_fall_back_one_by_one);
     RUN_TEST(test_the_sync_defaults_are_the_specs);

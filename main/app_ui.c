@@ -684,6 +684,7 @@ esp_err_t app_ui_replace_settings(const char *json, char *err, size_t err_size)
         snprintf(err, err_size, "settings.json is larger than %u bytes", (unsigned)sizeof(s_settings_base) - 1);
         return ESP_ERR_INVALID_SIZE;
     }
+    settings_replaced(&parsed, &s.settings); /* a page that turns `always` on: BOOT double returns */
     s.settings = parsed;
     memcpy(s_settings_base, json, n + 1); /* keys this firmware doesn't know stay, as in the file */
     esp_err_t e = app_ui_save_settings();

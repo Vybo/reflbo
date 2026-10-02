@@ -168,6 +168,9 @@ typedef enum {
     LS_T_SYNC_DONE,
     LS_T_SYNC_FAILED,
     LS_T_NO_NETWORK,
+    LS_T_ALWAYS_ON,   /* BOOT double turned sync mode `always` on (D31) */
+    LS_T_ALWAYS_FROM, /* the same in quiet hours or a night: followed by " 06:00", when Wi-Fi comes */
+    LS_T_SYNC_MODE, /* followed by ": <mode>", the mode BOOT double returned to */
     LS_UV_INDEX,
     LS_UV_LOW, /* the UV bands, in weather_uv_band_t order (D26) */
     LS_UV_MODERATE,

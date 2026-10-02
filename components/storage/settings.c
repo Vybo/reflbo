@@ -189,6 +189,12 @@ static void read_sync(const cJSON *sync, settings_t *out)
             out->sync_mode = (uint8_t)i;
         }
     }
+    const cJSON *before = child(sync, "mode_before_always");
+    for (size_t i = 0; cJSON_IsString(before) && i < sizeof(k_sync_modes) / sizeof(k_sync_modes[0]); i++) {
+        if (i != SETTINGS_SYNC_ALWAYS && strcmp(before->valuestring, k_sync_modes[i]) == 0) {
+            out->sync_mode_before_always = (uint8_t)i;
+        }
+    }
     read_times(child(sync, "times"), out);
     out->sync_interval_min = (uint16_t)read_scaled(sync, "interval_min", out->sync_interval_min, 1, 15, 1440);
     const cJSON *quiet = child(sync, "quiet");
@@ -237,6 +243,7 @@ void settings_radar_defaults(settings_t *out)
 void settings_sync_defaults(settings_t *out)
 {
     out->sync_mode = SETTINGS_SYNC_TIMES;
+    out->sync_mode_before_always = SETTINGS_SYNC_TIMES;
     out->sync_time_count = 1;
     memset(out->sync_times, 0, sizeof(out->sync_times));
     out->sync_times[0] = 5 * 60 + 30;
@@ -247,6 +254,28 @@ void settings_sync_defaults(settings_t *out)
     memset(out->ntp, 0, sizeof(out->ntp));
     snprintf(out->ntp[0], SETTINGS_HOST_LEN, "%s", "cz.pool.ntp.org");
     snprintf(out->ntp[1], SETTINGS_HOST_LEN, "%s", "pool.ntp.org");
+}
+
+void settings_remember_mode(settings_t *s, uint8_t prev_mode)
+{
+    bool from_other = prev_mode != SETTINGS_SYNC_ALWAYS && prev_mode <= SETTINGS_SYNC_MANUAL;
+    if (s->sync_mode == SETTINGS_SYNC_ALWAYS && from_other) {
+        s->sync_mode_before_always = prev_mode;
+    }
+}
+
+void settings_replaced(settings_t *s, const settings_t *before)
+{
+    if (s->sync_mode_before_always == before->sync_mode_before_always) {
+        settings_remember_mode(s, before->sync_mode);
+    }
+}
+
+void settings_toggle_always(settings_t *s)
+{
+    uint8_t prev = s->sync_mode;
+    s->sync_mode = prev == SETTINGS_SYNC_ALWAYS ? s->sync_mode_before_always : SETTINGS_SYNC_ALWAYS;
+    settings_remember_mode(s, prev);
 }
 
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size)
@@ -396,6 +425,9 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     cJSON *sync = object_at(root, "sync");
     put(sync, "mode", cJSON_CreateString(k_sync_modes[s->sync_mode < SETTINGS_SYNC_MANUAL ? s->sync_mode
                                                                                          : SETTINGS_SYNC_MANUAL]));
+    uint8_t before = s->sync_mode_before_always;
+    bool known = before <= SETTINGS_SYNC_MANUAL && before != SETTINGS_SYNC_ALWAYS;
+    put(sync, "mode_before_always", cJSON_CreateString(k_sync_modes[known ? before : SETTINGS_SYNC_TIMES]));
     cJSON *times = cJSON_CreateArray();
     for (int i = 0; i < s->sync_time_count && i < SETTINGS_SYNC_TIMES_MAX; i++) {
         cJSON_AddItemToArray(times, hhmm_json(s->sync_times[i]));

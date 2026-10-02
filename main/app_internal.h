@@ -114,6 +114,7 @@ extern const gesture_config_t k_app_dashboard_buttons[BOARD_BUTTON_COUNT];
 void app_menu_open(void);
 void app_menu_close(void);
 bool app_menu_is_open(void);
+bool app_menu_closed_within(int64_t ms); /* the menu closed less than `ms` ago */
 void app_menu_key(ui_menu_key_t key);
 void app_menu_render(void);
 int64_t app_menu_deadline_ms(void); /* the menu closes at this time without input */
@@ -129,6 +130,10 @@ time_t app_sync_due(void);       /* for the wake scheduler; 0 = none */
 void app_sync_tick(void);        /* starts a sync that is due; quiet hours in sync mode `always` */
 esp_err_t app_sync_now(void);    /* on demand: ESP_ERR_NOT_FOUND with no network saved */
 void app_sync_now_toast(void);   /* the same, with the menu's toast: Sync now, and BOOT on the Radar layout (D30) */
+/* BOOT double on the dashboard (spec §5.6, D31): sync mode `always` on, or back to the mode before,
+ * saved and scheduled, with a toast; refused with no network saved ("No Wi-Fi network saved") and on a
+ * critical battery. */
+void app_sync_toggle_always(void);
 bool app_sync_active(void);      /* a sync or a radar-only refresh runs */
 bool app_sync_refreshing(void);  /* what runs is a radar-only refresh (spec §9.3): not shown as a sync */
 bool app_sync_running(void);     /* a sync runs, or waits for a refresh to end: what the screens show */

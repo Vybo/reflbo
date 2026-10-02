@@ -23,6 +23,7 @@ enable_testing()
 
 add_library(unity STATIC third_party/unity/unity.c)
 target_include_directories(unity PUBLIC third_party/unity)
+target_compile_definitions(unity PUBLIC UNITY_INCLUDE_DOUBLE) # the map's projection compares doubles
 
 # Components under test: the same sources the firmware compiles.
 file(GLOB UTIL_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/util/*.c)
@@ -62,6 +63,13 @@ add_library(png STATIC ${REPO_ROOT}/components/png/png.c png_inflate_zlib.c)
 target_include_directories(png PUBLIC ${REPO_ROOT}/components/png/include)
 target_compile_options(png PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(png PUBLIC util PRIVATE ZLIB::ZLIB)
+
+# map: the web-Mercator views, the built-in map data and its drawing (spec §11.1); pure C.
+file(GLOB MAP_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/map/*.c)
+add_library(map STATIC ${MAP_SOURCES})
+target_include_directories(map PUBLIC ${REPO_ROOT}/components/map/include)
+target_compile_options(map PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(map PUBLIC gfx util m)
 
 # sync: the planner (modes, quiet hours, retries) and the SNTP packets build on the host; the task does not.
 add_library(sync_logic STATIC ${REPO_ROOT}/components/sync/sync_plan.c ${REPO_ROOT}/components/sync/sync_ntp.c)
@@ -188,6 +196,7 @@ reflbo_host_test(test_astro astro)
 reflbo_host_test(test_sync_plan sync_logic)
 reflbo_host_test(test_png png ZLIB::ZLIB)
 target_compile_definitions(test_png PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/png")
+reflbo_host_test(test_map_view map)
 reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)

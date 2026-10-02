@@ -67,6 +67,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D28 | Owner, 2026-10-01 (M6 design): the flight radar is a built-in preset that the cycle visits only in sync mode `always` (§5.4); each radar has its own centre and zoom (§11.1); BOOT short on the radar layout plays the last hour, 12 frames (§5.6, §11.2); the map draws borders, towns and airports (§11.1); no microSD in M6, as its working set fits PSRAM and LittleFS, while radar and flight history over days, a detailed map pack and an aircraft registration database join M9's candidates (§19) | A frame's grid is 78 KB of PSRAM; 12 frames take about 1 MB of the 8 MB |
 | D29 | Owner, 2026-10-02 (M6 plan review): GeoNames' places join the map's towns inside ČHMÚ's radar area, and GeoNames is credited (§11.1); the RTC trim keeps measuring only across syncs at least 20 h apart (§7); aircraft altitudes stay as flight levels from 10 000 ft and feet below (§11.3); M6 runs inline, one context with a review of the whole branch at the end | GeoNames is CC BY 4.0; its places of 1000 inhabitants or more add about 4 000 towns and 110 KB to the map |
 | D30 | Owner, 2026-10-02 (M6 board checks): BOOT short on the Radar layout starts a sync on demand, for a fresh frame, whenever the loop can't play (outside sync mode `always`, or with fewer than two frames), with the menu's Sync now toasts; in `always` it keeps playing the last hour (§5.6, §11.2) | The press re-read the sensors there, which that screen doesn't show |
+| D31 | Owner, 2026-10-02 (M6b design): a split layout (§5.2) beside the fixed ones, which stay as they are: the area under the status bar split into rows or columns at 1/4, 1/3, 1/2, 2/3 or 3/4, each part split again, at most 8 cells of at least 90×40, each cell holding one field at the size its dimensions allow, each split's separator shown or hidden; edited on the web page with the live preview (§10.3). BOOT double on the dashboard toggles sync mode `always`, remembering the mode before (§5.6, §9.3). Both are M6b, one plan, before M7 | Halves alone can't give a top of three quarters; the fixed layouts' hand-tuned sizes aren't all expressible in the five ratios, so they stay |
 
 ### 1.3 Out of scope for v1
 
@@ -329,9 +330,16 @@ Every layout has a status bar (top 20 px):
 | Focus | `main` XL, `s1`–`s2` M |
 | Radar (M6) | the weather radar map, full width under the status bar (400×279 as built), with the frame's time and source and a legend (§11.2) |
 | Flights (M6) | the flight radar map (400×238 as built) over a line and a 40 px panel for the nearest aircraft (§11.3) |
+| Split (M6b, D31) | up to 8 cells, as the preset's tree splits the area under the status bar (below) |
 
 - Slot rectangles are fixed per layout and defined in code (`components/ui/ui_layout.c`). The owner approved them from the M3a host renders on 2026-09-28.
 - Each slot declares which field kinds it accepts. The preset editor offers only compatible fields.
+- **The split layout** (M6b, D31): the area under the status bar (400×279) is split into two parts, as rows (a top part `a` over a bottom part `b`) or as columns (`a` left of `b`), and each part can be split again.
+  - **A split** gives its first part 1/4, 1/3, 1/2, 2/3 or 3/4 of its rectangle, rounded down to whole pixels; a 1 px gap follows, and the second part takes the rest. Its separator is a 1 px line in that gap, across the split's own rectangle and 8 px short of each end, drawn unless the split turns it off. The gap stays either way, so hiding a line never moves a cell. Lines follow White on black like the rest of the screen.
+  - **A cell** holds one field or none. A preset has at most 8 cells, and a split whose parts would be under 90×40 px is refused.
+  - **A cell's size class** comes from its dimensions: XL 400 wide and at least 120 tall; L at least 200×150; M at least 130×80; S otherwise. S draws wide, the icon beside the value, from 150 px of width, which needs 40 px of height; narrower, the icon above the value, which needs 80 px. A smaller cell holds no field.
+  - **A field** draws at the largest class its cell allows that accepts its kind (§5.1): XL takes only the clock and numbers, so the current weather in a full-width cell draws at L; series and the rain map need M or more; the small kinds fit anywhere. The device publishes these rules in `GET /api/layouts`, so the editor offers each cell only the fields that fit.
+  - **Example**, Weather with smaller bottom cells: rows 3/4; the top as columns 1/2, its left part a cell of 200×209 (L) and its right part rows 1/2 (two cells of 199×104, M); the bottom as columns 1/2 (cells of 200×69 and 199×69, S drawn wide).
 
 ### 5.3 Widgets
 
@@ -370,6 +378,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 }
 ```
 
+- **Split presets** (M6b, D31) have `"layout": "split"` and a `"split"` tree instead of `"slots"`. A split is `{ "split": "rows", "ratio": "3/4", "line": true, "a": {…}, "b": {…} }` (`rows` or `columns`; a missing `line` is `true`); a cell is `{ "field": "wx.now" }`, or `{}` when empty.
 - **Built-in defaults.** Home (Classic), Indoor (Grid, with the status clock), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. The built-in Weather preset joins the cycle from M5, which brings its data; a `presets.json` saved earlier keeps its own choice. M6 adds Rain radar (the Radar layout, in the cycle) and Flights (the Flights layout, D28): the cycle visits Flights only in sync mode `always`, and outside it a preset on that layout says "Flights need sync mode Always on". A `presets.json` saved before M6 gains both once, at the first boot that knows them, if there is room; the file then carries a marker, so a preset deleted later stays deleted. There can be at most 16 presets.
 - **Options.** `clock_24h` overrides the time setting when present. `status_clock` and `status_battery` shape the status bar (§5.2).
 - **Validation.** A file with a structural error is rejected as a whole, and the error names it. Structural errors:
@@ -377,6 +386,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - no presets, or more than 16;
   - a bad or duplicate id;
   - an unknown layout, slot or field, or a field the slot can't show;
+  - a split tree with more than 8 cells, a part under 90×40 px, an unknown `split` or `ratio`, or a field its cell can't show (M6b);
   - an unknown `stale_policy` or `status_battery` value;
   - nesting deeper than 16 levels, or `slots` that isn't an object;
   - a bad schedule: more than 8 entries, or an entry with a bad time, action or preset, or a night that ends at the minute it starts.
@@ -429,16 +439,18 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - In the menu KEY has no double press, so a short press answers at once, and BOOT's long press fires at 1 s.
 - A context binds at most one long gesture per button.
 
-| Context | KEY short | KEY double | KEY long | BOOT short | BOOT long |
-|---|---|---|---|---|---|
-| Dashboard | Next preset | Auto-cycle on/off | Open menu | Refresh sensors | Config mode (3 s) |
-| Radar layout (M6) | Next preset | Auto-cycle on/off | Open menu | Play the last hour in sync mode `always`; otherwise sync now, for a fresh frame (D30, §11.2) | Config mode (3 s) |
-| Menu: browsing | Next item | — | Select / enter | Back | Exit menu |
-| Menu: editing a value | + | — | Confirm | − | Cancel |
-| First run | Dashboard | — | Open menu | — | Config mode (3 s) |
-| Config mode | Toggle QR (join AP / open URL) | — | — | — | Exit config mode (1 s) |
-| Alarm ringing | Snooze | Snooze | Stop | Snooze | Stop |
-| Radio | Volume + | Next station | Open menu | Volume − | Stop radio |
+| Context | KEY short | KEY double | KEY long | BOOT short | BOOT double | BOOT long |
+|---|---|---|---|---|---|---|
+| Dashboard | Next preset | Auto-cycle on/off | Open menu | Refresh sensors | Sync mode `always` on/off (M6b) | Config mode (3 s) |
+| Radar layout (M6) | Next preset | Auto-cycle on/off | Open menu | Play the last hour in sync mode `always`; otherwise sync now, for a fresh frame (D30, §11.2) | Sync mode `always` on/off (M6b) | Config mode (3 s) |
+| Menu: browsing | Next item | — | Select / enter | Back | — | Exit menu |
+| Menu: editing a value | + | — | Confirm | − | — | Cancel |
+| First run | Dashboard | — | Open menu | — | — | Config mode (3 s) |
+| Config mode | Toggle QR (join AP / open URL) | — | — | — | — | Exit config mode (1 s) |
+| Alarm ringing | Snooze | Snooze | Stop | Snooze | — | Stop |
+| Radio | Volume + | Next station | Open menu | Volume − | — | Stop radio |
+
+- **BOOT double on the dashboard** (M6b, D31) toggles sync mode `always`. Turning it on remembers the mode before in `sync.mode_before_always` (§14.3) and toasts "Always on: Wi-Fi stays on"; turning it off returns to that mode and toasts its name. It is refused on a critical battery and with no network saved, with Sync now's toasts. As the dashboard then binds a double press, BOOT short waits the 300 ms double-press window before it acts.
 
 The `diag` console command `btn` injects the same gestures. Holding BOOT at power-on still enters download mode; holding it at runtime is safe.
 
@@ -647,6 +659,7 @@ The sync schedule (`settings.sync`) is fully configurable from the menu and the 
   - A sync on demand still runs, and so does the sync at boot that fetches a lost time, as the hour isn't known then.
   - The span may cross midnight; a span of no minutes counts as off. The web UI says when a sync time falls inside it.
 - **In config mode** a sync that comes due runs over config mode's station, if it has one, and leaves Wi-Fi on; on the AP alone it waits until config mode ends. Leaving config mode in `always` mode keeps Wi-Fi and the web UI on.
+- **The `always` shortcut** (M6b, D31): BOOT double on the dashboard turns `always` on and off (§5.6); off returns to the mode kept in `sync.mode_before_always`.
 - **Radar refresh and flights** (M6): in `always` mode a radar-only refresh comes every 5 min (RainViewer: 10), without SNTP or the forecast and outside the sync's history and retries; the flight radar polls adsb.fi from its own task while its view is on screen (§11.3).
   - As built (M6): the refresh comes a minute after each 5-minute step (`SYNC_RADAR_DELAY_S`), at once when `always` takes Wi-Fi, so the past hour arrives in one go (12 frames in 9.2 s on the board); one new frame took 0.6–0.8 s. It shows neither the status bar's sync mark nor the Sync page's "running". A sync asked for during a refresh starts when the refresh ends, 30 s at most, and shows as running from the moment it is asked.
 - **In `always` mode** the board stays awake, as neither sleep keeps Wi-Fi (D14), and netmgr keeps rejoining a network it lost. The web UI is reachable on the LAN (§10.4). A critical battery turns Wi-Fi off, as it ends config mode (§8).
@@ -746,6 +759,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Location & time (M5): a place search through `/api/geocode`, which fills in the name, latitude and longitude.
   - Radar (M6): a card for each radar: its centre (the location, the place search or coordinates) and zoom or range, the flight radar's filters, a live preview through `/api/preview.bmp`, and the credits (§11.2, §11.3). The flight radar's card says it runs only in sync mode Always on.
     - As built (M6): the previews draw the saved settings and refresh after each save; the zoom is a list with each step's width in km; the flight radar's card shows the last poll's failure ("Last poll: failed: too big") and adsb.lol's pause; below both cards, the map's credits: Natural Earth, OurAirports and GeoNames (CC BY 4.0, D29).
+  - Presets (M6b, D31): a split preset's tree as nested boxes under the live preview. A cell shows its size and class ("200×69 · S"), a field list with only the fields that fit, and Split into rows and Split into columns (at 1/2, the line on, the cell's field in the first part). A split shows its ratio (those that would make a part too small are disabled), Separator and Join, which keeps the first field found inside it. Switching a preset to Split starts from one cell holding its first field.
 - **API.** JSON. Mutating requests must send `Content-Type: application/json`, those without a body too.
   - The server reads each body once, before any route and any login: at most 16 KB (413), nested at most 18 levels, a backup bundle's depth (400).
   - A client that sends nothing for 15 s gets 408, and the connection closes, so one phone that vanishes mid-request can't stop the server.
@@ -1035,7 +1049,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
   "time": { "tz_iana": "Europe/Prague", "tz_posix": "CET-1CEST,M3.5.0,M10.5.0/3",
             "clock_24h": true, "ntp": ["cz.pool.ntp.org", "pool.ntp.org"] },
   "units": { "temp": "C" },
-  "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60,
+  "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60, "mode_before_always": "times",
             "quiet": { "enabled": false, "from": "23:00", "to": "06:00" } },
   "sensors": { "interval_min": 5, "temp_offset_c": 0.0, "hum_offset_pct": 0.0 },
   "display": { "contrast": "default", "update_min": 1, "lpm_hz": 1 },
@@ -1130,6 +1144,7 @@ pyserial comes from the ESP-IDF Python environment. The generators run through `
   - Sync planning: the next sync in each mode, the quiet hours, the retries, the expected interval, the syncs the device needs (a lost clock, a first forecast, `always` mode's Wi-Fi) and each step's share of the 45 s; the RTC trim's arithmetic and the Offset register's codec; SNTP packets and their refusals.
   - The forecast fields and widgets: the words, rounding and units, a two-digit high and low that must show whole, and the goldens of each new widget.
   - M6: the PNG reader against real ČHMÚ frames and a RainViewer tile, and its refusals; the map's projection round trips through known points, clipping and label placement; `tools/gen_map.py` against small fixtures; ČHMÚ's file names from the time, its palette's levels, a known pixel landing on its place in a view, the coverage test; RainViewer's index and tile choice; the adsb.fi parser against a real reply, its caps, filters, distance and bearing; the route parser and cache; the 15-minute rain and its window; `radar.*` in the settings; the preset migration; goldens of the Radar layout (rain, stale, a loop frame), the rain map in M and L slots, the rain strip, and the Flights view (aircraft and a route, none, outside sync mode `always`).
+  - M6b: the split tree's JSON (a round trip, the limits, the refusals), its geometry (the ratios, the gaps, 8 cells, 90×40), each cell's size class and each field's size in it, separators on and off, goldens of the Weather example (its lines on, the bottom one off) and of an 8-cell tree; the editor's tree operations against the fake device; BOOT double's toggle and the remembered mode.
   - As built (M6): 60 host targets (53 at M5), with 17 new goldens (8 of the Radar layout and `rain.map`, 6 of the Flights view, 3 of the rain strip); the generator's 14 tests among the 67 tool tests; 25 page tests; the ASan/UBSan build passes them all.
   - Preset and settings JSON: validation and migrations.
   - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
@@ -1159,6 +1174,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M4 | `netmgr` (STA/AP, captive portal, mDNS), config screen with QR, `webui` and REST API, preset editor with preview, set time from phone, OTA with rollback | Owner sets up Wi-Fi from a phone in AP mode (4); the preview matches a device screenshot (3); OTA upload and rollback work (3) |
 | M5 | One plan (D25): SNTP → RTC with the trim (D25), `weather` with air quality and pollen (D25), `astro`, `sync` with the configurable schedule, quiet hours (D25) and backoff, sync mode `always` with the web UI on the LAN (D24), the weather and air quality widgets, the status bar's sync and Wi-Fi state, the Sync page and the place search, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); the owner reviews the new widgets' goldens (2); the RTC trim brings the drift under 1 s a day (3); sync energy, `always`'s cost and the daily average are measured and `docs/power.md` is updated (4) |
 | M6 | One plan (D27): the radar views (D22, D23, D24, D28; §11.1–§11.4): `png`, the web-Mercator `map` with built-in borders, towns and airports; the weather radar (ČHMÚ, RainViewer outside its coverage) as the Radar layout and the `rain.map` widget, with a frame each sync, every 5 min in sync mode `always`, and the last hour's loop; the flight radar (adsb.fi, sync mode `always` only) as the Flights preset, with the nearest aircraft's route (adsb.lol); rain in the next 2 hours; the Radar page | Goldens of both radars and the new widgets (2); a ČHMÚ frame renders after a sync (3); the loop plays in sync mode `always` (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
+| M6b | One plan (D31): the split layout (§5.2, §5.4) in the renderer, `presets.json` and the web editor; BOOT double for sync mode `always` (§5.6) | Goldens of split presets (2); a split preset built in the web editor shows on the panel (3); BOOT double turns `always` on and back (3) |
 | M7 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
 | M8 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
 | M9 | microSD features agreed at the start of M9 | Per the agreed list |
@@ -1307,3 +1323,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r29 | 2026-10-02 | D29, the owner's answers to the M6 plan: GeoNames' towns in ČHMÚ's radar area, with their credit (§1.2, §11.1) |
 | r30 | 2026-10-02 | M6 as built: the components (§3.1); `wx.rain2h`, `rain.map` and the two layouts (§5.1, §5.2); the snapshot (§6); the refresh, a sync on demand behind it and ČHMÚ's names from NTP (§9.3); the Radar page and the status API (§10.3); the map's pack and D29's towns, labels on boxes (§11.1); the frame file, coverage, `2/0_0`, zlib on the host (§11.2); the flight radar's failures and board figures (§11.3); the 15-minute convention (§11.4); `radar.bin` (§14.3); `radar status` (§15); the tests (§17); open items (§20) |
 | r31 | 2026-10-02 | D30: BOOT short on the Radar layout syncs for a fresh frame when the loop can't play (§1.2, §5.6, §11.2) |
+| r32 | 2026-10-02 | M6b design (D31): the split layout (§5.2), split presets in `presets.json` (§5.4), BOOT double for sync mode `always` (§5.6, §9.3), the editor (§10.3), `sync.mode_before_always` (§14.3), the tests (§17), the M6b row (§18) |

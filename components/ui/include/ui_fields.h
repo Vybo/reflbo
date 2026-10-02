@@ -64,6 +64,7 @@ typedef enum {
     UI_FIELD_POLLEN_MUGWORT,
     UI_FIELD_POLLEN_OLIVE,
     UI_FIELD_POLLEN_RAGWEED,
+    UI_FIELD_WX_RAIN2H, /* M6 (D27) */
     UI_FIELD_COUNT,
 } ui_field_id_t;
 
@@ -92,6 +93,7 @@ typedef enum {
 } ui_wifi_mark_t;
 
 #define UI_SERIES_MAX 6
+#define UI_RAIN_STEPS 8 /* wx.rain2h: two hours of quarter hours */
 
 /* One column of a forecast strip. */
 typedef struct {
@@ -146,6 +148,8 @@ typedef struct {
     int bands;         /* UI_FK_LEVEL: how many bands its scale has; `percent` is the one it is in */
     int series_count;
     ui_series_point_t series[UI_SERIES_MAX];
+    uint8_t rain_mm10[UI_RAIN_STEPS]; /* wx.rain2h: each quarter hour from now, as ds_rain_t keeps them */
+    uint8_t rain_prob[UI_RAIN_STEPS];
 } ui_value_t;
 
 void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);

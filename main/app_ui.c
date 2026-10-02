@@ -35,7 +35,7 @@ static int64_t s_toast_until_ms;
 #define LEARN_PATH "/fs/state/battery_learn.txt" /* the battery learning session in base64 (D21) */
 #define FORECAST_PATH "/fs/state/datastore.bin"    /* the last weather and air quality (spec §6) */
 #define FORECAST_MAGIC 0x72666366u /* "rfcf" */
-#define FORECAST_VERSION 1
+#define FORECAST_VERSION 2 /* 2: the rain in quarter hours (M6) */
 #define LEARN_TEXT_MAX ((BATTERY_LEARN_PACKED_MAX + 2) / 3 * 4 + 1)
 _Static_assert(SETTINGS_BAT_CURVE_POINTS == BATTERY_CURVE_POINTS, "settings keep a learned curve whole");
 

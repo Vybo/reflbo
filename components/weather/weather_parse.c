@@ -105,6 +105,42 @@ static cJSON *open_reply(const char *json, size_t len, double *hour0, double *of
     return root;
 }
 
+/* An amount in 0.1 mm, capped at 254; DS_RAIN_NONE when missing. */
+static uint8_t rain_tenths(const cJSON *item)
+{
+    double v;
+    if (!number(item, &v)) {
+        return DS_RAIN_NONE;
+    }
+    long t = rounded(v * 10.0);
+    return (uint8_t)(t < 0 ? 0 : t > 254 ? 254 : t);
+}
+
+/* `minutely_15` (spec §11.4): left out, t0 0, unless its times are 15 minutes apart. A forecast
+ * without it still stands. */
+static void parse_rain(const cJSON *root, ds_rain_t *out)
+{
+    memset(out->mm10, DS_RAIN_NONE, sizeof(out->mm10));
+    memset(out->prob, DS_RAIN_NONE, sizeof(out->prob));
+    const cJSON *m = member(root, "minutely_15");
+    const cJSON *times = member(m, "time");
+    int n = cJSON_IsArray(times) ? cJSON_GetArraySize(times) : 0;
+    double t0 = 0, t;
+    bool ok = n > 0 && number_at(times, 0, &t0) && t0 > 0;
+    for (int i = 1; ok && i < n && i < DS_RAIN_STEPS; i++) {
+        ok = number_at(times, i, &t) && t == t0 + (double)DS_RAIN_STEP_S * i;
+    }
+    if (!ok) {
+        return;
+    }
+    out->t0 = (uint32_t)t0;
+    const cJSON *mm = member(m, "precipitation"), *prob = member(m, "precipitation_probability");
+    for (int i = 0; i < n && i < DS_RAIN_STEPS; i++) {
+        out->mm10[i] = rain_tenths(cJSON_IsArray(mm) ? cJSON_GetArrayItem(mm, i) : NULL);
+        out->prob[i] = (uint8_t)whole(cJSON_IsArray(prob) ? cJSON_GetArrayItem(prob, i) : NULL, 100, DS_RAIN_NONE);
+    }
+}
+
 bool weather_parse_forecast(const char *json, size_t len, ds_weather_t *out, char *err, size_t err_size)
 {
     double hour0, offset;
@@ -156,6 +192,7 @@ bool weather_parse_forecast(const char *json, size_t len, ds_weather_t *out, cha
                                      DS_WX_NO_PCT),
         };
     }
+    parse_rain(root, &out->rain);
     cJSON_Delete(root);
     return true;
 }

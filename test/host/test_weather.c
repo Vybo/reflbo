@@ -37,6 +37,7 @@ static void test_the_requests_ask_for_what_the_spec_lists(void)
                              "&hourly=temperature_2m,weather_code,precipitation_probability"
                              "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
                              "precipitation_probability_max,sunrise,sunset"
+                             "&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=96"
                              "&timezone=auto&timeformat=unixtime&forecast_days=3",
                              url);
     TEST_ASSERT_TRUE(weather_air_url(url, sizeof(url), -338688, -1512093) > 0); /* Sydney: both signs */
@@ -82,6 +83,48 @@ static void test_a_forecast_parses_into_the_datastore_form(void)
     TEST_ASSERT_EQUAL_UINT8(3, w.days[0].code);
     TEST_ASSERT_EQUAL_INT16(96, w.days[2].min_c10);
     TEST_ASSERT_EQUAL_INT16(225, w.days[2].max_c10);
+}
+
+/* Bergen at 00:57 local on 2026-10-02, drizzling: 0.1 mm in the first quarter hour (spec §11.4). */
+static void test_the_rain_in_quarter_hours_comes_with_the_forecast(void)
+{
+    ds_weather_t w;
+    const char *json = fixture("forecast_bergen_2026-10-02.json");
+    TEST_ASSERT_TRUE_MESSAGE(weather_parse_forecast(json, s_len, &w, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT32(1790895600u, w.rain.t0); /* 22:45 UTC: the quarter hour of the fetch */
+    TEST_ASSERT_EQUAL_UINT8(1, w.rain.mm10[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, w.rain.mm10[1]);
+    TEST_ASSERT_EQUAL_UINT8(100, w.rain.prob[0]);
+    TEST_ASSERT_EQUAL_UINT8(97, w.rain.prob[5]);
+    TEST_ASSERT_EQUAL_UINT8(27, w.rain.prob[DS_RAIN_STEPS - 1]);
+    TEST_ASSERT_EQUAL_UINT32(1790892000u, w.hour0); /* the rest as before: Oslo's midnight */
+
+    json = fixture("forecast_brno_2026-10-01.json"); /* an M5 reply, without them */
+    TEST_ASSERT_TRUE_MESSAGE(weather_parse_forecast(json, s_len, &w, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT32(0, w.rain.t0);
+}
+
+static void test_rain_is_capped_and_its_gaps_stay_missing(void)
+{
+    static const char k_json[] =
+        "{\"hourly\":{\"time\":[1790892000]},"
+        "\"minutely_15\":{\"time\":[1790895600,1790896500,1790897400],"
+        "\"precipitation\":[30.0,null,0.04],\"precipitation_probability\":[null,120,55]}}";
+    ds_weather_t w;
+    TEST_ASSERT_TRUE_MESSAGE(weather_parse_forecast(k_json, strlen(k_json), &w, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT32(1790895600u, w.rain.t0);
+    TEST_ASSERT_EQUAL_UINT8(254, w.rain.mm10[0]); /* 25.4 mm at most */
+    TEST_ASSERT_EQUAL_UINT8(DS_RAIN_NONE, w.rain.mm10[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, w.rain.mm10[2]); /* 0.04 mm rounds to none */
+    TEST_ASSERT_EQUAL_UINT8(DS_RAIN_NONE, w.rain.prob[0]);
+    TEST_ASSERT_EQUAL_UINT8(100, w.rain.prob[1]);
+    TEST_ASSERT_EQUAL_UINT8(DS_RAIN_NONE, w.rain.mm10[3]); /* beyond the series */
+
+    static const char k_gap[] = /* not 15 minutes apart: no rain series, the forecast still stands */
+        "{\"hourly\":{\"time\":[1790892000]},"
+        "\"minutely_15\":{\"time\":[1790895600,1790897400],\"precipitation\":[1.0,1.0]}}";
+    TEST_ASSERT_TRUE_MESSAGE(weather_parse_forecast(k_gap, strlen(k_gap), &w, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT32(0, w.rain.t0);
 }
 
 static void test_nulls_and_short_series_stay_missing(void)
@@ -279,6 +322,8 @@ int main(void)
     RUN_TEST(test_the_requests_ask_for_what_the_spec_lists);
     RUN_TEST(test_the_place_search_encodes_the_query);
     RUN_TEST(test_a_forecast_parses_into_the_datastore_form);
+    RUN_TEST(test_the_rain_in_quarter_hours_comes_with_the_forecast);
+    RUN_TEST(test_rain_is_capped_and_its_gaps_stay_missing);
     RUN_TEST(test_nulls_and_short_series_stay_missing);
     RUN_TEST(test_a_reply_that_is_no_forecast_is_refused);
     RUN_TEST(test_air_quality_parses_with_daily_pollen_peaks);

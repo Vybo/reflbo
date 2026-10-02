@@ -173,6 +173,11 @@ typedef enum {
     LS_UV_HIGH,
     LS_UV_VERY_HIGH,
     LS_UV_EXTREME,
+    LS_RAIN_2H,   /* wx.rain2h (spec §11.4, D27) */
+    LS_RAIN_NOW,  /* followed by " · 1.2 mm/h" */
+    LS_RAIN_FROM, /* followed by " 21:45" */
+    LS_DRY_2H,
+    LS_MM_PER_H,
     LS_COUNT,
 } lang_str_t;
 

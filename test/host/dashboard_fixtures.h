@@ -153,6 +153,23 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         ctx->wifi = UI_WIFI_REJOINING;
         ctx->sync = UI_SYNC_FAILED;
         ctx->web_session = true;
+    } else if (strcmp(name, "weather_rain") == 0) { /* M6 (D27): rain in the next 2 h for the hours */
+        *preset = fixture_preset("weather");
+        preset->slots[2] = UI_FIELD_WX_RAIN2H;
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "focus_rain_now") == 0) { /* raining now; one unlikely quarter hour */
+        *preset = fixture_preset("focus");
+        preset->slots[1] = UI_FIELD_WX_RAIN2H;
+        preset->slots[2] = UI_FIELD_WX_HOURLY;
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+        fixture_rain_now(&s_fix_ds);
+    } else if (strcmp(name, "grid_rain_cs") == 0) { /* narrow cells, in Czech: raining now, and dry */
+        *preset = fixture_preset("indoor");
+        preset->slots[0] = UI_FIELD_WX_RAIN2H;
+        preset->slots[1] = UI_FIELD_WX_NOW;
+        ctx->lang = lang_get("cs");
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+        fixture_rain_now(&s_fix_ds);
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -172,4 +189,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "home_web", "home_stale_web", "weather_now",
                                                     "weather_noon_cs", "weather_stale", "air_grid", "air_grid_cs", "grid_sun_uv", "home_forecast",
                                                     "focus_forecast", "home_syncing", "home_sync_failed",
-                                                    "home_always", "home_always_rejoining" };
+                                                    "home_always", "home_always_rejoining", "weather_rain",
+                                                    "focus_rain_now", "grid_rain_cs" };

@@ -108,6 +108,20 @@ static void test_hour_index_follows_the_first_entry(void)
     TEST_ASSERT_EQUAL_INT(-1, ds_hour_index(0, HOUR0)); /* never fetched */
 }
 
+static void test_the_rain_steps_follow_their_quarter_hours(void)
+{
+    /* Open-Meteo sums the 15 minutes before each time: the entry at 06:15 holds 06:00-06:15 */
+    const uint32_t t0 = HOUR0 + 6 * 3600 + 900; /* 06:15 */
+    TEST_ASSERT_EQUAL_INT(-1, ds_rain_index(t0, t0 - 900));
+    TEST_ASSERT_EQUAL_INT(0, ds_rain_index(t0, t0 - 899));
+    TEST_ASSERT_EQUAL_INT(0, ds_rain_index(t0, t0));
+    TEST_ASSERT_EQUAL_INT(1, ds_rain_index(t0, t0 + 1));
+    TEST_ASSERT_EQUAL_INT(1, ds_rain_index(t0, t0 + 900));
+    TEST_ASSERT_EQUAL_INT(DS_RAIN_STEPS - 1, ds_rain_index(t0, t0 + (DS_RAIN_STEPS - 1) * 900));
+    TEST_ASSERT_EQUAL_INT(-1, ds_rain_index(t0, t0 + (DS_RAIN_STEPS - 1) * 900 + 1)); /* past the 24 h (spec §6) */
+    TEST_ASSERT_EQUAL_INT(-1, ds_rain_index(0, HOUR0));                               /* none came */
+}
+
 static void test_air_quality_now_is_this_hours_entry(void)
 {
     ds_air_t a;
@@ -155,6 +169,7 @@ int main(void)
     RUN_TEST(test_a_forecast_is_missing_past_its_last_hour);
     RUN_TEST(test_now_is_the_current_block_for_an_hour_then_the_hourly_entry);
     RUN_TEST(test_hour_index_follows_the_first_entry);
+    RUN_TEST(test_the_rain_steps_follow_their_quarter_hours);
     RUN_TEST(test_air_quality_now_is_this_hours_entry);
     RUN_TEST(test_a_new_fetch_replaces_the_old_one_whole);
     return UNITY_END();

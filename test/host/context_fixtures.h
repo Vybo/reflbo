@@ -65,6 +65,17 @@ static inline void fixture_forecast(ds_t *ds, time_t fetched)
     w.days[0] = (ds_wx_day_t){ .min_c10 = 88, .max_c10 = 183, .code = 61, .precip = 60 };
     w.days[1] = (ds_wx_day_t){ .min_c10 = 61, .max_c10 = 157, .code = 3, .precip = 20 };
     w.days[2] = (ds_wx_day_t){ .min_c10 = 32, .max_c10 = 171, .code = 0, .precip = 0 };
+    /* a shower of five quarter hours from 21:45 CEST on the fixture's day: the entries from 22:00, as
+     * each holds the 15 minutes before its time */
+    static const uint8_t k_mm10[5] = { 2, 5, 9, 6, 3 }, k_prob[5] = { 40, 60, 80, 70, 55 };
+    const time_t shower = (time_t)FIX_DAY * 86400 + 20 * 3600;
+    w.rain.t0 = (uint32_t)(fetched - fetched % 900); /* the quarter hour of the fetch, as Open-Meteo sends */
+    for (int i = 0; i < DS_RAIN_STEPS; i++) {
+        time_t t = (time_t)w.rain.t0 + 900 * i;
+        int k = t >= shower ? (int)((t - shower) / 900) : -1;
+        w.rain.mm10[i] = k >= 0 && k < 5 ? k_mm10[k] : 0;
+        w.rain.prob[i] = k >= 0 && k < 5 ? k_prob[k] : 10;
+    }
     ds_set_weather(ds, &w);
     memset(&a, 0, sizeof(a));
     a.fetched = (uint32_t)fetched;
@@ -84,6 +95,31 @@ static inline void fixture_forecast(ds_t *ds, time_t fetched)
     ds_set_air(ds, &a);
     ds_set_forecast_ttl(ds, 26 * 3600); /* a daily sync */
     ds_take_changes(ds);
+}
+
+/* The stored forecast's rain changed: raining at 20:45 CEST (1.2 mm/h), easing off, one unlikely
+ * quarter hour; or dry all day. */
+static inline void fixture_rain_now(ds_t *ds)
+{
+    static ds_weather_t w;
+    w = *ds_weather(ds);
+    static const uint8_t k_mm10[4] = { 3, 4, 2, 1 }, k_prob[4] = { 90, 85, 45, 30 };
+    int i0 = ds_rain_index(w.rain.t0, FIX_NOW);
+    for (int i = 0; i < DS_RAIN_STEPS; i++) {
+        bool rain = i >= i0 && i < i0 + 4;
+        w.rain.mm10[i] = rain ? k_mm10[i - i0] : 0;
+        w.rain.prob[i] = rain ? k_prob[i - i0] : 5;
+    }
+    ds_set_weather(ds, &w);
+}
+
+static inline void fixture_rain_dry(ds_t *ds)
+{
+    static ds_weather_t w;
+    w = *ds_weather(ds);
+    memset(w.rain.mm10, 0, sizeof(w.rain.mm10));
+    memset(w.rain.prob, 0, sizeof(w.rain.prob));
+    ds_set_weather(ds, &w);
 }
 
 /* The fixtures' zone, Europe/Prague: the forecast's hours and the sun are in local time. The file

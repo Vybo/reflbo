@@ -38,6 +38,7 @@ static const ui_field_info_t k_fields[UI_FIELD_COUNT] = {
     [UI_FIELD_POLLEN_MUGWORT] = { "pollen.mugwort", UI_FK_POLLEN, LS_POLLEN_MUGWORT, -1 },
     [UI_FIELD_POLLEN_OLIVE] = { "pollen.olive", UI_FK_POLLEN, LS_POLLEN_OLIVE, -1 },
     [UI_FIELD_POLLEN_RAGWEED] = { "pollen.ragweed", UI_FK_POLLEN, LS_POLLEN_RAGWEED, -1 },
+    [UI_FIELD_WX_RAIN2H] = { "wx.rain2h", UI_FK_SERIES, LS_RAIN_2H, -1 },
 };
 
 const ui_field_info_t *ui_field_info(ui_field_id_t field)

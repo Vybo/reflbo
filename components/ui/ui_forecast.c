@@ -247,6 +247,45 @@ static void resolve_daily(const ui_context_t *ctx, ui_value_t *out)
     }
 }
 
+/* wx.rain2h (spec §11.4, D27): the next 8 quarter hours, and when the rain is. Missing unless all 8
+ * are stored. */
+static void resolve_rain(const ui_context_t *ctx, ui_value_t *out)
+{
+    const ds_weather_t *w = ds_weather(ctx->ds);
+    int i0 = w != NULL ? ds_rain_index(w->rain.t0, ctx->now) : -1;
+    if (i0 < 0 || i0 + UI_RAIN_STEPS > DS_RAIN_STEPS ||
+        !forecast_state(ds_weather_freshness(ctx->ds, ctx->now), w->fetched, ctx, out)) {
+        out->state = UI_VALUE_MISSING;
+        return;
+    }
+    int first = -1, known = 0; /* the first quarter hour with 0.1 mm or more; those with an amount */
+    for (int i = 0; i < UI_RAIN_STEPS; i++) {
+        out->rain_mm10[i] = w->rain.mm10[i0 + i];
+        out->rain_prob[i] = w->rain.prob[i0 + i];
+        known += out->rain_mm10[i] != DS_RAIN_NONE;
+        if (first < 0 && out->rain_mm10[i] != DS_RAIN_NONE && out->rain_mm10[i] > 0) {
+            first = i;
+        }
+    }
+    if (known == 0) {
+        out->state = UI_VALUE_MISSING; /* nulls: no data, not a dry spell */
+        return;
+    }
+    out->series_count = UI_RAIN_STEPS;
+    if (first == 0) {
+        snprintf(out->text, sizeof(out->text), "%s", lang_str(ctx->lang, LS_RAIN_NOW));
+        char rate[12];
+        lang_format_decimal(ctx->lang, (long)out->rain_mm10[0] * 4, 1, rate, sizeof(rate)); /* per hour */
+        snprintf(out->extra, sizeof(out->extra), "%s %s", rate, lang_str(ctx->lang, LS_MM_PER_H));
+    } else if (first > 0) {
+        char at[12]; /* where its quarter hour starts */
+        clock_text(ctx, (time_t)w->rain.t0 + (time_t)(i0 + first - 1) * DS_RAIN_STEP_S, at, sizeof(at));
+        snprintf(out->text, sizeof(out->text), "%s %s", lang_str(ctx->lang, LS_RAIN_FROM), at);
+    } else {
+        snprintf(out->text, sizeof(out->text), "%s", lang_str(ctx->lang, LS_DRY_2H));
+    }
+}
+
 /* ---- air quality and pollen ---- */
 
 static const lang_str_t k_bands[] = { LS_AQ_GOOD, LS_AQ_FAIR, LS_AQ_MODERATE,
@@ -351,6 +390,9 @@ bool ui_resolve_forecast(const ui_context_t *ctx, ui_field_id_t field, ui_value_
         return true;
     case UI_FIELD_WX_DAILY:
         resolve_daily(ctx, out);
+        return true;
+    case UI_FIELD_WX_RAIN2H:
+        resolve_rain(ctx, out);
         return true;
     case UI_FIELD_SUN_TIMES:
         resolve_sun(ctx, out);
@@ -605,6 +647,62 @@ static void draw_series(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     }
 }
 
+/* wx.rain2h: its words over 8 bars, one a quarter hour (D27). A bar is a third, two thirds or the
+ * whole height for light, moderate or heavy rain (below 2.5 mm/h, below 7.6 mm/h, above); a likely
+ * one is solid, one under 50 % an outline; a dry one leaves the baseline. */
+static void draw_rain(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
+{
+    const gfx_font_t *f = &gfx_font_sans_bold_16;
+    int max_w = r.w - 12;
+    char line1[sizeof(v->text) + sizeof(v->extra) + 4], line2[sizeof(line1)] = "";
+    snprintf(line1, sizeof(line1), "%s%s%s", v->text, v->extra[0] ? " \xC2\xB7 " : "", v->extra);
+    if (gfx_text_width(f, line1) > max_w) { /* two lines: the words over the rate, or split at a space */
+        if (v->extra[0]) {
+            snprintf(line1, sizeof(line1), "%s", v->text);
+            snprintf(line2, sizeof(line2), "%s", v->extra);
+        } else {
+            ui_split_two_lines(f, v->text, max_w, line1, line2, sizeof(line1));
+        }
+    }
+    int text_h = (line2[0] ? 2 : 1) * f->line_height;
+    int room = r.h - 12 - (v->state == UI_VALUE_STALE ? 18 : 0) - text_h - 8 - 5; /* the age mark goes below */
+    int bar_h = room < 36 ? room : 36;
+    if (bar_h < 9) {
+        bar_h = 0; /* no room for bars: the words alone */
+    }
+    int block = text_h + (bar_h ? 8 + bar_h + 5 : 0);
+    int top = v->state == UI_VALUE_STALE ? r.y + 6 : r.y + (r.h - block) / 2;
+    centred(fb, f, r, top + f->ascent, line1);
+    if (line2[0]) {
+        centred(fb, f, r, top + f->line_height + f->ascent, line2);
+    }
+    if (bar_h == 0) {
+        return;
+    }
+    int base = top + text_h + 8 + bar_h;
+    int w = r.w - 16;
+    int pitch = w / UI_RAIN_STEPS;
+    int x0 = r.x + 8 + (w - pitch * UI_RAIN_STEPS) / 2;
+    for (int i = 0; i < UI_RAIN_STEPS; i++) {
+        int mm10 = v->rain_mm10[i];
+        int level = mm10 == DS_RAIN_NONE ? 0 : mm10 >= 19 ? 3 : mm10 >= 6 ? 2 : mm10 >= 1 ? 1 : 0;
+        if (level == 0) {
+            continue;
+        }
+        int h = level * bar_h / 3;
+        gfx_rect_t bar = { (int16_t)(x0 + i * pitch + 1), (int16_t)(base - h), (int16_t)(pitch - 3), (int16_t)h };
+        if (v->rain_prob[i] != DS_RAIN_NONE && v->rain_prob[i] < 50) {
+            gfx_rect(fb, bar, GFX_BLACK);
+        } else {
+            gfx_fill_rect(fb, bar, GFX_BLACK);
+        }
+    }
+    gfx_hline(fb, x0, base, pitch * UI_RAIN_STEPS, GFX_BLACK);
+    for (int i = 0; i <= UI_RAIN_STEPS; i += UI_RAIN_STEPS / 2) { /* now, in 1 h, in 2 h */
+        gfx_vline(fb, x0 + i * pitch - (i == UI_RAIN_STEPS ? 1 : 0), base, 5, GFX_BLACK);
+    }
+}
+
 static void draw_sun(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v)
 {
     int top = r.y;
@@ -714,7 +812,11 @@ bool ui_forecast_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value
         draw_weather_day(fb, r, size, v);
         return true;
     case UI_FK_SERIES:
-        draw_series(fb, r, v);
+        if (v->field == UI_FIELD_WX_RAIN2H) {
+            draw_rain(fb, r, v);
+        } else {
+            draw_series(fb, r, v);
+        }
         return true;
     case UI_FK_SUN:
         draw_sun(fb, r, size, v);

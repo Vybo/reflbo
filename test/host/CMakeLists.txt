@@ -71,6 +71,14 @@ target_include_directories(map PUBLIC ${REPO_ROOT}/components/map/include)
 target_compile_options(map PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(map PUBLIC gfx util m)
 
+# radar: the decoders, the frame store and the drawing build on the host; the fetching does not.
+add_library(radar_logic STATIC ${REPO_ROOT}/components/radar/radar_frame.c
+            ${REPO_ROOT}/components/radar/radar_chmu.c ${REPO_ROOT}/components/radar/radar_rainviewer.c
+            ${REPO_ROOT}/components/radar/radar_store.c)
+target_include_directories(radar_logic PUBLIC ${REPO_ROOT}/components/radar/include)
+target_compile_options(radar_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(radar_logic PUBLIC png map gfx PRIVATE cjson util m)
+
 # sync: the planner (modes, quiet hours, retries) and the SNTP packets build on the host; the task does not.
 add_library(sync_logic STATIC ${REPO_ROOT}/components/sync/sync_plan.c ${REPO_ROOT}/components/sync/sync_ntp.c)
 target_include_directories(sync_logic PUBLIC ${REPO_ROOT}/components/sync/include)
@@ -201,6 +209,8 @@ reflbo_host_test(test_map_data map)
 target_compile_definitions(test_map_data PRIVATE MAP_BIN="${REPO_ROOT}/assets/map/map.bin")
 reflbo_host_test(test_map_draw map)
 target_compile_definitions(test_map_draw PRIVATE MAP_BIN="${REPO_ROOT}/assets/map/map.bin")
+reflbo_host_test(test_radar radar_logic)
+target_compile_definitions(test_radar PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)

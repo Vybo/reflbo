@@ -222,6 +222,7 @@ components/
   weather/       Open-Meteo URLs, parsers, bands and levels; the HTTPS fetch
   png/           PNG reader for the radar images: palette and RGBA, row by row   [host]
   map/           web-Mercator views; the built-in map (assets/map/map.bin) and its drawing   [host]
+  radar/         ČHMÚ's and RainViewer's frames: their decoding, store and drawing   [host]
   ha_mqtt/       MQTT session, discovery, state, commands, field mappings   (planned)
   sync/          when syncs run and their retries, SNTP packets, the sync task
   audio/         codec control, tone/WAV/stream players, alarm ringing      (planned)

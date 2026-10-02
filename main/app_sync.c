@@ -301,6 +301,13 @@ static esp_err_t start(bool manual, sync_due_t due)
     return err;
 }
 
+void app_sync_now_toast(void)
+{
+    esp_err_t err = app_sync_now();
+    const lang_t *lang = lang_get(app_settings()->language);
+    app_ui_toast(lang_str(lang, err == ESP_ERR_NOT_FOUND ? LS_T_NO_NETWORK : LS_T_SYNC_STARTED));
+}
+
 esp_err_t app_sync_now(void)
 {
     if (app_state()->critical) {

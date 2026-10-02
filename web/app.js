@@ -710,7 +710,7 @@ async function radarPage() {
   ]),
   h('p', { class: 'muted small', text: 'A frame comes with each sync, and every 5 minutes in sync mode Always on ' +
     '(RainViewer: 10). Rain for a new centre or zoom comes with the next one. In sync mode Always on, BOOT on the ' +
-    'Radar layout plays the last hour.' }),
+    'Radar layout plays the last hour; otherwise BOOT there syncs for a fresh frame.' }),
   wxCentre.els, field('Zoom', zoom), wxNote,
   actions(button('Save weather radar', () => busy(wxCard, wxNote, async () => {
     await api('PATCH', '/api/settings', { radar: { weather: { ...wxCentre.value(), zoom: Number(zoom.value) } } });

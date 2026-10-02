@@ -347,12 +347,10 @@ static void apply(const ui_menu_intent_t *in)
                 app_ui_toast(lang_str(lang(), LS_T_PASSWORD_CLEARED));
             }
             return;
-        case UI_MI_SYNC_NOW: {
+        case UI_MI_SYNC_NOW:
             app_menu_close();
-            esp_err_t err = app_sync_now();
-            app_ui_toast(lang_str(lang(), err == ESP_ERR_NOT_FOUND ? LS_T_NO_NETWORK : LS_T_SYNC_STARTED));
+            app_sync_now_toast();
             return;
-        }
         case UI_MI_REBOOT:
             app_restart(LS_T_REBOOTING, false);
             break;

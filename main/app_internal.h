@@ -128,6 +128,7 @@ void app_sync_schedule(void);    /* the next automatic sync, after a sync, a set
 time_t app_sync_due(void);       /* for the wake scheduler; 0 = none */
 void app_sync_tick(void);        /* starts a sync that is due; quiet hours in sync mode `always` */
 esp_err_t app_sync_now(void);    /* on demand: ESP_ERR_NOT_FOUND with no network saved */
+void app_sync_now_toast(void);   /* the same, with the menu's toast: Sync now, and BOOT on the Radar layout (D30) */
 bool app_sync_active(void);      /* a sync or a radar-only refresh runs */
 bool app_sync_refreshing(void);  /* what runs is a radar-only refresh (spec §9.3): not shown as a sync */
 bool app_sync_running(void);     /* a sync runs, or waits for a refresh to end: what the screens show */

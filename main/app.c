@@ -311,8 +311,13 @@ static void handle_button(board_button_t button, gesture_t gesture)
     } else if (button == BOARD_BUTTON_KEY && gesture == GESTURE_LONG) {
         app_menu_open();
     } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_SHORT &&
-               app_presets()->presets[app_presets()->active].layout == UI_LAYOUT_RADAR && app_radar_loop_start()) {
-        ESP_LOGI(TAG, "BOOT short: the radar's loop"); /* D28 */
+               app_presets()->presets[app_presets()->active].layout == UI_LAYOUT_RADAR) {
+        if (app_radar_loop_start()) {
+            ESP_LOGI(TAG, "BOOT short: the radar's loop"); /* D28 */
+        } else {
+            ESP_LOGI(TAG, "BOOT short: a sync for a fresh frame"); /* D30: no hour to play */
+            app_sync_now_toast();
+        }
     } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_SHORT) {
         app_ui_sample(time(NULL));
         app_ui_render();

@@ -66,6 +66,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D27 | Owner, 2026-10-01 (M6 planning): M6 runs as one plan, written straight from the spec without a spike; review minors are fixed where M6 touches their code; three extras join the radars: rain in the next 2 hours (§11.4), a loop of the last hour's radar frames (§11.2), and the nearest aircraft's route from adsb.lol (§11.3) | The radars are about the size of M3a and M3b together (§19) |
 | D28 | Owner, 2026-10-01 (M6 design): the flight radar is a built-in preset that the cycle visits only in sync mode `always` (§5.4); each radar has its own centre and zoom (§11.1); BOOT short on the radar layout plays the last hour, 12 frames (§5.6, §11.2); the map draws borders, towns and airports (§11.1); no microSD in M6, as its working set fits PSRAM and LittleFS, while radar and flight history over days, a detailed map pack and an aircraft registration database join M9's candidates (§19) | A frame's grid is 78 KB of PSRAM; 12 frames take about 1 MB of the 8 MB |
 | D29 | Owner, 2026-10-02 (M6 plan review): GeoNames' places join the map's towns inside ČHMÚ's radar area, and GeoNames is credited (§11.1); the RTC trim keeps measuring only across syncs at least 20 h apart (§7); aircraft altitudes stay as flight levels from 10 000 ft and feet below (§11.3); M6 runs inline, one context with a review of the whole branch at the end | GeoNames is CC BY 4.0; its places of 1000 inhabitants or more add about 4 000 towns and 110 KB to the map |
+| D30 | Owner, 2026-10-02 (M6 board checks): BOOT short on the Radar layout starts a sync on demand, for a fresh frame, whenever the loop can't play (outside sync mode `always`, or with fewer than two frames), with the menu's Sync now toasts; in `always` it keeps playing the last hour (§5.6, §11.2) | The press re-read the sensors there, which that screen doesn't show |
 
 ### 1.3 Out of scope for v1
 
@@ -431,7 +432,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 | Context | KEY short | KEY double | KEY long | BOOT short | BOOT long |
 |---|---|---|---|---|---|
 | Dashboard | Next preset | Auto-cycle on/off | Open menu | Refresh sensors | Config mode (3 s) |
-| Radar layout (M6) | Next preset | Auto-cycle on/off | Open menu | Play the last hour in sync mode `always`; otherwise refresh sensors (§11.2) | Config mode (3 s) |
+| Radar layout (M6) | Next preset | Auto-cycle on/off | Open menu | Play the last hour in sync mode `always`; otherwise sync now, for a fresh frame (D30, §11.2) | Config mode (3 s) |
 | Menu: browsing | Next item | — | Select / enter | Back | Exit menu |
 | Menu: editing a value | + | — | Confirm | − | Cancel |
 | First run | Dashboard | — | Open menu | — | Config mode (3 s) |
@@ -856,7 +857,7 @@ GET https://air-quality-api.open-meteo.com/v1/air-quality?latitude=<lat>&longitu
   - The layout: the map with the rain; the frame's time and source at the bottom left, inverted with its age once older than 30 min ("21:05 · 3 h ago"); a legend of the three levels at the bottom right; "No radar frame yet" before the first.
   - The widget, in M and L slots: the same, cropped to the slot around the weather view's centre at its zoom, with the frame's time.
   - As built (M6): a refusal or any other missing frame shows "No radar frame yet" (not "No radar here"), the reason in `radar status` and on the Radar page.
-- **The loop** (D27, D28): BOOT short on the Radar layout switches the panel to HPM and plays the kept frames, oldest first, at about 3 a second with each frame's time and a row of progress dots, then stops on the newest and returns to LPM. Missing frames are skipped; KEY short still switches the preset and ends it. Outside sync mode `always` there is one frame, and BOOT short refreshes the sensors as elsewhere. As built (M6): a frame every 333 ms; the panel reads HPM while it plays and LPM after.
+- **The loop** (D27, D28): BOOT short on the Radar layout switches the panel to HPM and plays the kept frames, oldest first, at about 3 a second with each frame's time and a row of progress dots, then stops on the newest and returns to LPM. Missing frames are skipped; KEY short still switches the preset and ends it. Outside sync mode `always` there is one frame, and BOOT short starts a sync on demand instead, for a fresh frame (D30; it refreshed the sensors before). As built (M6): a frame every 333 ms; the panel reads HPM while it plays and LPM after.
 
 ### 11.3 Flight radar (M6)
 
@@ -1305,3 +1306,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r28 | 2026-10-01 | M6 design (D27, D28): the map, the weather radar with its loop, the flight radar with routes, and rain in the next 2 hours (§11.1–§11.4); their fields, layouts, presets and control (§5.1, §5.2, §5.4, §5.6); the 15-minute rain's storage (§6); the radar step, refresh and flights in the sync (§9.3, §9.4); the Radar page and status (§10.3); `radar.*` and the frame file (§14.3); `radar` commands (§15); the tests (§17); the M6 row (§18); M6's place in §19 and M9's new candidates; five risks (§20) |
 | r29 | 2026-10-02 | D29, the owner's answers to the M6 plan: GeoNames' towns in ČHMÚ's radar area, with their credit (§1.2, §11.1) |
 | r30 | 2026-10-02 | M6 as built: the components (§3.1); `wx.rain2h`, `rain.map` and the two layouts (§5.1, §5.2); the snapshot (§6); the refresh, a sync on demand behind it and ČHMÚ's names from NTP (§9.3); the Radar page and the status API (§10.3); the map's pack and D29's towns, labels on boxes (§11.1); the frame file, coverage, `2/0_0`, zlib on the host (§11.2); the flight radar's failures and board figures (§11.3); the 15-minute convention (§11.4); `radar.bin` (§14.3); `radar status` (§15); the tests (§17); open items (§20) |
+| r31 | 2026-10-02 | D30: BOOT short on the Radar layout syncs for a fresh frame when the loop can't play (§1.2, §5.6, §11.2) |

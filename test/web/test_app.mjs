@@ -375,3 +375,120 @@ test('Done keeps the page when sync mode Always on keeps the network', async () 
   await byId.done.onclick();
   assert.doesNotMatch(text(byId.main), /Wi-Fi is off/);
 });
+
+/* ---- the Radar page (spec §10.3, M6) ---- */
+
+const RADAR_SETTINGS = { schema: 1, location: { name: 'Brno', lat: 49.1951, lon: 16.6068 }, sync: { mode: 'times' },
+                         radar: { weather: { zoom: 6.5 }, flights: { range_km: 50, min_alt_ft: 0, ground: false, max: 100 } } };
+const radarStatus = (radar) => ({ device: {}, time: { valid: true }, battery: {}, sensors: {}, preset: {}, sync: {}, radar });
+
+function radarDevice(settings, patches, previews) {
+  return {
+    'GET /api/settings': () => reply(200, settings),
+    'GET /api/status': () => reply(200, radarStatus({ weather: { source: 'chmu', frames: 1, frame_at: 1790880000 },
+                                                      flights: { on: false, aircraft: 0, failed: false } })),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, settings); },
+    'POST /api/preview.bmp': (init) => { previews.push(JSON.parse(init.body)); return reply(200, 'BM', 'image/bmp'); },
+  };
+}
+
+/* The radio buttons of a radar's card: a browser unchecks the other of a group by itself. */
+function pick(main, group, label) {
+  const radios = below(main).filter((e) => e.tag === 'input' && e.attrs.type === 'radio' && e.attrs.name === group);
+  const labels = below(main).filter((e) => e.tag === 'label' && e.children.some((k) => radios.includes(k)));
+  for (const l of labels) {
+    const r = l.children.find((k) => radios.includes(k));
+    r.checked = text(l).startsWith(label);
+    if (r.checked) (r.listeners.change || []).forEach((fn) => fn({ target: r }));
+  }
+}
+
+test('the Radar page saves the weather radar\'s own centre and zoom', async () => {
+  const patches = [], previews = [];
+  const { ctx, main } = await load(radarDevice(RADAR_SETTINGS, patches, previews));
+  await ctx.radarPage();
+  pick(main, 'wx-centre', 'A place of its own');
+  const numbers = below(main).filter((e) => e.tag === 'input' && e.attrs.type === 'number');
+  numbers[0].value = '50.0755'; /* the weather card's latitude and longitude come first */
+  numbers[1].value = '14.4378';
+  const zoom = below(main).find((e) => e.tag === 'select' && e.attrs.name === 'zoom');
+  zoom.value = '7.25';
+  await buttonNamed(main, 'Save weather radar').click();
+  assert.deepEqual(patches.at(-1), { radar: { weather: { lat: 50.0755, lon: 14.4378, zoom: 7.25 } } });
+});
+
+test('the location again clears a radar\'s own centre', async () => {
+  const patches = [], previews = [];
+  const settings = { ...RADAR_SETTINGS, radar: { weather: { lat: 50.0755, lon: 14.4378, zoom: 7 }, flights: {} } };
+  const { ctx, main } = await load(radarDevice(settings, patches, previews));
+  await ctx.radarPage();
+  pick(main, 'wx-centre', 'The location');
+  await buttonNamed(main, 'Save weather radar').click();
+  assert.deepEqual(patches.at(-1), { radar: { weather: { lat: null, lon: null, zoom: 7 } } }); /* RFC 7396 removes them */
+});
+
+test('the flight radar\'s filters are saved within their bounds', async () => {
+  const patches = [], previews = [];
+  const { ctx, main } = await load(radarDevice(RADAR_SETTINGS, patches, previews));
+  await ctx.radarPage();
+  const range = below(main).find((e) => e.tag === 'select' && e.attrs.name === 'range');
+  range.value = '25';
+  const byName = (n) => below(main).find((e) => e.tag === 'input' && e.attrs.name === n);
+  byName('min_alt_ft').value = '3000';
+  byName('ground').checked = true;
+  byName('max').value = '0';
+  await buttonNamed(main, 'Save flight radar').click();
+  assert.equal(patches.length, 0);
+  assert.match(text(main), /Aircraft at most: 1 to 100/);
+  byName('max').value = '40';
+  await buttonNamed(main, 'Save flight radar').click();
+  assert.deepEqual(patches.at(-1), { radar: { flights: { lat: null, lon: null, range_km: 25, min_alt_ft: 3000,
+                                                         ground: true, max: 40 } } });
+});
+
+test('the flight radar says it runs only in sync mode Always on', async () => {
+  const { ctx, main } = await load(radarDevice(RADAR_SETTINGS, [], []));
+  await ctx.radarPage();
+  assert.match(text(main), /runs only in sync mode Always on/);
+  const always = { ...RADAR_SETTINGS, sync: { mode: 'always' } };
+  const again = await load(radarDevice(always, [], []));
+  await again.ctx.radarPage();
+  assert.doesNotMatch(text(again.main), /runs only in sync mode Always on/);
+});
+
+test('the Radar page previews both radars and credits their sources', async () => {
+  const previews = [];
+  const { ctx, main } = await load(radarDevice(RADAR_SETTINGS, [], previews));
+  await ctx.radarPage();
+  await settle();
+  assert.deepEqual(previews.map((d) => d.presets[0].layout).sort(), ['flights', 'radar']);
+  const all = text(main);
+  for (const credit of ['ČHMÚ', 'CC BY 4.0', 'RainViewer', 'adsb.fi', 'adsb.lol', 'GeoNames']) assert.ok(all.includes(credit), credit);
+  assert.match(all, /Newest frame/);
+});
+
+test('the Sync page shows the radar\'s step', async () => {
+  const last = { at: 1790880000, steps: { wifi: 'ok', time: 'ok', weather: 'ok', air: 'ok', radar: 'failed' },
+                 failed: 'radar', detail: 'HTTP 503' };
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, SYNC_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'times', running: false, last })),
+  });
+  await ctx.syncPage();
+  assert.match(text(main), /Radar failed \(HTTP 503\)/);
+  assert.match(text(main), /Radarfailed: HTTP 503/); /* the steps' list: its name, then its result */
+});
+
+test('a preset on a radar layout has no slots to fill', async () => {
+  const catalogue = { ...CATALOGUE, layouts: [...CATALOGUE.layouts, { id: 'radar', slots: [] }, { id: 'flights', slots: [] }] };
+  const doc = { schema: 1, active: 'rain', presets: [{ id: 'rain', name: 'Rain radar', layout: 'radar', in_cycle: true,
+                                                         slots: {}, options: {} }],
+                cycle: { enabled: false, interval_s: 60 }, schedule: { enabled: false, entries: [] } };
+  const { ctx, main } = await load({
+    'GET /api/layouts': () => reply(200, catalogue), 'GET /api/presets': () => reply(200, doc),
+    'GET /api/fields': () => reply(200, FIELDS), 'POST /api/preview.bmp': () => reply(200, 'BM', 'image/bmp'),
+  });
+  await ctx.presetsPage();
+  assert.match(text(main), /Rain radar Radar/); /* the list names its layout */
+  assert.match(text(main), /This layout draws the weather radar/);
+});

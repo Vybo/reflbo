@@ -223,8 +223,8 @@ document.getElementById('done').onclick = async () => {
 
 /* ---- pages ---- */
 
-const pages = { status: statusPage, wifi: wifiPage, place: placePage, sync: syncPage, device: devicePage,
-                presets: presetsPage, firmware: firmwarePage, backup: backupPage };
+const pages = { status: statusPage, wifi: wifiPage, place: placePage, sync: syncPage, radar: radarPage,
+                device: devicePage, presets: presetsPage, firmware: firmwarePage, backup: backupPage };
 
 function route() {
   const name = location.hash.slice(1) || 'status';
@@ -306,7 +306,8 @@ async function statusPage() {
 
 /* ---- Sync (spec §9.3, D25) ---- */
 
-const SYNC_STEPS = [['wifi', 'Wi-Fi'], ['time', 'Time'], ['weather', 'Weather'], ['air', 'Air quality']];
+const SYNC_STEPS = [['wifi', 'Wi-Fi'], ['time', 'Time'], ['weather', 'Weather'], ['air', 'Air quality'],
+                    ['radar', 'Radar']];
 const SYNC_INTERVALS = [15, 30, 60, 120, 180, 360, 720, 1440];
 const intervalLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} h`);
 
@@ -565,6 +566,24 @@ async function wifiPage() {
 
 /* ---- Location and time ---- */
 
+/* A place by its name, through the device, which is online (spec §10.3): `onPick` gets the one tapped. */
+function placeSearch(note, onPick) {
+  const query = h('input', { type: 'search', placeholder: 'A town or city' });
+  const found = h('div');
+  const search = () => busy(box, note, async () => {
+    if (!query.value.trim()) throw new ApiError('Type a place to look for.');
+    const r = await api('GET', '/api/geocode?q=' + encodeURIComponent(query.value.trim()));
+    found.replaceChildren(...(r.places.length ? r.places.map((pl) => button(
+      `${pl.name}${pl.region ? ', ' + pl.region : ''}${pl.country ? ', ' + pl.country : ''}`, () => {
+        onPick(pl);
+        found.replaceChildren(h('p', { class: 'muted small', text: `${pl.name}: ${pl.lat}, ${pl.lon}. Save it below.` }));
+      })) : [h('p', { class: 'muted small', text: 'Nothing found by that name.' })]));
+  });
+  const box = h('div', {}, h('div', { class: 'row' }, h('div', {}, field('Find a place', query)),
+    actions(button('Search', search))), found);
+  return box;
+}
+
 async function placePage() {
   const s = await api('GET', '/api/settings');
   const loc = s.location || {}, time = s.time || {};
@@ -572,22 +591,13 @@ async function placePage() {
   const lat = h('input', { type: 'number', step: 'any', min: -90, max: 90, value: loc.lat ?? '' });
   const lon = h('input', { type: 'number', step: 'any', min: -180, max: 180, value: loc.lon ?? '' });
   const locNote = h('p');
-  const query = h('input', { type: 'search', placeholder: 'A town or city' });
-  const found = h('div');
-  const search = () => busy(locCard, locNote, async () => { /* spec §10.3: through the device, which is online */
-    if (!query.value.trim()) throw new ApiError('Type a place to look for.');
-    const r = await api('GET', '/api/geocode?q=' + encodeURIComponent(query.value.trim()));
-    found.replaceChildren(...(r.places.length ? r.places.map((pl) => button(
-      `${pl.name}${pl.region ? ', ' + pl.region : ''}${pl.country ? ', ' + pl.country : ''}`, () => {
-        name.value = pl.name.slice(0, 31);
-        lat.value = String(pl.lat);
-        lon.value = String(pl.lon);
-        found.replaceChildren(h('p', { class: 'muted small', text: `${pl.name}: ${pl.lat}, ${pl.lon}. Save it below.` }));
-      })) : [h('p', { class: 'muted small', text: 'Nothing found by that name.' })]));
-  });
   const locCard = card('Location', h('p', { class: 'muted small', text: 'For sunrise, sunset and the weather. ' +
     'Decimal degrees: north and east are positive.' }),
-  h('div', { class: 'row' }, h('div', {}, field('Find a place', query)), actions(button('Search', search))), found,
+  placeSearch(locNote, (pl) => {
+    name.value = pl.name.slice(0, 31);
+    lat.value = String(pl.lat);
+    lon.value = String(pl.lon);
+  }),
   field('Name', name), h('div', { class: 'row' }, h('div', {}, field('Latitude', lat)), h('div', {}, field('Longitude', lon))),
   locNote, actions(button('Save location', () => busy(locCard, locNote, async () => {
     const la = Number(lat.value), lo = Number(lon.value);
@@ -634,6 +644,120 @@ async function placePage() {
     toast('Clock set');
   }))));
   main.replaceChildren(h('h1', { text: 'Location and time' }), locCard, tzCard, clockCard);
+}
+
+/* ---- Radar (spec §10.3, §11.1-§11.3, D22, D23, D28) ---- */
+
+const ZOOMS = Array.from({ length: 21 }, (_, i) => 4 + i / 4); /* 4 to 9 in quarters (spec §14.3) */
+const RANGES = [10, 15, 20, 25, 30, 40, 50, 60, 75, 100];
+/* The ground the Radar layout's 400 px span at a zoom and latitude, in web Mercator (spec §11.1). */
+const acrossKm = (zoom, lat) => Math.round(400 * 156543.03 * Math.cos((lat || 0) * Math.PI / 180) / 2 ** zoom / 1000);
+
+/* A radar's centre (spec §11.1): the location, which it then follows, or a place of its own. */
+function centreEditor(group, settings, own, note) {
+  const loc = settings.location || {};
+  const ownSet = typeof (own || {}).lat === 'number' && typeof own.lon === 'number';
+  const lat = h('input', { type: 'number', step: 'any', min: -85, max: 85, value: ownSet ? own.lat : loc.lat ?? '' });
+  const lon = h('input', { type: 'number', step: 'any', min: -180, max: 180, value: ownSet ? own.lon : loc.lon ?? '' });
+  const where = h('div', {}, placeSearch(note, (pl) => { lat.value = String(pl.lat); lon.value = String(pl.lon); }),
+    h('div', { class: 'row' }, h('div', {}, field('Latitude', lat)), h('div', {}, field('Longitude', lon))));
+  where.hidden = !ownSet;
+  const atHome = h('input', { type: 'radio', name: group, checked: !ownSet, onchange: () => { where.hidden = true; } });
+  const elsewhere = h('input', { type: 'radio', name: group, checked: ownSet, onchange: () => { where.hidden = false; } });
+  return {
+    els: [h('label', {}, 'Centre'), h('label', { class: 'check' }, atHome, `The location${loc.name ? ` (${loc.name})` : ''}`),
+          h('label', { class: 'check' }, elsewhere, 'A place of its own'), where],
+    /* the patch's coordinates: null follows the location again, as a merge patch removes them */
+    value() {
+      if (atHome.checked) return { lat: null, lon: null };
+      const la = Number(lat.value), lo = Number(lon.value);
+      if (lat.value === '' || !(la >= -85 && la <= 85)) throw new ApiError('Latitude: -85 to 85.');
+      if (lon.value === '' || !(lo >= -180 && lo <= 180)) throw new ApiError('Longitude: -180 to 180.');
+      return { lat: la, lon: lo };
+    },
+  };
+}
+
+/* The device draws a radar's layout as saved (POST /api/preview.bmp): one preset on it. */
+async function radarPreview(img, layout) {
+  const doc = { schema: 1, active: 'preview', presets: [{ id: 'preview', name: 'Preview', layout,
+                                                          options: { status_clock: true } }] };
+  const bmp = await api('POST', '/api/preview.bmp?preset=preview', doc);
+  if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+  img.src = URL.createObjectURL(bmp);
+}
+
+const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
+
+async function radarPage() {
+  const [s, st] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status')]);
+  const radar = s.radar || {}, wx = radar.weather || {}, fl = radar.flights || {}, now = st.radar || {};
+  const always = (s.sync || {}).mode === 'always';
+  const lat = typeof wx.lat === 'number' ? wx.lat : (s.location || {}).lat;
+
+  const wxNote = h('p');
+  const wxCentre = centreEditor('wx-centre', s, wx, wxNote);
+  const zoom = h('select', { name: 'zoom' }, ZOOMS.map((z) => h('option', { value: String(z), selected: z === (wx.zoom ?? 6.5) },
+    `${z}: about ${acrossKm(z, lat)} km across`)));
+  zoom.value = String(ZOOMS.includes(wx.zoom) ? wx.zoom : 6.5);
+  const wxImg = h('img', { class: 'screen', alt: 'The Radar layout' });
+  const w = now.weather || {};
+  const wxCard = card('Weather radar', wxImg, facts([
+    ['Source', w.source === 'rainviewer' ? 'RainViewer, as the centre is outside ČHMÚ\'s area' : 'ČHMÚ'],
+    ['Newest frame', w.frame_at ? when(w.frame_at) : 'none yet'],
+    ['Frames kept', `${w.frames ?? 0}${always ? ', the last hour for the loop' : ''}`],
+    w.error ? ['Last fetch', `failed: ${w.error}`] : null,
+  ]),
+  h('p', { class: 'muted small', text: 'A frame comes with each sync, and every 5 minutes in sync mode Always on ' +
+    '(RainViewer: 10). Rain for a new centre or zoom comes with the next one. In sync mode Always on, BOOT on the ' +
+    'Radar layout plays the last hour.' }),
+  wxCentre.els, field('Zoom', zoom), wxNote,
+  actions(button('Save weather radar', () => busy(wxCard, wxNote, async () => {
+    await api('PATCH', '/api/settings', { radar: { weather: { ...wxCentre.value(), zoom: Number(zoom.value) } } });
+    toast('Weather radar saved');
+    await radarPreview(wxImg, 'radar');
+  }), 'primary')),
+  h('p', { class: 'muted small' }, 'Rain: ', link('https://opendata.chmi.cz', 'Data: ČHMÚ, opendata.chmi.cz'),
+    ', CC BY 4.0; outside its area ', link('https://www.rainviewer.com', 'RainViewer'), '.'));
+
+  const flNote = h('p');
+  const flCentre = centreEditor('fl-centre', s, fl, flNote);
+  const ranges = RANGES.includes(fl.range_km) || fl.range_km === undefined ? RANGES : [...RANGES, fl.range_km].sort((a, b) => a - b);
+  const range = h('select', { name: 'range' }, ranges.map((km) => h('option', { value: String(km), selected: km === (fl.range_km ?? 50) },
+    `${km} km`)));
+  range.value = String(fl.range_km ?? 50);
+  const minAlt = h('input', { type: 'number', name: 'min_alt_ft', min: 0, max: 60000, step: 100, value: fl.min_alt_ft ?? 0 });
+  const ground = h('input', { type: 'checkbox', name: 'ground', checked: !!fl.ground });
+  const max = h('input', { type: 'number', name: 'max', min: 1, max: 100, step: 1, value: fl.max ?? 100 });
+  const f = now.flights || {};
+  const flImg = h('img', { class: 'screen', alt: 'The Flights layout' });
+  const flCard = card('Flight radar',
+    always ? null : h('p', { class: 'bad small' }, 'It runs only in sync mode Always on, set on the ',
+      h('a', { href: '#sync' }, 'Sync'), ' page.'),
+    flImg, facts([['Now', f.on ? `${f.aircraft} aircraft${f.updated ? ' at ' + when(f.updated) : ''}`
+      : 'resting: it asks while the Flights view is on the screen']]),
+    h('p', { class: 'muted small', text: 'While the Flights view shows, it asks adsb.fi every 5 to 15 s, more often for ' +
+      'a smaller range, and the nearest aircraft\'s route comes from adsb.lol.' }),
+    flCentre.els, field('Range', range, 'From the centre to the map\'s top edge.'),
+    field('Lowest altitude (ft)', minAlt), h('label', { class: 'check' }, ground, 'Aircraft on the ground too'),
+    field('Aircraft at most', max), flNote,
+    actions(button('Save flight radar', () => busy(flCard, flNote, async () => {
+      const lo = Number(minAlt.value), mx = Number(max.value);
+      if (minAlt.value === '' || !(lo >= 0 && lo <= 60000)) throw new ApiError('Lowest altitude: 0 to 60000 ft.');
+      if (max.value === '' || !Number.isInteger(mx) || mx < 1 || mx > 100) throw new ApiError('Aircraft at most: 1 to 100.');
+      await api('PATCH', '/api/settings', { radar: { flights: { ...flCentre.value(), range_km: Number(range.value),
+        min_alt_ft: Math.round(lo), ground: ground.checked, max: mx } } });
+      toast('Flight radar saved');
+      await radarPreview(flImg, 'flights');
+    }), 'primary')),
+    h('p', { class: 'muted small' }, 'Aircraft: ', link('https://adsb.fi', 'adsb.fi'), '; routes: ',
+      link('https://adsb.lol', 'adsb.lol'), '.'));
+  const mapCredit = h('p', { class: 'muted small' }, 'Map: borders and towns from ',
+    link('https://www.naturalearthdata.com', 'Natural Earth'), ', airports from ',
+    link('https://ourairports.com', 'OurAirports'), '; more towns in ČHMÚ\'s area from ',
+    link('https://www.geonames.org', 'GeoNames'), ', CC BY 4.0.');
+  main.replaceChildren(h('h1', { text: 'Radar' }), wxCard, flCard, mapCredit);
+  await Promise.all([radarPreview(wxImg, 'radar'), radarPreview(flImg, 'flights')]).catch(() => {});
 }
 
 /* ---- Device: the settings the menu also has (spec §5.7, D19) ---- */
@@ -715,7 +839,10 @@ async function devicePage() {
 
 /* ---- Presets (spec §5.4) ---- */
 
-const LAYOUT_NAMES = { classic: 'Classic', weather: 'Weather', grid: 'Grid', focus: 'Focus' };
+const LAYOUT_NAMES = { classic: 'Classic', weather: 'Weather', grid: 'Grid', focus: 'Focus', radar: 'Radar',
+                       flights: 'Flights' };
+const NO_SLOTS = { radar: 'This layout draws the weather radar: its centre and zoom are on the Radar page.',
+                   flights: 'This layout draws the flight radar: its centre, range and filters are on the Radar page.' };
 const CYCLE_S = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
 const cycleLabel = (s) => (s < 60 ? `${s} s` : s < 3600 ? `${s / 60} min` : `${s / 3600} h`);
 const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']; /* bit 0 is Monday */
@@ -851,6 +978,7 @@ function renderPresets(ed) {
     } }), text);
   const editCard = card(`Edit ${p.name}`, previewBox(ed, layoutOf(p.layout)), ed.previewNote,
     field('Name', name), field('Layout', layout), slots,
+    NO_SLOTS[p.layout] ? h('p', { class: 'muted small', text: NO_SLOTS[p.layout] }) : null,
     field('Time format', clock), check('seconds', 'Show seconds'),
     o.seconds ? h('p', { class: 'bad small', text: 'Seconds wake the device every second: the battery lasts far less.' }) : null,
     check('invert', 'White on black'), field('Old or missing data', stale),

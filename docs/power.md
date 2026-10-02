@@ -25,6 +25,12 @@ Firmware at M3a (the dashboards, 2026-09-28): 64 ms of app time per routine deep
 
 Firmware at M5 (2026-10-01, the board tethered, from its logs): a sync keeps the radio on for 3.2–4.4 s on the home network at −87 to −88 dBm: the join about 2 s, SNTP 0.1–0.2 s, the forecast and the air quality about 1 s each. When the server or the weak link is slow it took 13–27 s, and one forecast timed out at 10 s; the 45 s limit caps it (spec §9.3). At the default schedule, one sync a day, that is about 0.1 mAh a day (4 s at the 100 mA the radio draws, an estimate), and 0.75 mAh on a slow day, next to the converter's floor of 11.5 mA, about 276 mAh a day. Sync mode `always` keeps the chip awake with Wi-Fi in modem sleep: its cost is the owner's measurement below.
 
+Firmware at M6 (2026-10-02, ede8f1c, the board tethered, from its logs, the home network at −85 dBm):
+- **A sync with the radar step** took 3.5 s in sync mode `times` (the join, SNTP, the forecast, the air quality and the radar, its frame already held), 4.4 s after quiet hours with one new ČHMÚ frame, and 10.3 s with RainViewer's index and tiles for a view over Berlin.
+- **Sync mode `always`:** a radar-only refresh comes a minute after each 5-minute step and took 0.6–0.8 s for one ČHMÚ frame, each file on its own TLS connection; the hour, 12 frames, took 9.2 s. A sync with the flight radar polling took 2.6 s.
+- **The flight radar** polls every 10 s at 50 km over one kept TLS session; its first poll after the view comes up took 25–50 s on the weak link.
+- **The Rain radar preset** keeps the chip awake 287 ms per routine wake on light sleep and 346 ms on deep sleep, where the frame comes from its file, against 57–64 ms for the dashboards (M2, M3a): the map, the rain and the push, every minute.
+
 ## The hardware floor
 
 The TPS63020 that makes the 3V3 rail has PS/SYNC tied high, which forces PWM and disables its power-save mode (AGENTS.md gotcha 23). TI's efficiency curve for that mode (datasheet Figure 9) is about 1–2 % at 0.1 mA and about 10 % at 1 mA, so the converter burns tens of mW even when the 3V3 load is almost nothing. That loss is there in every mode, deep sleep included, and on battery as well as on USB. Two deep-sleep runs, with and without the battery, both drew about 60 mW (11.4–11.5 mA at 5.2 V), while the chip was awake 0.1 % of the time. Deep and light sleep differ by less than that floor, so compare them in absolute mA.
@@ -42,3 +48,5 @@ The TPS63020 that makes the 3V3 rail has PS/SYNC tied high, which forces PWM and
 | — | — | M5: the energy of a sync | 10 syncs on demand, 2 min apart, against 20 min of idle | Fnirsi FNB58 | — | — | — | — | To be measured by the owner (M5 acceptance 4) |
 | — | — | M5: sync mode `always` | `always`, quiet hours off; the web UI on the LAN | Fnirsi FNB58 | 1 h | — | — | — | To be measured by the owner (M5 acceptance 4) |
 | — | — | M5: the default schedule | `times` 05:30, display every 1 min, sensors every 5 min; light sleep | Fnirsi FNB58 | 24 h | — | — | — | To be measured by the owner (M5 acceptance 4): the daily average |
+| — | — | M6: a radar frame per sync | 10 syncs on demand, 2 min apart, against M5's syncs without the radar | Fnirsi FNB58 | — | — | — | — | To be measured by the owner (M6 acceptance 6) |
+| — | — | M6: the flight radar in sync mode `always` | an hour with the Flights view, against an hour of `always` with the clock | Fnirsi FNB58 | 2 × 1 h | — | — | — | To be measured by the owner (M6 acceptance 6) |

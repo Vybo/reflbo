@@ -21,6 +21,15 @@ Host tests:
 cmake -S test/host -B build-host -G Ninja && cmake --build build-host && ctest --test-dir build-host
 ```
 
+## Data sources
+
+The device fetches or carries data from these services and datasets:
+
+- Weather, air quality, pollen and the place search: [Open-Meteo](https://open-meteo.com), CC BY 4.0.
+- The weather radar: "Data: ČHMÚ, [opendata.chmi.cz](https://opendata.chmi.cz), CC BY 4.0"; outside ČHMÚ's area, [RainViewer](https://www.rainviewer.com).
+- The flight radar: aircraft from [adsb.fi](https://adsb.fi), routes from [adsb.lol](https://adsb.lol).
+- The built-in map: borders, coasts and towns from [Natural Earth](https://www.naturalearthdata.com) and airports from [OurAirports](https://ourairports.com), both public domain; more towns inside ČHMÚ's radar area from [GeoNames](https://www.geonames.org), CC BY 4.0.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md).

@@ -57,6 +57,7 @@ typedef struct {
     uint16_t bat_learned_mv[SETTINGS_BAT_CURVE_POINTS]; /* all 0 until a discharge was learned */
     uint32_t bat_learned_at;                            /* UTC seconds, 0 for never */
     uint8_t sync_mode;                                  /* settings_sync_mode_t */
+    uint8_t sync_mode_before_always;                    /* what BOOT double returns to; never `always` (D31) */
     uint8_t sync_time_count;                            /* 1..SETTINGS_SYNC_TIMES_MAX */
     uint16_t sync_times[SETTINGS_SYNC_TIMES_MAX];       /* minutes after midnight, ascending, no repeats */
     uint16_t sync_interval_min;                         /* 15..1440 */
@@ -75,9 +76,19 @@ typedef struct {
 } settings_t;
 
 /* The sync's and the NTP servers' defaults (spec §14.3): times mode at 05:30, a 60 min interval,
- * quiet hours 23:00-06:00 but off, cz.pool.ntp.org and pool.ntp.org. The app's defaults include
- * them, so a settings.json from before M5 syncs. */
+ * quiet hours 23:00-06:00 but off, cz.pool.ntp.org and pool.ntp.org; times again after `always`.
+ * The app's defaults include them, so a settings.json from before M5 syncs. */
 void settings_sync_defaults(settings_t *out);
+
+/* sync.mode just changed from `prev_mode` (the menu, a page): entering `always` from another mode
+ * remembers that one in sync_mode_before_always (D31). */
+void settings_remember_mode(settings_t *s, uint8_t prev_mode);
+/* `s` replaces `before` whole (a page's settings, a restored backup): entering `always` remembers
+ * the mode left, unless `s` names a mode_before_always of its own. */
+void settings_replaced(settings_t *s, const settings_t *before);
+/* BOOT double on the dashboard (spec §5.6, D31): sync mode `always` on, remembering the mode
+ * before, or off, back to the mode it remembers. */
+void settings_toggle_always(settings_t *s);
 
 /* The radars' defaults (spec §14.3): zoom 6.5; a range of 50 km, every altitude, none on the ground,
  * 100 aircraft; both centres on out->lat_e4 and lon_e4, so set the location first. */

@@ -26,11 +26,13 @@
 
 static const char *TAG = "app_menu";
 
-/* Gesture timings (spec §5.6): the dashboard binds KEY double and a 3 s BOOT long press; the menu
- * binds neither, so KEY short answers at once. */
+static int64_t s_closed_ms; /* app_uptime_ms() when the menu last closed */
+
+/* Gesture timings (spec §5.6): the dashboard binds both double presses (BOOT's since M6b, D31) and
+ * a 3 s BOOT long press; the menu binds neither double, so KEY short answers at once. */
 const gesture_config_t k_app_dashboard_buttons[BOARD_BUTTON_COUNT] = {
     [BOARD_BUTTON_KEY] = { .long_ms = 1000, .double_enabled = true },
-    [BOARD_BUTTON_BOOT] = { .long_ms = 3000, .double_enabled = false },
+    [BOARD_BUTTON_BOOT] = { .long_ms = 3000, .double_enabled = true },
 };
 static const gesture_config_t k_menu_buttons[BOARD_BUTTON_COUNT] = {
     [BOARD_BUTTON_KEY] = { .long_ms = 1000, .double_enabled = false },
@@ -281,10 +283,13 @@ static void apply(const ui_menu_intent_t *in)
             set->display_every_min = (uint8_t)in->value;
             save_settings = retime = true;
             break;
-        case UI_MI_SYNC_MODE:
+        case UI_MI_SYNC_MODE: {
+            uint8_t prev = set->sync_mode;
             set->sync_mode = (uint8_t)(in->value >= 0 && in->value <= SETTINGS_SYNC_MANUAL ? in->value : 0);
-            save_settings = retime = true; /* retime schedules the next sync */
+            settings_remember_mode(set, prev); /* BOOT double returns to it (D31) */
+            save_settings = retime = true;     /* retime schedules the next sync */
             break;
+        }
         case UI_MI_SYNC_INTERVAL:
             set->sync_interval_min = k_sync_min[in->value >= 0 && in->value < SYNC_STEPS ? in->value : 2];
             save_settings = retime = true;
@@ -408,6 +413,7 @@ void app_menu_close(void)
         return;
     }
     s_open = false;
+    s_closed_ms = app_uptime_ms();
     board_buttons_set_config(k_app_dashboard_buttons);
     esp_err_t err = st7305_set_mode(ST7305_MODE_LPM);
     if (err != ESP_OK) {
@@ -425,6 +431,11 @@ bool app_menu_is_open(void)
 int64_t app_menu_deadline_ms(void)
 {
     return s_open ? s_deadline_ms : 0;
+}
+
+bool app_menu_closed_within(int64_t ms)
+{
+    return s_closed_ms != 0 && app_uptime_ms() - s_closed_ms < ms;
 }
 
 void app_menu_key(ui_menu_key_t key)

@@ -54,6 +54,7 @@
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */
 #define OTA_VERIFY_MS     60000 /* spec §10.5: a new image is valid after this long without a panic */
+#define MENU_SETTLE_MS    1000  /* BOOT pressed fast to back out of the menu makes no double after it */
 #define RESTART_MS        1500  /* a restart's toast stays this long; it also lets a web reply go out */
 #define NVS_KEY_RESUME    "resume_cfg" /* in `sys`: come back in config mode (spec §10.2) */
 
@@ -322,6 +323,12 @@ static void handle_button(board_button_t button, gesture_t gesture)
         app_ui_sample(time(NULL));
         app_ui_render();
         ESP_LOGI(TAG, "BOOT short: sensors refreshed");
+    } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_DOUBLE) { /* spec §5.6, D31 */
+        if (app_menu_closed_within(MENU_SETTLE_MS)) {
+            ESP_LOGI(TAG, "BOOT double just after the menu closed: ignored"); /* the presses that backed out */
+        } else {
+            app_sync_toggle_always();
+        }
     } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
         app_config_enter(); /* 3 s on the dashboard (spec §5.6) */
     }

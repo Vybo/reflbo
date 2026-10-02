@@ -178,6 +178,12 @@ typedef enum {
     LS_RAIN_FROM, /* followed by " 21:45" */
     LS_DRY_2H,
     LS_MM_PER_H,
+    LS_RAIN_MAP, /* rain.map (spec §11.2) */
+    LS_NO_RADAR_FRAME,
+    LS_RAIN_LIGHT, /* the radar's legend */
+    LS_RAIN_MODERATE,
+    LS_RAIN_HEAVY,
+    LS_AGO, /* "%s ago": the one "%s" is an age, "3 h" */
     LS_COUNT,
 } lang_str_t;
 

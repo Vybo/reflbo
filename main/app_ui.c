@@ -129,6 +129,10 @@ void app_ui_load(void)
     s.first_run = settings == ESP_ERR_NOT_FOUND; /* a new board, or a factory reset (spec §5.5) */
     esp_err_t presets = load_one(STORAGE_PRESETS_PATH, s_file, sizeof(s_file), parse_presets, &s.presets,
                                  sizeof(s.presets), &presets_defaults);
+    if (presets == ESP_OK && ui_presets_offer_builtins(&s.presets)) { /* spec §5.4: the radars, once */
+        ESP_LOGI(TAG, "presets.json: offered the built-in presets it didn't have");
+        app_ui_save_presets();
+    }
     if (settings == ESP_ERR_INVALID_RESPONSE || presets == ESP_ERR_INVALID_RESPONSE) { /* spec §14.3: say so */
         app_ui_toast(lang_str(lang_get(s.settings.language), LS_T_DEFAULTS));
     }
@@ -605,7 +609,8 @@ void app_ui_tick(bool force)
         s.cycle_at = now + s.presets.cycle_interval_s; /* the first tick, or the clock moved back */
     }
     if (s.presets.cycle_enabled && now >= s.cycle_at) {
-        app_ui_select(ui_presets_next(&s.presets), false); /* renders; not saved, the cycle will move on */
+        app_ui_select(ui_presets_next(&s.presets, s.settings.sync_mode == SETTINGS_SYNC_ALWAYS),
+                      false); /* renders; not saved, the cycle will move on */
         return;
     }
     if (render) {
@@ -693,7 +698,9 @@ esp_err_t app_ui_patch_settings(const char *patch, char *err, size_t err_size)
 
 esp_err_t app_ui_replace_presets(const ui_presets_t *presets)
 {
+    uint8_t offered = s.presets.offered;
     s.presets = *presets;
+    s.presets.offered |= offered; /* a page or backup without the marker: what was offered stays offered */
     s.cycle_at = 0;              /* the next tick starts the cycle interval */
     s.sched_checked = time(NULL); /* entries don't run late for a new schedule */
     esp_err_t err = app_ui_save_presets();

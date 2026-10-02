@@ -17,30 +17,118 @@ void setUp(void)
 
 void tearDown(void) {}
 
-static void test_defaults_are_home_indoor_weather_and_focus(void)
+static void test_defaults_are_the_six_built_ins(void)
 {
-    TEST_ASSERT_EQUAL_INT(4, s_p.count);
+    TEST_ASSERT_EQUAL_INT(6, s_p.count);
     TEST_ASSERT_EQUAL_STRING("home", s_p.presets[s_p.active].id);
     TEST_ASSERT_EQUAL(UI_LAYOUT_CLASSIC, s_p.presets[0].layout);
     TEST_ASSERT_EQUAL(UI_FIELD_TIME_CLOCK, s_p.presets[0].slots[0]);
     TEST_ASSERT_EQUAL_INT(2, ui_presets_find(&s_p, "weather"));
     TEST_ASSERT_TRUE(s_p.presets[2].in_cycle); /* M5 brings its data (spec §5.4) */
+    TEST_ASSERT_EQUAL_INT(4, ui_presets_find(&s_p, "rain")); /* M6 (D28) */
+    TEST_ASSERT_EQUAL(UI_LAYOUT_RADAR, s_p.presets[4].layout);
+    TEST_ASSERT_EQUAL_STRING("Rain radar", s_p.presets[4].name);
+    TEST_ASSERT_TRUE(s_p.presets[4].in_cycle);
+    TEST_ASSERT_EQUAL_INT(5, ui_presets_find(&s_p, "flights"));
+    TEST_ASSERT_EQUAL(UI_LAYOUT_FLIGHTS, s_p.presets[5].layout);
+    TEST_ASSERT_TRUE(s_p.presets[5].in_cycle);
+    TEST_ASSERT_TRUE(s_p.presets[4].status_clock && s_p.presets[5].status_clock); /* a map fills the screen */
+    TEST_ASSERT_EQUAL_UINT8(UI_OFFERED_ALL, s_p.offered); /* nothing left to add */
     TEST_ASSERT_EQUAL_INT(-1, ui_presets_find(&s_p, "nope"));
 }
 
 static void test_next_follows_cycle_order_and_skips_presets_out_of_it(void)
 {
-    TEST_ASSERT_EQUAL_INT(1, ui_presets_next(&s_p)); /* home -> indoor */
+    TEST_ASSERT_EQUAL_INT(1, ui_presets_next(&s_p, true)); /* home -> indoor */
     s_p.active = 1;
-    TEST_ASSERT_EQUAL_INT(2, ui_presets_next(&s_p)); /* indoor -> weather */
+    TEST_ASSERT_EQUAL_INT(2, ui_presets_next(&s_p, true)); /* indoor -> weather */
     s_p.presets[2].in_cycle = false;
-    TEST_ASSERT_EQUAL_INT(3, ui_presets_next(&s_p)); /* indoor -> focus, skipping weather out of the cycle */
-    s_p.active = 3;
-    TEST_ASSERT_EQUAL_INT(0, ui_presets_next(&s_p)); /* wraps */
+    TEST_ASSERT_EQUAL_INT(3, ui_presets_next(&s_p, true)); /* indoor -> focus, skipping weather out of the cycle */
+    s_p.active = 5;
+    TEST_ASSERT_EQUAL_INT(0, ui_presets_next(&s_p, true)); /* wraps */
     for (int i = 0; i < s_p.count; i++) {
         s_p.presets[i].in_cycle = i == 3;
     }
-    TEST_ASSERT_EQUAL_INT(3, ui_presets_next(&s_p)); /* the only one: stays */
+    TEST_ASSERT_EQUAL_INT(3, ui_presets_next(&s_p, true)); /* the only one: stays */
+}
+
+static void test_the_cycle_visits_flights_only_in_sync_mode_always(void)
+{
+    s_p.active = 4; /* rain */
+    TEST_ASSERT_EQUAL_INT(5, ui_presets_next(&s_p, true));
+    TEST_ASSERT_EQUAL_INT(0, ui_presets_next(&s_p, false)); /* past flights to home */
+    for (int i = 0; i < s_p.count; i++) {
+        s_p.presets[i].in_cycle = i == 5;
+    }
+    s_p.active = 0;
+    TEST_ASSERT_EQUAL_INT(0, ui_presets_next(&s_p, false)); /* only flights in the cycle: stays */
+    TEST_ASSERT_EQUAL_INT(5, ui_presets_next(&s_p, true));
+}
+
+/* A presets.json saved by M5: the four presets of its day, no marker. */
+static const char k_m5_file[] =
+    "{\"schema\":1,\"active\":\"weather\",\"presets\":["
+    "{\"id\":\"home\",\"layout\":\"classic\"},{\"id\":\"indoor\",\"layout\":\"grid\"},"
+    "{\"id\":\"weather\",\"layout\":\"weather\"},{\"id\":\"focus\",\"layout\":\"focus\"}]}";
+
+static void test_a_file_from_before_m6_gains_the_radars_once(void)
+{
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(k_m5_file, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(0, s_p.offered);
+    TEST_ASSERT_TRUE(ui_presets_offer_builtins(&s_p)); /* changed: save it */
+    TEST_ASSERT_EQUAL_INT(6, s_p.count);
+    TEST_ASSERT_EQUAL_INT(4, ui_presets_find(&s_p, "rain"));
+    TEST_ASSERT_EQUAL_INT(5, ui_presets_find(&s_p, "flights"));
+    TEST_ASSERT_EQUAL_STRING("weather", s_p.presets[s_p.active].id); /* the active one stays */
+    TEST_ASSERT_FALSE(ui_presets_offer_builtins(&s_p));
+
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"offered\":[\"rain\",\"flights\"]"));
+    s_p.count = 5; /* the owner deletes Flights */
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_FALSE(ui_presets_offer_builtins(&s_p)); /* and it stays deleted */
+    TEST_ASSERT_EQUAL_INT(-1, ui_presets_find(&s_p, "flights"));
+}
+
+static void test_the_radars_need_room_and_a_free_id(void)
+{
+    memset(&s_p, 0, sizeof(s_p));
+    for (int i = 0; i < UI_PRESET_MAX; i++) {
+        snprintf(s_p.presets[i].id, sizeof(s_p.presets[i].id), "p%d", i);
+    }
+    s_p.count = UI_PRESET_MAX;
+    TEST_ASSERT_TRUE(ui_presets_offer_builtins(&s_p)); /* the marker changed, nothing was added */
+    TEST_ASSERT_EQUAL_INT(UI_PRESET_MAX, s_p.count);
+    TEST_ASSERT_EQUAL_UINT8(UI_OFFERED_ALL, s_p.offered);
+
+    memset(&s_p, 0, sizeof(s_p));
+    snprintf(s_p.presets[0].id, sizeof(s_p.presets[0].id), "rain"); /* the owner's own, on another layout */
+    s_p.presets[0].layout = UI_LAYOUT_GRID;
+    s_p.count = 1;
+    TEST_ASSERT_TRUE(ui_presets_offer_builtins(&s_p));
+    TEST_ASSERT_EQUAL_INT(2, s_p.count); /* Flights only */
+    TEST_ASSERT_EQUAL(UI_LAYOUT_GRID, s_p.presets[0].layout);
+    TEST_ASSERT_EQUAL_STRING("flights", s_p.presets[1].id);
+}
+
+static void test_the_radar_layouts_have_no_slots_and_the_rain_map_needs_room(void)
+{
+    static const char k_ok[] =
+        "{\"schema\":1,\"presets\":[{\"id\":\"r\",\"layout\":\"radar\"},"
+        "{\"id\":\"f\",\"layout\":\"flights\",\"slots\":{}},"
+        "{\"id\":\"g\",\"layout\":\"grid\",\"slots\":{\"g1\":\"rain.map\"}},"
+        "{\"id\":\"w\",\"layout\":\"weather\",\"slots\":{\"now\":\"rain.map\"}}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(k_ok, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL(UI_FIELD_RAIN_MAP, s_p.presets[2].slots[0]);
+    static const char k_slot[] =
+        "{\"schema\":1,\"presets\":[{\"id\":\"r\",\"layout\":\"radar\",\"slots\":{\"map\":\"rain.map\"}}]}";
+    TEST_ASSERT_FALSE(ui_presets_from_json(k_slot, &s_p, s_err, sizeof(s_err)));
+    TEST_ASSERT_NOT_NULL(strstr(s_err, "has no slot"));
+    static const char k_small[] =
+        "{\"schema\":1,\"presets\":[{\"id\":\"h\",\"layout\":\"classic\",\"slots\":{\"s1\":\"rain.map\"}}]}";
+    TEST_ASSERT_FALSE(ui_presets_from_json(k_small, &s_p, s_err, sizeof(s_err)));
+    TEST_ASSERT_NOT_NULL(strstr(s_err, "can't show"));
 }
 
 static void test_defaults_survive_a_json_round_trip(void)
@@ -266,6 +354,7 @@ static void test_a_full_set_fits_the_save_buffer(void)
     }
     s_p.count = UI_PRESET_MAX;
     s_p.cycle_interval_s = 60;
+    s_p.offered = UI_OFFERED_ALL;
     s_p.schedule.count = UI_SCHEDULE_MAX;
     for (int i = 0; i < UI_SCHEDULE_MAX; i++) {
         s_p.schedule.entries[i] = (ui_schedule_entry_t){ .at_min = 600, .days = 0x7F, .action = UI_SCHED_NIGHT,
@@ -282,8 +371,12 @@ static void test_a_full_set_fits_the_save_buffer(void)
 int main(void)
 {
     UNITY_BEGIN();
-    RUN_TEST(test_defaults_are_home_indoor_weather_and_focus);
+    RUN_TEST(test_defaults_are_the_six_built_ins);
     RUN_TEST(test_next_follows_cycle_order_and_skips_presets_out_of_it);
+    RUN_TEST(test_the_cycle_visits_flights_only_in_sync_mode_always);
+    RUN_TEST(test_a_file_from_before_m6_gains_the_radars_once);
+    RUN_TEST(test_the_radars_need_room_and_a_free_id);
+    RUN_TEST(test_the_radar_layouts_have_no_slots_and_the_rain_map_needs_room);
     RUN_TEST(test_defaults_survive_a_json_round_trip);
     RUN_TEST(test_the_spec_example_parses);
     RUN_TEST(test_invalid_files_are_rejected_with_a_reason);

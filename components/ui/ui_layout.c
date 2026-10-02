@@ -10,8 +10,8 @@
     (UI_KIND(UI_FK_TIME) | UI_KIND(UI_FK_DATE) | UI_KIND(UI_FK_NUMBER) | UI_KIND(UI_FK_BATTERY) |                    \
      UI_KIND(UI_FK_MOON) | UI_KIND(UI_FK_TEXT) | UI_KIND(UI_FK_WEATHER_NOW) | UI_KIND(UI_FK_WEATHER_DAY) |           \
      UI_KIND(UI_FK_SUN) | UI_KIND(UI_FK_LEVEL) | UI_KIND(UI_FK_POLLEN))
-#define K_ANY_MEDIUM (K_ANY_SMALL | UI_KIND(UI_FK_SERIES))
-#define K_LARGE (K_ANY_SMALL)
+#define K_ANY_MEDIUM (K_ANY_SMALL | UI_KIND(UI_FK_SERIES) | UI_KIND(UI_FK_RAIN_MAP))
+#define K_LARGE (K_ANY_SMALL | UI_KIND(UI_FK_RAIN_MAP))
 #define K_XL (UI_KIND(UI_FK_TIME) | UI_KIND(UI_FK_NUMBER))
 
 static const ui_slot_t k_classic[] = {
@@ -51,6 +51,8 @@ static const ui_layout_t k_layouts[UI_LAYOUT_COUNT] = {
     [UI_LAYOUT_WEATHER] = { "weather", k_weather, sizeof(k_weather) / sizeof(k_weather[0]) },
     [UI_LAYOUT_GRID] = { "grid", k_grid, sizeof(k_grid) / sizeof(k_grid[0]) },
     [UI_LAYOUT_FOCUS] = { "focus", k_focus, sizeof(k_focus) / sizeof(k_focus[0]) },
+    [UI_LAYOUT_RADAR] = { "radar", NULL, 0 },
+    [UI_LAYOUT_FLIGHTS] = { "flights", NULL, 0 },
 };
 
 const ui_layout_t *ui_layout(ui_layout_id_t id)

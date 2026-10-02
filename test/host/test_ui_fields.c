@@ -4,6 +4,7 @@
 
 #include "context_fixtures.h"
 #include "ui_fields.h"
+#include "ui_radar.h"
 #include "unity.h"
 
 static ui_context_t s_ctx;
@@ -206,6 +207,29 @@ static void test_rain_needs_its_two_hours_stored_and_ages_like_the_forecast(void
     TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state);
 }
 
+static void test_the_rain_map_shows_a_frame_with_its_time(void)
+{
+    ui_value_t v = resolve(UI_FIELD_RAIN_MAP);
+    TEST_ASSERT_EQUAL(UI_FK_RAIN_MAP, v.kind);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state); /* no radar at all */
+    static radar_frame_t f;
+    static ui_radar_t r;
+    r = (ui_radar_t){ .wx_zoom_q = 26 };
+    s_ctx.radar = &r;
+    v = resolve(UI_FIELD_RAIN_MAP);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state); /* before the first frame */
+    f.time = (uint32_t)(FIX_NOW - 8 * 60);
+    r.frame = &f;
+    v = resolve(UI_FIELD_RAIN_MAP);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+    TEST_ASSERT_EQUAL_STRING("20:40", v.text);
+    TEST_ASSERT_EQUAL_PTR(&r, v.radar);
+    f.time = (uint32_t)(FIX_NOW - 3 * 3600);
+    v = resolve(UI_FIELD_RAIN_MAP);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state); /* its age shows on the map, never as stale (spec §5.1) */
+    TEST_ASSERT_EQUAL_UINT32(3 * 3600, v.age_s);
+}
+
 static void test_a_forecast_older_than_its_ttl_is_stale(void)
 {
     fixture_forecast(&s_fix_ds, FIX_NOW - 30 * 3600);
@@ -301,6 +325,7 @@ int main(void)
     RUN_TEST(test_the_hourly_strip_starts_at_the_next_hour_every_two_hours);
     RUN_TEST(test_rain_in_the_next_two_hours_says_when);
     RUN_TEST(test_rain_needs_its_two_hours_stored_and_ages_like_the_forecast);
+    RUN_TEST(test_the_rain_map_shows_a_frame_with_its_time);
     RUN_TEST(test_a_forecast_older_than_its_ttl_is_stale);
     RUN_TEST(test_the_sun_rises_and_sets_over_brno);
     RUN_TEST(test_air_quality_and_pollen_name_their_band_and_level);

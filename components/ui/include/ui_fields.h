@@ -28,6 +28,7 @@ typedef enum {
     UI_FK_SUN,
     UI_FK_LEVEL,  /* a number and its band: the air quality index (D25) */
     UI_FK_POLLEN, /* a pollen level, and its type or count (D25) */
+    UI_FK_RAIN_MAP, /* the weather radar's map (M6) */
     UI_FK_COUNT,
 } ui_field_kind_t;
 
@@ -65,6 +66,7 @@ typedef enum {
     UI_FIELD_POLLEN_OLIVE,
     UI_FIELD_POLLEN_RAGWEED,
     UI_FIELD_WX_RAIN2H, /* M6 (D27) */
+    UI_FIELD_RAIN_MAP,  /* M6 (D23) */
     UI_FIELD_COUNT,
 } ui_field_id_t;
 
@@ -104,6 +106,8 @@ typedef struct {
     bool night;
 } ui_series_point_t;
 
+typedef struct ui_radar ui_radar_t; /* ui_radar.h */
+
 /* Everything the dashboard reads, gathered by the app for one render. */
 typedef struct {
     time_t now;          /* UTC */
@@ -119,6 +123,7 @@ typedef struct {
     int32_t lat_e4, lon_e4; /* the location, for the sun's times */
     ui_sync_mark_t sync;    /* the status bar's sync state (spec §5.2) */
     ui_wifi_mark_t wifi;
+    const ui_radar_t *radar; /* M6: the radars' map, frames and settings; NULL for none */
 } ui_context_t;
 
 typedef enum {
@@ -150,6 +155,7 @@ typedef struct {
     ui_series_point_t series[UI_SERIES_MAX];
     uint8_t rain_mm10[UI_RAIN_STEPS]; /* wx.rain2h: each quarter hour from now, as ds_rain_t keeps them */
     uint8_t rain_prob[UI_RAIN_STEPS];
+    const ui_radar_t *radar; /* rain.map: what its map draws; `text` is its frame's time */
 } ui_value_t;
 
 void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);

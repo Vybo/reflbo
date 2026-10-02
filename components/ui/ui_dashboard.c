@@ -1,6 +1,7 @@
 #include "ui_dashboard.h"
 
 #include "ui_internal.h"
+#include "ui_radar.h"
 
 static void draw_separators(gfx_fb_t *fb, ui_layout_id_t layout)
 {
@@ -43,7 +44,10 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
     gfx_clear(fb, GFX_WHITE);
     const ui_layout_t *layout = ui_layout((ui_layout_id_t)preset->layout);
     bool any_stale = false;
-    if (layout != NULL) {
+    if (preset->layout == UI_LAYOUT_RADAR) { /* spec §5.2: the map under the status bar */
+        ui_draw_radar_view(fb, (gfx_rect_t){ 0, UI_STATUS_H + 1, fb->width, (int16_t)(fb->height - UI_STATUS_H - 1) },
+                           &c);
+    } else if (layout != NULL) {
         draw_separators(fb, (ui_layout_id_t)preset->layout);
         for (int i = 0; i < layout->slot_count; i++) {
             ui_value_t v;

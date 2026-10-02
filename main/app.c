@@ -299,7 +299,7 @@ static void handle_button(board_button_t button, gesture_t gesture)
             }
         }
     } else if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT) {
-        app_ui_select(ui_presets_next(app_presets()), true);
+        app_ui_select(ui_presets_next(app_presets(), app_state()->settings.sync_mode == SETTINGS_SYNC_ALWAYS), true);
         snprintf(text, sizeof(text), "%s: %s", lang_str(lang, LS_T_PRESET), preset_name());
         app_ui_toast(text);
     } else if (button == BOARD_BUTTON_KEY && gesture == GESTURE_DOUBLE) {

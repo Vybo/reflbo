@@ -55,7 +55,7 @@ void radar_frame_set(radar_frame_t *f, int x, int y, radar_level_t level)
     f->levels[i / 4] = (uint8_t)((f->levels[i / 4] & ~(3 << shift)) | (level & 3) << shift);
 }
 
-static bool inks(radar_level_t level, int x, int y)
+bool radar_inks(radar_level_t level, int x, int y)
 {
     switch (level) {
     case RADAR_LIGHT:
@@ -112,7 +112,7 @@ void radar_render(gfx_fb_t *fb, gfx_rect_t area, const map_view_t *v, const rada
     for (int sy = 0; sy < g.h; sy++) {
         for (int sx = 0; g.rows[sy] >= 0 && sx < g.w; sx++) {
             int x = area.x + sx, y = area.y + sy;
-            if (g.cols[sx] >= 0 && inks(radar_frame_level(f, g.cols[sx], g.rows[sy]), x, y)) {
+            if (g.cols[sx] >= 0 && radar_inks(radar_frame_level(f, g.cols[sx], g.rows[sy]), x, y)) {
                 gfx_pixel(fb, x, y, GFX_BLACK);
             }
         }

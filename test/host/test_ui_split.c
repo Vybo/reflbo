@@ -1,5 +1,8 @@
+#define _POSIX_C_SOURCE 200809L /* setenv() in fixture_zone() */
+
 #include <string.h>
 
+#include "dashboard_fixtures.h"
 #include "ui_split.h"
 #include "unity.h"
 
@@ -208,6 +211,35 @@ static void test_ratios_have_names(void)
     TEST_ASSERT_NULL(ui_split_ratio_name(6));
 }
 
+/* A separator is a 1 px line in its split's gap, 8 px short of each end; a hidden one leaves the gap
+ * white, and the cells don't move (spec §5.2). */
+static void test_separators_are_drawn_unless_hidden(void)
+{
+    static uint8_t buf[400 * 300 / 8];
+    ui_context_t ctx = fixture_context();
+    ui_preset_t p = { .layout = UI_LAYOUT_SPLIT, .split = { ROWS(UI_RATIO_1_2), COLS(UI_RATIO_1_2) | NO_LINE, CELL,
+                                                            CELL, COLS(UI_RATIO_1_3), CELL, CELL } };
+    gfx_fb_t fb;
+    gfx_fb_init(&fb, buf, 400, 300);
+    ui_draw_dashboard(&fb, &ctx, &p); /* every cell empty: only the lines below the status bar */
+    for (int x = 0; x < 400; x++) { /* the rows' gap at y 160 */
+        TEST_ASSERT_EQUAL_INT_MESSAGE(x >= 8 && x < 392, gfx_get_pixel(&fb, x, 160), "the rows' line");
+    }
+    for (int y = 21; y < 160; y++) { /* the top columns' gap at x 200: hidden */
+        TEST_ASSERT_FALSE_MESSAGE(gfx_get_pixel(&fb, 200, y), "a hidden line");
+    }
+    for (int y = 161; y < 300; y++) { /* the bottom columns' gap at x 133, over 139 px */
+        TEST_ASSERT_EQUAL_INT_MESSAGE(y >= 169 && y < 292, gfx_get_pixel(&fb, 133, y), "the columns' line");
+    }
+    int ink = 0;
+    for (int y = 21; y < 300; y++) {
+        for (int x = 0; x < 400; x++) {
+            ink += gfx_get_pixel(&fb, x, y);
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(384 + 123, ink); /* the two lines and nothing else */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -223,5 +255,6 @@ int main(void)
     RUN_TEST(test_a_field_draws_at_the_largest_size_with_room_for_it);
     RUN_TEST(test_more_room_never_loses_a_field);
     RUN_TEST(test_ratios_have_names);
+    RUN_TEST(test_separators_are_drawn_unless_hidden);
     return UNITY_END();
 }

@@ -12,6 +12,7 @@ The layout of map.bin is documented in components/map/include/map_data.h; this f
 """
 import argparse
 import binascii
+import collections
 import csv
 import hashlib
 import io
@@ -49,8 +50,11 @@ NAME_FIXES = {"Pizen": "Plzeň", "Usti Nad Labem": "Ústí nad Labem", "Breslau"
 GEONAMES_AREA = (48.07, 51.46, 11.26, 19.63)  # lat_min, lat_max, lon_min, lon_max
 GEONAMES_MIN_POPULATION = 1000
 GEONAMES_SKIP = {"PPLX", "PPLH", "PPLQ", "PPLW", "PPLCH"}  # sections of towns; historical, abandoned, destroyed
-SAME_TOWN_KM = 10.0  # a Natural Earth town's own GeoNames entry: the largest place this close to it
-PART_OF_KM = 0.0142  # km per square root of inhabitants: a place this close to a larger one is part of it
+SAME_TOWN_KM = 10.0  # a Natural Earth town's own GeoNames entry: a place this close that goes by its name
+PART_OF_KM = 0.0142  # km per square root of inhabitants: how far a larger place's districts reach
+
+# A GeoNames place: what map.bin keeps of it, the names it goes by (folded) and where it belongs
+Place = collections.namedtuple("Place", "lat lon population name names country admin")
 
 
 def line_parts(geojson):
@@ -186,9 +190,10 @@ def towns(geojson):
 
 
 def geonames_places(text, area=GEONAMES_AREA):
-    """cities1000.txt -> [(lat_e4, lon_e4, population, name)]: the places inside `area` of 1000
-    inhabitants or more that aren't sections of towns, the largest first; the name in ASCII when the
-    fonts lack its letters."""
+    """cities1000.txt -> [Place]: the places inside `area` of 1000 inhabitants or more that aren't
+    sections of towns, the largest first; the name in ASCII when the fonts lack its letters. Each keeps
+    the names it goes by, to find Natural Earth's towns among them, and its country and admin1-4 codes,
+    to tell a town's districts from its neighbours."""
     out = []
     for line in text.splitlines():
         fields = line.split("\t")
@@ -200,8 +205,9 @@ def geonames_places(text, area=GEONAMES_AREA):
             continue
         if not (area[0] <= lat <= area[1] and area[2] <= lon <= area[3]):
             continue
-        out.append((round(lat * 1e4), round(lon * 1e4), population, name))
-    out.sort(key=lambda t: (-t[2], t[3]))
+        names = frozenset(n.casefold() for n in (fields[1], fields[2], *fields[3].split(",")) if n)
+        out.append(Place(round(lat * 1e4), round(lon * 1e4), population, name, names, fields[8], tuple(fields[10:14])))
+    out.sort(key=lambda p: (-p.population, p.name))
     return out
 
 
@@ -211,35 +217,47 @@ def km(a, b):
     return math.hypot((a[1] - b[1]) * k, a[0] - b[0]) * 0.0111195
 
 
+def part_of(place, other):
+    """`place` lies inside `other`'s unit, as a district does: the same country and every admin code
+    `other` has (Brno's 78/0642 holds Brno střed, not Modřice in 0643)."""
+    same_unit = all(not code or code == own for code, own in zip(other.admin, place.admin))
+    return place.country == other.country and same_unit
+
+
 def merge_towns(ne_towns, places):
-    """Natural Earth's towns, and the GeoNames places that are neither one of them (Natural Earth
-    keeps its local name: "Praha", not "Prague") nor part of a larger place: within 0.0142 km x the
-    square root of its inhabitants, 9 km of Brno, 15 km of Praha, which leaves out the districts
-    GeoNames lists as places. The largest first."""
+    """Natural Earth's towns, and the GeoNames places that are neither one of them nor a district of a
+    larger place. A Natural Earth town's own entry is the nearest place within 10 km that goes by its
+    name: Natural Earth keeps its local name ("Praha", not "Prague"). A district lies inside the larger
+    place's unit (part_of) and within 0.0142 km x the square root of its inhabitants (9 km of Brno,
+    15 km of Praha), so neighbours stay: Sosnowiec beside Katowice, Zgorzelec across from Görlitz.
+    Natural Earth's towns first, as its selection leads the wide views, then GeoNames' places, which
+    fill in the closer ones; each the largest first."""
     if not places:
         return list(ne_towns)
-    lats, lons = [p[0] for p in places], [p[1] for p in places]
+    lats, lons = [p.lat for p in places], [p.lon for p in places]
     near_area = (min(lats) - 2000, max(lats) + 2000, min(lons) - 3000, max(lons) + 3000)  # SAME_TOWN_KM and more
     taken = set()
-    larger = []  # (lat_e4, lon_e4, population) of the places that can own smaller ones near them
+    larger = []  # the places whose districts are left out
     for town in ne_towns:
         if not (near_area[0] <= town[0] <= near_area[1] and near_area[2] <= town[1] <= near_area[3]):
             continue
-        near = [i for i, p in enumerate(places) if i not in taken and km(town, p) <= SAME_TOWN_KM]
+        name = town[3].casefold()
+        near = [i for i, p in enumerate(places) if i not in taken and name in p.names and km(town, p) <= SAME_TOWN_KM]
         if near:
-            own = max(near, key=lambda i: places[i][2])
+            own = min(near, key=lambda i: km(town, places[i]))
             taken.add(own)
-            larger.append(places[own][:3])
-    out = list(ne_towns)
+            larger.append(places[own])
+    kept = []
     for i, place in enumerate(places):  # the largest first: whatever could own it came before
         if i in taken:
             continue
-        if any(other[2] > place[2] and km(place, other) <= PART_OF_KM * math.sqrt(other[2]) for other in larger):
+        if any(other.population > place.population and part_of(place, other) and
+               km(place, other) <= PART_OF_KM * math.sqrt(other.population) for other in larger):
             continue
-        larger.append(place[:3])
-        out.append(place)
-    out.sort(key=lambda t: (-t[2], t[3]))
-    return out
+        larger.append(place)
+        kept.append(tuple(place[:4]))
+    kept.sort(key=lambda t: (-t[2], t[3]))
+    return list(ne_towns) + kept
 
 
 def airports(csv_text):
@@ -324,7 +342,8 @@ def main(argv=None):
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(blob)
     with open(args.sources, "w") as f:
-        f.write("# The sources of map.bin (tools/gen_map.py): public domain, but GeoNames (CC BY 4.0, THIRD_PARTY.md)\n")
+        f.write("# The sources of map.bin (tools/gen_map.py): public domain, but GeoNames (CC BY 4.0, "
+                "THIRD_PARTY.md)\n")
         for name, path in paths.items():
             f.write(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {SOURCES[name]}\n")
     print(f"{out}: {len(blob)} bytes, {len(lines)} lines, {len(town_list)} towns, {len(airport_list)} airports")

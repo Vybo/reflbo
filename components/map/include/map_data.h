@@ -16,7 +16,8 @@
  *     pos, u16 point count, u8 kind (map_line_kind_t), u8 0. Its points: the first as i32 lat,
  *     lon (1e-4°), the rest as i16 deltas; a delta pair (-32768, -32768) is followed by an
  *     absolute point
- *   town, 16 bytes: i32 lat, lon (1e-4°), u32 population, u32 name pos; the largest first
+ *   town, 16 bytes: i32 lat, lon (1e-4°), u32 population, u32 name pos; Natural Earth's the largest
+ *     first, then GeoNames' the same way (D29)
  *   airport, 16 bytes: i32 lat, lon (1e-4°), 3 bytes IATA, 4 bytes ICAO (NUL-padded), u8 kind
  *     (0 large, 1 medium); large first
  *   names: NUL-terminated UTF-8
@@ -59,7 +60,8 @@ typedef void (*map_segment_fn)(void *ctx, map_line_kind_t kind, double lat0, dou
 /* Every segment whose box meets `b`. */
 void map_data_segments(const map_data_t *d, const map_bounds_t *b, map_segment_fn fn, void *ctx);
 
-/* The towns inside `b`, the largest first, until `fn` returns false. */
+/* The towns inside `b` in map.bin's order, until `fn` returns false: Natural Earth's, then GeoNames',
+ * each the largest first. */
 typedef bool (*map_town_fn)(void *ctx, const map_town_t *t);
 void map_data_towns(const map_data_t *d, const map_bounds_t *b, map_town_fn fn, void *ctx);
 

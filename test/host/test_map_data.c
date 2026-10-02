@@ -40,7 +40,7 @@ typedef struct {
     char names[64][32]; /* the first 64 */
     int count;
     uint32_t last_population;
-    bool rising; /* a town larger than the one before it */
+    int rises; /* how often a town is larger than the one before it */
 } towns_t;
 
 static bool on_town(void *ctx, const map_town_t *t)
@@ -49,7 +49,7 @@ static bool on_town(void *ctx, const map_town_t *t)
     if (c->count < 64) {
         snprintf(c->names[c->count], sizeof(c->names[0]), "%s", t->name);
     }
-    c->rising |= c->count > 0 && t->population > c->last_population;
+    c->rises += c->count > 0 && t->population > c->last_population;
     c->last_population = t->population;
     c->count++;
     return true;
@@ -73,7 +73,7 @@ static void test_towns_around_brno_come_largest_first(void)
     map_view_bounds(&v, &b);
     towns_t c = { 0 };
     map_data_towns(&s_map, &b, on_town, &c);
-    TEST_ASSERT_FALSE(c.rising);
+    TEST_ASSERT_TRUE(c.rises <= 1); /* once at most: where GeoNames' places follow Natural Earth's (D29) */
     int wien = index_of(&c, "Wien"), praha = index_of(&c, "Praha"); /* Natural Earth's local names */
     TEST_ASSERT_TRUE(wien >= 0 && praha > wien);
     TEST_ASSERT_TRUE(index_of(&c, "Brno") > praha);

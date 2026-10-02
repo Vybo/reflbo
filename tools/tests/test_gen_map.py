@@ -83,39 +83,64 @@ class GeoNamesTest(unittest.TestCase):
     AREA = (48.0, 51.5, 11.0, 20.0)  # lat_min, lat_max, lon_min, lon_max
 
     @staticmethod
-    def row(name, ascii_name, lat, lon, code, population):
+    def row(name, ascii_name, lat, lon, code, population, country="CZ", admin=("78", "0643", "", ""), alternates=""):
         """A line of cities1000.txt: 19 tab-separated columns."""
         fields = [""] * 19
-        fields[1], fields[2], fields[4], fields[5] = name, ascii_name, str(lat), str(lon)
-        fields[6], fields[7], fields[14] = "P", code, str(population)
+        fields[1], fields[2], fields[3], fields[4], fields[5] = name, ascii_name, alternates, str(lat), str(lon)
+        fields[6], fields[7], fields[8], fields[14] = "P", code, country, str(population)
+        fields[10:14] = admin
         return "\t".join(fields)
+
+    @staticmethod
+    def place(name, lat_e4, lon_e4, population, country, admin, alternates=()):
+        names = frozenset(n.casefold() for n in (name, *alternates))
+        return gen_map.Place(lat_e4, lon_e4, population, name, names, country, admin)
 
     def test_places_of_a_thousand_inside_the_area_and_no_sections_of_towns(self):
         text = "\n".join([
             self.row("Malá Strana", "Mala Strana", 50.0875, 14.4036, "PPLX", 6350),  # a section of Prague
-            self.row("Kuřim", "Kurim", 49.29852, 16.53144, "PPL", 11860),
+            self.row("Kuřim", "Kurim", 49.29852, 16.53144, "PPL", 11860, alternates="Kurim,Kurzim"),
             self.row("Lhota", "Lhota", 49.5, 16.0, "PPL", 999),                         # too small
             self.row("Warszawa", "Warsaw", 52.22977, 21.01178, "PPLC", 1702139),        # outside the area
             self.row("Sl\u2019ažany", "Sl'azany", 48.39487, 18.32848, "PPL", 1706),    # a letter the fonts lack
         ])
-        self.assertEqual(gen_map.geonames_places(text, self.AREA),
+        places = gen_map.geonames_places(text, self.AREA)
+        self.assertEqual([p[:4] for p in places],
                          [(492985, 165314, 11860, "Kuřim"), (483949, 183285, 1706, "Sl'azany")])
+        self.assertEqual(places[0].names, {"kuřim", "kurim", "kurzim"})
+        self.assertEqual((places[0].country, places[0].admin), ("CZ", ("78", "0643", "", "")))
 
-    def test_natural_earth_keeps_its_towns_and_geonames_adds_the_others(self):
+    def test_natural_earth_keeps_its_towns_and_a_towns_districts_go(self):
         natural_earth = [(500800, 144400, 1162000, "Praha"), (492000, 166100, 388277, "Brno")]
         places = [
-            (500880, 144208, 1165581, "Prague"),    # Natural Earth's Praha, in English
-            (491952, 166080, 404296, "Brno"),       # Natural Earth's Brno
-            (491979, 166161, 86685, "Brno střed"),  # 0.7 km from Brno: one of its districts
-            (492985, 165314, 11860, "Kuřim"),       # 12.8 km from Brno, beyond its 9 km
-            (492775, 169990, 20664, "Vyškov"),
-            (492790, 170080, 1500, "Dědice"),       # 0.7 km from Vyškov, inside its 2 km
-            (491717, 167112, 3554, "Moravany"),     # 7.9 km from Brno, inside its 9 km
+            self.place("Prague", 500880, 144208, 1165581, "CZ", ("52", "", "", ""), ("Praha",)),  # NE's Praha
+            self.place("Brno", 491952, 166080, 404296, "CZ", ("78", "0642", "", "")),
+            self.place("Vyškov", 492775, 169990, 20664, "CZ", ("78", "0646", "593834", "")),
+            self.place("Kuřim", 492985, 165314, 11860, "CZ", ("78", "0643", "583251", "")),
+            self.place("Brno střed", 491979, 166161, 86685, "CZ", ("78", "0642", "582786", "")),  # in Brno, 0.7 km out
+            self.place("Moravany", 491717, 167112, 3554, "CZ", ("78", "0643", "583413", "")),     # 7.9 km, outside Brno
+            self.place("Dědice", 492790, 170080, 1500, "CZ", ("78", "0646", "593834", "")),       # in Vyškov, 0.7 km
         ]
         self.assertEqual(gen_map.merge_towns(natural_earth, places), [
             (500800, 144400, 1162000, "Praha"), (492000, 166100, 388277, "Brno"),
-            (492775, 169990, 20664, "Vyškov"), (492985, 165314, 11860, "Kuřim")])
+            (492775, 169990, 20664, "Vyškov"), (492985, 165314, 11860, "Kuřim"), (491717, 167112, 3554, "Moravany")])
         self.assertEqual(gen_map.merge_towns(natural_earth, []), natural_earth)  # no GeoNames at all
+
+    def test_a_twin_goes_by_the_name_and_neighbours_in_other_units_stay(self):
+        natural_earth = [(502667, 190333, 2746000, "Katowice"), (503500, 189167, 662247, "Bytom"),
+                         (497470, 133780, 164180, "Plzeň")]
+        places = [
+            self.place("Katowice", 502597, 190217, 286960, "PL", ("83", "2469", "246901", "")),
+            self.place("Sosnowiec", 502868, 191039, 227295, "PL", ("83", "2475", "247501", "")),  # 6.6 km from Katowice
+            self.place("Zabrze", 503249, 187858, 192177, "PL", ("83", "2478", "247801", "")),     # 9.6 km from Bytom
+            self.place("Bytom", 503480, 189328, 189186, "PL", ("83", "2462", "246201", "")),
+            self.place("Pilsen", 497475, 133776, 187863, "CZ", ("87", "0323", "554791", ""), ("Plzeň",)),
+            self.place("Görlitz", 511552, 149885, 57751, "DE", ("13", "00", "14626", "14626110")),
+            self.place("Zgorzelec", 511494, 150084, 33247, "PL", ("72", "0225", "022502", "")),  # 1.5 km, in Poland
+        ]
+        # Natural Earth's towns lead, its selection for the wide views; GeoNames' places follow
+        self.assertEqual([t[3] for t in gen_map.merge_towns(natural_earth, places)],
+                         ["Katowice", "Bytom", "Plzeň", "Sosnowiec", "Zabrze", "Görlitz", "Zgorzelec"])
 
 
 class PackTest(unittest.TestCase):

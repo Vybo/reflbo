@@ -43,6 +43,7 @@ static const ui_layout_t k_layouts[UI_LAYOUT_COUNT] = {
     [UI_LAYOUT_FOCUS] = { "focus", k_focus, sizeof(k_focus) / sizeof(k_focus[0]) },
     [UI_LAYOUT_RADAR] = { "radar", NULL, 0 },
     [UI_LAYOUT_FLIGHTS] = { "flights", NULL, 0 },
+    [UI_LAYOUT_SPLIT] = { "split", NULL, 0 },
 };
 
 const ui_layout_t *ui_layout(ui_layout_id_t id)

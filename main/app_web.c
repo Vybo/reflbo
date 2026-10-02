@@ -198,6 +198,32 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
         cJSON_AddNumberToObject(rtc, "drift_s_per_day", timekeeping_trim_drift_s10_per_day(trim) / 10.0);
     }
 
+    /* spec §10.3, M6: the weather radar's frames and the flight radar's polls */
+    app_radar_status_t rs;
+    app_radar_status(&rs);
+    cJSON *radar = cJSON_AddObjectToObject(o, "radar");
+    cJSON *weather = cJSON_AddObjectToObject(radar, "weather");
+    cJSON_AddStringToObject(weather, "source", rs.source == RADAR_SOURCE_CHMU ? "chmu" : "rainviewer");
+    cJSON_AddNumberToObject(weather, "frames", rs.frames);
+    if (rs.frame_at != 0) {
+        cJSON_AddNumberToObject(weather, "frame_at", rs.frame_at);
+    }
+    if (rs.fetched_at != 0) {
+        cJSON_AddNumberToObject(weather, "fetched_at", (double)rs.fetched_at);
+        if (!rs.ok) {
+            cJSON_AddStringToObject(weather, "error", rs.detail);
+        }
+    }
+    app_flights_status_t fs;
+    app_flights_status(&fs);
+    cJSON *flights = cJSON_AddObjectToObject(radar, "flights");
+    cJSON_AddBoolToObject(flights, "on", fs.on);
+    cJSON_AddNumberToObject(flights, "aircraft", fs.aircraft);
+    if (fs.updated != 0) {
+        cJSON_AddNumberToObject(flights, "updated", (double)fs.updated);
+    }
+    cJSON_AddBoolToObject(flights, "failed", fs.failed);
+
     const ui_preset_t *active = &st->presets.presets[st->presets.active];
     cJSON *preset = cJSON_AddObjectToObject(o, "preset");
     cJSON_AddStringToObject(preset, "active", active->id);
@@ -259,6 +285,7 @@ static void preview(const char *method, const char *query, const char *body, uin
     }
     gfx_fb_t *fb = preview_fb();
     if (fb != NULL) {
+        app_radar_prepare(&doc.presets[index]); /* its map, and the frame from its file if PSRAM has none */
         ui_context_t ctx;
         app_ui_context(&ctx);
         ui_draw_dashboard(fb, &ctx, &doc.presets[index]);

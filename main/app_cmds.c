@@ -356,6 +356,45 @@ static int cmd_sync(int argc, char **argv)
     return diag_on_owner(sync_body, argc, argv);
 }
 
+/* `radar status | loop` (spec §15, M6). */
+static int radar_body(int argc, char **argv)
+{
+    static const char *const k_usage = "radar status | radar loop";
+    if (argc == 2 && strcmp(argv[1], "status") == 0) {
+        app_radar_status_t r;
+        app_radar_status(&r);
+        printf("weather: %s, %u frame%s kept\n", r.source == RADAR_SOURCE_CHMU ? "ChMU" : "RainViewer", r.frames,
+               r.frames == 1 ? "" : "s");
+        print_time("  newest", (time_t)r.frame_at);
+        print_time("  fetched", r.fetched_at);
+        if (r.fetched_at != 0 && !r.ok) {
+            printf("  failed: %s\n", r.detail);
+        }
+        app_flights_status_t f;
+        app_flights_status(&f);
+        printf("flights: %s, %u aircraft%s\n", f.on ? "polling" : "off", f.aircraft,
+               f.failed ? ", the last poll failed" : "");
+        print_time("  updated", f.updated);
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "loop") == 0) {
+        const ui_presets_t *p = app_presets();
+        if (p->presets[p->active].layout != UI_LAYOUT_RADAR) {
+            printf("radar: the loop plays on the Radar layout\n");
+            return 1;
+        }
+        bool ok = app_radar_loop_start();
+        printf("radar: %s\n", ok ? "the loop plays" : "fewer than two frames: sync mode always keeps the hour");
+        return ok ? 0 : 1;
+    }
+    return usage(k_usage);
+}
+
+static int cmd_radar(int argc, char **argv)
+{
+    return diag_on_owner(radar_body, argc, argv);
+}
+
 void app_register_commands(void)
 {
     const esp_console_cmd_t cmds[] = {
@@ -366,6 +405,7 @@ void app_register_commands(void)
                                          "add <HH:MM> night <HH:MM> [days]", .func = &cmd_schedule },
         { .command = "wifi", .help = "wifi status | scan", .func = &cmd_wifi },
         { .command = "sync", .help = "sync now | status (spec §9.3)", .func = &cmd_sync },
+        { .command = "radar", .help = "radar status | loop (spec §11.2, §11.3)", .func = &cmd_radar },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_err_t err = esp_console_cmd_register(&cmds[i]);

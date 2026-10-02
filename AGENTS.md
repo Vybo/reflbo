@@ -221,7 +221,7 @@ components/
   webui/         HTTP server, REST API, embedded web assets
   weather/       Open-Meteo URLs, parsers, bands and levels; the HTTPS fetch
   png/           PNG reader for the radar images: palette and RGBA, row by row   [host]
-  map/           web-Mercator views: projection, distance and bearing   [host]
+  map/           web-Mercator views; the built-in map (assets/map/map.bin)   [host]
   ha_mqtt/       MQTT session, discovery, state, commands, field mappings   (planned)
   sync/          when syncs run and their retries, SNTP packets, the sync task
   audio/         codec control, tone/WAV/stream players, alarm ringing      (planned)
@@ -296,6 +296,7 @@ cmake -S test/host -B build-host-asan -G Ninja -DREFLBO_SANITIZE=ON && cmake --b
   && ctest --test-dir build-host-asan --output-on-failure   # the same tests with ASan and UBSan
 tools/gen_fonts.sh                          # regenerate components/gfx/fonts (needs uv; versions in tools/requirements.txt)
 tools/gen_icons.sh                          # regenerate components/gfx/icons from assets/icons (needs uv)
+tools/gen_map.sh                            # regenerate assets/map/map.bin (plain Python 3; sources cached in ref/mapdata/)
 python3 tools/render.py                     # host renderings to captures/render/*.png (after the host build)
 node --test test/web/test_app.mjs           # the page script against a fake device; ctest runs it when node is found
 ```

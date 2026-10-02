@@ -1,0 +1,6 @@
+# The sources of map.bin (tools/gen_map.py): public domain, but GeoNames (CC BY 4.0, THIRD_PARTY.md)
+74d9c16229c095fde65943a9919e337682f044bcebccb120764f38edf3b70f4a  https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_boundary_lines_land.geojson
+271f1c4c1908312bac6b29d158ea1356544beafc129f260005300913aa5ea283  https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_50m_coastline.geojson
+fd3fa867a320cbd5c5b6bb5bc550afeec2939fb2cef688e508007282a55ac42f  https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_populated_places_simple.geojson
+7a3fe6ee4a451469cb3197d43ad71838b587dc4bca8bef98728d779d2a475722  https://davidmegginson.github.io/ourairports-data/airports.csv
+5a53bcc8283cbe7aca4d2d8b56998168d5c7670472e344dc77cf9cc39972d11f  https://download.geonames.org/export/dump/cities1000.zip

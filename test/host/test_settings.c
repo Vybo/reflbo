@@ -17,6 +17,7 @@ void setUp(void)
                                .sync_mode = SETTINGS_SYNC_TIMES, .sync_time_count = 1, .sync_times = { 330 },
                                .sync_interval_min = 60, .quiet = false, .quiet_from = 1380, .quiet_to = 360,
                                .ntp = { "cz.pool.ntp.org", "pool.ntp.org" } };
+    settings_radar_defaults(&s_defaults);
     memset(&s_out, 0xAA, sizeof(s_out));
     s_err[0] = '\0';
 }
@@ -335,6 +336,91 @@ static void test_the_sync_defaults_are_the_specs(void)
     TEST_ASSERT_EQUAL_STRING("cz.pool.ntp.org", s_out.ntp[0]);
 }
 
+static void test_the_radars_default_to_the_location(void)
+{
+    settings_t defaults;
+    memset(&defaults, 0, sizeof(defaults));
+    settings_radar_defaults(&defaults); /* spec §14.3 */
+    TEST_ASSERT_FALSE(defaults.wx_centre_set);
+    TEST_ASSERT_EQUAL_UINT8(26, defaults.wx_zoom_q); /* 6.5 */
+    TEST_ASSERT_FALSE(defaults.fl_centre_set);
+    TEST_ASSERT_EQUAL_UINT8(50, defaults.fl_range_km);
+    TEST_ASSERT_EQUAL_UINT16(0, defaults.fl_min_alt_ft);
+    TEST_ASSERT_FALSE(defaults.fl_ground);
+    TEST_ASSERT_EQUAL_UINT8(100, defaults.fl_max);
+    /* A file from before M6: both centres sit on its location, and move with it */
+    const char *json = "{\"schema\":1,\"location\":{\"name\":\"Ostrava\",\"lat\":49.8209,\"lon\":18.2625}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_FALSE(s_out.wx_centre_set);
+    TEST_ASSERT_EQUAL_INT32(498209, s_out.wx_lat_e4);
+    TEST_ASSERT_EQUAL_INT32(182625, s_out.wx_lon_e4);
+    TEST_ASSERT_EQUAL_INT32(498209, s_out.fl_lat_e4);
+    TEST_ASSERT_EQUAL_INT32(182625, s_out.fl_lon_e4);
+}
+
+static void test_the_radar_settings_parse_clamp_and_round_trip(void)
+{
+    const char *json = "{\"schema\":1,\"radar\":{"
+                       "\"weather\":{\"lat\":50.0755,\"lon\":14.4378,\"zoom\":7.3},"
+                       "\"flights\":{\"lat\":48.1103,\"lon\":16.5697,\"range_km\":25,\"min_alt_ft\":3000,"
+                       "\"ground\":true,\"max\":40}}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_TRUE(s_out.wx_centre_set);
+    TEST_ASSERT_EQUAL_INT32(500755, s_out.wx_lat_e4);
+    TEST_ASSERT_EQUAL_INT32(144378, s_out.wx_lon_e4);
+    TEST_ASSERT_EQUAL_UINT8(29, s_out.wx_zoom_q); /* 7.3 to the nearest quarter: 7.25 */
+    TEST_ASSERT_TRUE(s_out.fl_centre_set);
+    TEST_ASSERT_EQUAL_INT32(481103, s_out.fl_lat_e4);
+    TEST_ASSERT_EQUAL_UINT8(25, s_out.fl_range_km);
+    TEST_ASSERT_EQUAL_UINT16(3000, s_out.fl_min_alt_ft);
+    TEST_ASSERT_TRUE(s_out.fl_ground);
+    TEST_ASSERT_EQUAL_UINT8(40, s_out.fl_max);
+
+    settings_t again;
+    TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"zoom\":\t7.25"));
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &again, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_out, &again, sizeof(again));
+
+    json = "{\"schema\":1,\"radar\":{\"weather\":{\"zoom\":12},"
+           "\"flights\":{\"range_km\":5,\"min_alt_ft\":70000,\"max\":0}}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(36, s_out.wx_zoom_q); /* 9 at most */
+    TEST_ASSERT_EQUAL_UINT8(10, s_out.fl_range_km);
+    TEST_ASSERT_EQUAL_UINT16(60000, s_out.fl_min_alt_ft);
+    TEST_ASSERT_EQUAL_UINT8(1, s_out.fl_max);
+    json = "{\"schema\":1,\"radar\":{\"weather\":{\"zoom\":1,\"lat\":50.1},"
+           "\"flights\":{\"range_km\":250,\"min_alt_ft\":-5,\"max\":500,\"ground\":\"yes\"}}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(16, s_out.wx_zoom_q); /* 4 at least */
+    TEST_ASSERT_FALSE(s_out.wx_centre_set);      /* a latitude alone is no centre */
+    TEST_ASSERT_EQUAL_INT32(491951, s_out.wx_lat_e4);
+    TEST_ASSERT_EQUAL_UINT8(100, s_out.fl_range_km);
+    TEST_ASSERT_EQUAL_UINT16(0, s_out.fl_min_alt_ft);
+    TEST_ASSERT_EQUAL_UINT8(100, s_out.fl_max);
+    TEST_ASSERT_FALSE(s_out.fl_ground);
+}
+
+static void test_a_centre_that_follows_the_location_is_not_saved(void)
+{
+    TEST_ASSERT_TRUE(settings_to_json(&s_defaults, NULL, s_json, sizeof(s_json)) > 0);
+    const char *radar = strstr(s_json, "\"radar\"");
+    TEST_ASSERT_NOT_NULL(radar);
+    TEST_ASSERT_NULL(strstr(radar, "\"lat\"")); /* so a new location moves it */
+    TEST_ASSERT_NOT_NULL(strstr(radar, "\"zoom\":\t6.5"));
+    TEST_ASSERT_NOT_NULL(strstr(radar, "\"range_km\":\t50"));
+
+    /* The web UI's "use the location": the merge patch removes a centre */
+    const char *base = "{\"schema\":1,\"radar\":{\"weather\":{\"lat\":50.0755,\"lon\":14.4378,\"zoom\":7}}}";
+    char patched[512];
+    TEST_ASSERT_TRUE(settings_patch(base, "{\"radar\":{\"weather\":{\"lat\":null,\"lon\":null}}}", patched,
+                                    sizeof(patched), s_err, sizeof(s_err)) > 0);
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(patched, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_FALSE(s_out.wx_centre_set);
+    TEST_ASSERT_EQUAL_INT32(491951, s_out.wx_lat_e4);
+    TEST_ASSERT_EQUAL_UINT8(28, s_out.wx_zoom_q);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -358,5 +444,8 @@ int main(void)
     RUN_TEST(test_sync_times_are_sorted_without_repeats_or_bad_ones);
     RUN_TEST(test_sync_settings_fall_back_one_by_one);
     RUN_TEST(test_the_sync_defaults_are_the_specs);
+    RUN_TEST(test_the_radars_default_to_the_location);
+    RUN_TEST(test_the_radar_settings_parse_clamp_and_round_trip);
+    RUN_TEST(test_a_centre_that_follows_the_location_is_not_saved);
     return UNITY_END();
 }

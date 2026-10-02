@@ -32,6 +32,9 @@ typedef enum {
     SETTINGS_SYNC_MANUAL,
 } settings_sync_mode_t;
 
+#define SETTINGS_ZOOM_Q_MIN 16 /* radar.weather.zoom in quarters: 4 to 9 (spec §14.3) */
+#define SETTINGS_ZOOM_Q_MAX 36
+
 #define SETTINGS_SYNC_TIMES_MAX 8
 #define SETTINGS_NTP_MAX 2
 #define SETTINGS_HOST_LEN 64
@@ -60,12 +63,25 @@ typedef struct {
     bool quiet;                                         /* quiet hours (D25) */
     uint16_t quiet_from, quiet_to;                      /* minutes after midnight */
     char ntp[SETTINGS_NTP_MAX][SETTINGS_HOST_LEN];      /* time.ntp; "" for an unused entry */
+    bool wx_centre_set;           /* radar.weather.lat and .lon are given; else they follow the location */
+    int32_t wx_lat_e4, wx_lon_e4; /* the weather radar's centre */
+    uint8_t wx_zoom_q;            /* radar.weather.zoom in quarters: 16..36 */
+    bool fl_centre_set;           /* the same for radar.flights */
+    int32_t fl_lat_e4, fl_lon_e4;
+    uint8_t fl_range_km;    /* 10..100: from the centre to the map's top edge */
+    uint16_t fl_min_alt_ft; /* 0..60000 */
+    bool fl_ground;         /* aircraft on the ground too */
+    uint8_t fl_max;         /* aircraft shown at most, 1..100 */
 } settings_t;
 
 /* The sync's and the NTP servers' defaults (spec §14.3): times mode at 05:30, a 60 min interval,
  * quiet hours 23:00-06:00 but off, cz.pool.ntp.org and pool.ntp.org. The app's defaults include
  * them, so a settings.json from before M5 syncs. */
 void settings_sync_defaults(settings_t *out);
+
+/* The radars' defaults (spec §14.3): zoom 6.5; a range of 50 km, every altitude, none on the ground,
+ * 100 aircraft; both centres on out->lat_e4 and lon_e4, so set the location first. */
+void settings_radar_defaults(settings_t *out);
 
 /* Fails only if the text is not a JSON object with "schema": 1. */
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size);

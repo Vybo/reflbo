@@ -25,7 +25,9 @@
 
 **Tech stack:** ESP-IDF v5.5.5 with `esp_http_client` and mbedTLS's certificate bundle (now allocating in PSRAM), the ROM's `tinfl`, the bundled cJSON (allocating in PSRAM since M5), LittleFS; Unity on the host with the system zlib; Node's test runner for the page; plain Python 3 for `tools/gen_map.py`. New data, all public domain: Natural Earth 5.1.2 (borders at 1:10 m, coasts at 1:50 m, populated places) and OurAirports. New services: ČHMÚ open data (CC BY 4.0), RainViewer (free for personal use, with a link), adsb.fi (non-commercial, credited with a link), adsb.lol.
 
-**Spec:** `docs/specs/2026-09-25-firmware-design.md` r28. Task 15 brings it to r29, as built.
+**Spec:** `docs/specs/2026-09-25-firmware-design.md` r29 (r28 with D29, the owner's answers to this plan). Task 15 brings it to r30, as built.
+
+**Amendment (owner, 2026-10-02, D29):** GeoNames' places of 1000 inhabitants or more join the map's towns inside ČHMÚ's radar area, credited as CC BY 4.0. Task 3's generator gains them, so `map.bin` is generated there rather than copied from `plan/m6` (from the cached sources of 2026-10-01 and GeoNames' `cities1000.zip` of 2026-10-02), and the tests and goldens that count or draw towns (Tasks 3, 4, 9, 10) are checked against the new map rather than the branch's files. The Radar page's credits (Task 14) and the README (Task 15) name GeoNames. The rest of D29 changes nothing here: the RTC trim keeps its 20 h, and aircraft altitudes stay as Task 10 draws them.
 - Relevant: §5.1, §5.2, §5.4, §5.6, §6, §9.3, §9.4, §10.3, §11.1–§11.4, §14.3, §15, §17, §18 (M6), §19.1, §19.2, §20; D11, D22–D24, D27, D28.
 - Also `AGENTS.md` §3.4 (gotchas 11, 18, 22, 25, 28, 29, 30), §5.3, §6–§8.
 
@@ -11189,7 +11191,7 @@ git commit -m "feat(web): the Radar page"
 
 **Files:**
 - Modify (only if the checks find something): whatever they point at, each fix with its own test where one can fail first.
-- Modify: `docs/specs/2026-09-25-firmware-design.md` (r29, as built), `AGENTS.md`, `docs/power.md`, `README.md` (the data sources' credits)
+- Modify: `docs/specs/2026-09-25-firmware-design.md` (r30, as built), `AGENTS.md`, `docs/power.md`, `README.md` (the data sources' credits)
 
 **Needs the owner first:** the board plugged into this Mac. It has the home network saved (M5's checks) and no web password (reset at their end, with the owner's agreement). The API checks need a session: this task sets a temporary password over the device's own network and clears it again in Step 10, so the owner's first visit still chooses theirs. Ask, and wait.
 
@@ -11272,7 +11274,7 @@ A centre with no aircraft: `PATCH {"radar":{"flights":{"lat":0,"lon":-140}}}`, `
 - [ ] **Step 10: Back to the start.** Sync mode, quiet hours and the radars' settings as `captures/m6-before.log` had them (the offered presets stay: they are the owner's now); then clear the temporary web password: Menu ▸ Wi-Fi ▸ Reset web password. `btn key long` opens the menu; `btn key short` steps to the next item and `btn key long` enters it; the confirmation asks for KEY held. A screenshot after each press shows where the menu is. Last, `networksetup -removepreferredwirelessnetwork en0 reflbo-bb94` and `rm jar`.
 
 - [ ] **Step 11: Write down what was built.**
-  - Spec r29: §3.1 (`png`, `map`, `radar`, `adsb`, `fetch` and their host parts), §5.1 and §5.2 as built (the strip's three heights, the Flights panel's words), §5.4 (the "offered" marker), §6 (the snapshot's size with the rain), §9.3 (the refresh as built, a minute after each step), §11.1–§11.4 as built with the plan's rulings (zlib on the host, the 1:50 m coasts, the data area only, labels on boxes, `2/0_0.png`, `/fs/state/radar.bin` and its 30 minutes in `always`, frames kept while they cover the view, ČHMÚ's names from the sync's NTP time, a sync on demand after a refresh, the map's CRC on the host only), §14.3 (`radar.bin`), §15 (`radar status|loop`), §17 (the new tests), §20 (anything Steps 1–9 found), §21.
+  - Spec r30: §3.1 (`png`, `map`, `radar`, `adsb`, `fetch` and their host parts), §5.1 and §5.2 as built (the strip's three heights, the Flights panel's words), §5.4 (the "offered" marker), §6 (the snapshot's size with the rain), §9.3 (the refresh as built, a minute after each step), §11.1–§11.4 as built with the plan's rulings (zlib on the host, the 1:50 m coasts, the data area only, labels on boxes, `2/0_0.png`, `/fs/state/radar.bin` and its 30 minutes in `always`, frames kept while they cover the view, ČHMÚ's names from the sync's NTP time, a sync on demand after a refresh, the map's CRC on the host only), §14.3 (`radar.bin`), §15 (`radar status|loop`), §17 (the new tests), §20 (anything Steps 1–9 found), §21.
   - `AGENTS.md`: the status (M6 built), §5.2's components (`png`, `map`, `radar`, `adsb`, `fetch`), the console list (`radar status|loop`), §6's commands (`tools/gen_map.sh`, `radar status`), new gotchas from the work (at least: the linker leaves an embedded blob out until code reads it, so the image grows only then; `util_snapshot` blocks are at most 64 KB; `cJSON_ArrayForEach` takes a plain pointer, not an expression; TLS allocates in PSRAM; ČHMÚ closes every connection, and a GET on a socket the server closed fails in `esp_http_client_fetch_headers()` with the status at -1; each Open-Meteo `minutely_15` amount is the 15 minutes before its time), D27 and D28 already there.
   - `README.md`: the data sources and their credits (ČHMÚ, RainViewer, adsb.fi, adsb.lol, Natural Earth, OurAirports).
   - `docs/power.md`: an M6 section with the radar step's time from Step 2's log, and the rows the owner's measurements (below) fill in.
@@ -11281,7 +11283,7 @@ A centre with no aircraft: `PATCH {"radar":{"flights":{"lat":0,"lon":-140}}}`, `
 
 ```bash
 git add docs AGENTS.md README.md
-git commit -m "docs: record M6 as built (spec r29)"
+git commit -m "docs: record M6 as built (spec r30)"
 git push origin main
 ```
 

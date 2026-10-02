@@ -79,6 +79,12 @@ target_include_directories(radar_logic PUBLIC ${REPO_ROOT}/components/radar/incl
 target_compile_options(radar_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(radar_logic PUBLIC png map gfx PRIVATE cjson util m)
 
+# adsb: the flight radar's parser, filters and route cache build on the host; the polling does not.
+add_library(adsb_logic STATIC ${REPO_ROOT}/components/adsb/adsb_parse.c ${REPO_ROOT}/components/adsb/adsb_route.c)
+target_include_directories(adsb_logic PUBLIC ${REPO_ROOT}/components/adsb/include)
+target_compile_options(adsb_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(adsb_logic PUBLIC map PRIVATE cjson util m)
+
 # sync: the planner (modes, quiet hours, retries) and the SNTP packets build on the host; the task does not.
 add_library(sync_logic STATIC ${REPO_ROOT}/components/sync/sync_plan.c ${REPO_ROOT}/components/sync/sync_ntp.c)
 target_include_directories(sync_logic PUBLIC ${REPO_ROOT}/components/sync/include)
@@ -211,6 +217,8 @@ reflbo_host_test(test_map_draw map)
 target_compile_definitions(test_map_draw PRIVATE MAP_BIN="${REPO_ROOT}/assets/map/map.bin")
 reflbo_host_test(test_radar radar_logic)
 target_compile_definitions(test_radar PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+reflbo_host_test(test_adsb adsb_logic)
+target_compile_definitions(test_adsb PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/adsb")
 reflbo_host_test(test_gesture board_logic)
 reflbo_host_test(test_shtc3_codec sensors_logic)
 reflbo_host_test(test_battery_model sensors_logic)

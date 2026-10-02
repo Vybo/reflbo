@@ -1,0 +1,32 @@
+{
+  "_airport_codes_iata": "BRQ-AYT",
+  "_airports": [
+    {
+      "alt_feet": 778.0,
+      "alt_meters": 237.13,
+      "countryiso2": "CZ",
+      "iata": "BRQ",
+      "icao": "LKTB",
+      "lat": 49.151299,
+      "location": "Brno",
+      "lon": 16.694401,
+      "name": "Brno-Tuřany Airport"
+    },
+    {
+      "alt_feet": 177.0,
+      "alt_meters": 53.95,
+      "countryiso2": "TR",
+      "iata": "AYT",
+      "icao": "LTAI",
+      "lat": 36.898701,
+      "location": "Antalya",
+      "lon": 30.800501,
+      "name": "Antalya International Airport"
+    }
+  ],
+  "airline_code": "TVS",
+  "airport_codes": "LKTB-LTAI",
+  "callsign": "TVS7UZ",
+  "number": "7UZ",
+  "plausible": true
+}

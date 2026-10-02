@@ -842,7 +842,7 @@ async function devicePage() {
 /* ---- Presets (spec §5.4) ---- */
 
 const LAYOUT_NAMES = { classic: 'Classic', weather: 'Weather', grid: 'Grid', focus: 'Focus', radar: 'Radar',
-                       flights: 'Flights' };
+                       flights: 'Flights', split: 'Split' };
 const NO_SLOTS = { radar: 'This layout draws the weather radar: its centre and zoom are on the Radar page.',
                    flights: 'This layout draws the flight radar: its centre, range and filters are on the Radar page.' };
 const CYCLE_S = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
@@ -873,10 +873,10 @@ async function presetsPage() {
 }
 
 /* The preview, with each slot's name at its top right corner, as the slot fields below call them
- * (the renderer puts captions top left). */
-function previewBox(ed, layout) {
+ * (the renderer puts captions top left); a split preset's cells by their numbers. */
+function previewBox(ed, slots) {
   const pct = (v, of) => `${+(100 * v / of).toFixed(3)}%`;
-  return h('div', { class: 'preview' }, ed.img, layout.slots.map((slot) => {
+  return h('div', { class: 'preview' }, ed.img, slots.map((slot) => {
     const tag = h('span', { class: 'slot-tag', text: slot.id });
     tag.style.left = pct(slot.x + slot.w, catalogue.width);
     tag.style.top = pct(slot.y, catalogue.height);
@@ -886,6 +886,118 @@ function previewBox(ed, layout) {
 
 function layoutOf(id) {
   return catalogue.layouts.find((l) => l.id === id) || catalogue.layouts[0];
+}
+
+/* ---- the split layout (spec §5.2, D31): its tree, by the rules GET /api/layouts publishes ---- */
+
+const splitArea = () => ({ x: catalogue.split.x, y: catalogue.split.y, w: catalogue.split.w, h: catalogue.split.h });
+
+/* A split's two parts of r: the first gets its ratio, rounded down, then a 1 px gap. */
+function splitParts(node, r) {
+  const [num, den] = node.ratio.split('/').map(Number);
+  if (node.split === 'columns') {
+    const first = Math.floor(r.w * num / den);
+    return [{ x: r.x, y: r.y, w: first, h: r.h }, { x: r.x + first + 1, y: r.y, w: r.w - first - 1, h: r.h }];
+  }
+  const first = Math.floor(r.h * num / den);
+  return [{ x: r.x, y: r.y, w: r.w, h: first }, { x: r.x, y: r.y + first + 1, w: r.w, h: r.h - first - 1 }];
+}
+
+/* The cells under `node` with their rectangles, in the device's order: its error messages count them so. */
+function splitCells(node, r, out = []) {
+  if (!node.split) out.push({ node, r });
+  else splitParts(node, r).forEach((part, i) => splitCells(i ? node.b : node.a, part, out));
+  return out;
+}
+
+/* Every part of the tree is at least min_w × min_h. */
+function splitFits(node, r) {
+  if (r.w < catalogue.split.min_w || r.h < catalogue.split.min_h) return false;
+  if (!node.split) return true;
+  const [a, b] = splitParts(node, r);
+  return splitFits(node.a, a) && splitFits(node.b, b);
+}
+
+/* A cell's size class, or the size a field of `kind` draws at in it: the first size, largest first, whose
+ * least width and height it has; null if none. */
+function splitSize(w, h, kind) {
+  const wide = w >= catalogue.split.narrow_w ? 1 : 0;
+  const size = catalogue.split.sizes.find((s) => {
+    const need = kind ? s.kinds[kind] : s.min_h;
+    return w >= s.min_w && need && h >= need[wide];
+  });
+  return size ? size.size : null;
+}
+
+const cellCount = (node) => (node.split ? cellCount(node.a) + cellCount(node.b) : 1);
+const firstField = (node) => (node.split ? firstField(node.a) || firstField(node.b) : node.field);
+
+/* The preview's tags: each cell's number where a slot's name goes. */
+function slotsOf(p) {
+  if (p.layout !== 'split') return layoutOf(p.layout).slots;
+  return splitCells(p.split, splitArea()).map(({ r }, i) => ({ id: String(i + 1), ...r }));
+}
+
+/* The tree as nested boxes (spec §10.3): a cell's size, class (and its field's, when smaller) and the
+ * fields that fit it, Split into rows or columns; a split's ratio, Separator and Join. */
+function splitEditor(ed, p) {
+  const fieldOf = (id) => ed.fields.find((f) => f.id === id);
+  let number = 0;
+  const box = (node, r, set) => {
+    if (!node.split) {
+      number++;
+      const fits = ed.fields.filter((f) => splitSize(r.w, r.h, f.kind));
+      const select = h('select', { onchange: (ev) => {
+        if (ev.target.value) node.field = ev.target.value;
+        else delete node.field;
+        changed(ed, false);
+      } }, h('option', { value: '' }, '(empty)'), fits.map((f) => h('option',
+        { value: f.id, selected: node.field === f.id }, `${f.label} — ${f.value || 'no data yet'}`)));
+      const splitButton = (dir, text) => {
+        const half = { split: dir, ratio: '1/2', line: true, a: {}, b: {} }; /* the field goes to the first part */
+        const b = button(text, () => {
+          const f = fieldOf(node.field), [a] = splitParts(half, r);
+          if (f && splitSize(a.w, a.h, f.kind)) half.a.field = f.id;
+          else if (f) toast(`No room for ${f.label}`);
+          set(half);
+          changed(ed, true);
+        });
+        b.disabled = cellCount(p.split) >= catalogue.split.cells || !splitFits(half, r);
+        return b;
+      };
+      const size = splitSize(r.w, r.h), f = fieldOf(node.field), at = f && splitSize(r.w, r.h, f.kind);
+      const smaller = at && at !== size ? ` (${f.label} at ${at})` : '';
+      const name = `${number} · ${r.w}×${r.h} · ${size || 'too small'}${smaller}`;
+      return h('div', { class: 'cell' }, h('label', { class: 'cell-name', text: name }),
+        select, actions(splitButton('rows', 'Split into rows'), splitButton('columns', 'Split into columns')));
+    }
+    const [ra, rb] = splitParts(node, r);
+    const ratio = h('select', { onchange: (ev) => {
+      node.ratio = ev.target.value;
+      const dropped = []; /* a smaller cell may lose its field */
+      for (const { node: cell, r: cr } of splitCells(p.split, splitArea())) {
+        const f = fieldOf(cell.field);
+        if (f && !splitSize(cr.w, cr.h, f.kind)) {
+          delete cell.field;
+          dropped.push(f.label);
+        }
+      }
+      if (dropped.length) toast(`No room for ${dropped.join(', ')}`);
+      changed(ed, true);
+    } }, catalogue.split.ratios.map((q) => h('option', { value: q, selected: node.ratio === q,
+                                                         disabled: !splitFits({ ...node, ratio: q }, r) }, q)));
+    return h('div', { class: 'split' }, h('div', { class: 'row' },
+      h('span', { class: 'muted', text: node.split === 'columns' ? 'Columns' : 'Rows' }), ratio,
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: node.line !== false,
+        onchange: (ev) => { node.line = ev.target.checked; changed(ed, false); } }), 'Separator'),
+      button('Join', () => {
+        const f = firstField(node); /* it had room in a part, so it has room in the whole */
+        set(f ? { field: f } : {});
+        changed(ed, true);
+      })),
+    box(node.a, ra, (x) => { node.a = x; }), box(node.b, rb, (x) => { node.b = x; }));
+  };
+  return h('div', { class: 'tree' }, box(p.split, splitArea(), (x) => { p.split = x; }));
 }
 
 /* The device renders the preset as it stands in the editor (POST /api/preview.bmp). */
@@ -939,8 +1051,17 @@ function renderPresets(ed) {
   const name = h('input', { type: 'text', maxlength: 23, value: p.name,
                             onchange: (ev) => { p.name = ev.target.value.trim() || p.id; changed(ed, true); } });
   const layout = h('select', { onchange: (ev) => {
-    const old = p.slots;
+    const old = p.slots || {};
+    const first = p.layout === 'split' ? firstField(p.split)
+                                       : layoutOf(p.layout).slots.map((s) => old[s.id]).find(Boolean);
     p.layout = ev.target.value;
+    if (p.layout === 'split') { /* spec §10.3: one cell, holding the first field */
+      const f = ed.fields.find((x) => x.id === first), all = splitArea();
+      delete p.slots;
+      p.split = f && splitSize(all.w, all.h, f.kind) ? { field: f.id } : {};
+      return changed(ed, true);
+    }
+    delete p.split;
     p.slots = {};
     for (const slot of layoutOf(p.layout).slots) { /* keep what still fits */
       const f = old[slot.id] && ed.fields.find((x) => x.id === old[slot.id]);
@@ -948,7 +1069,8 @@ function renderPresets(ed) {
     }
     changed(ed, true);
   } }, catalogue.layouts.map((l) => h('option', { value: l.id, selected: l.id === p.layout }, LAYOUT_NAMES[l.id] || l.id)));
-  const slots = h('div', { class: 'slots' }, layoutOf(p.layout).slots.map((slot) => h('div', { class: 'slot' },
+  const slots = p.layout === 'split' ? splitEditor(ed, p)
+    : h('div', { class: 'slots' }, layoutOf(p.layout).slots.map((slot) => h('div', { class: 'slot' },
     h('label', { text: `${slot.id} · ${slot.size}` }),
     h('select', { onchange: (ev) => {
       if (ev.target.value) p.slots[slot.id] = ev.target.value;
@@ -978,7 +1100,7 @@ function renderPresets(ed) {
       o.status_battery = ['percent', 'voltage', 'days'].filter((k) => battery.has(k));
       changed(ed, false);
     } }), text);
-  const editCard = card(`Edit ${p.name}`, previewBox(ed, layoutOf(p.layout)), ed.previewNote,
+  const editCard = card(`Edit ${p.name}`, previewBox(ed, slotsOf(p)), ed.previewNote,
     field('Name', name), field('Layout', layout), slots,
     NO_SLOTS[p.layout] ? h('p', { class: 'muted small', text: NO_SLOTS[p.layout] }) : null,
     field('Time format', clock), check('seconds', 'Show seconds'),

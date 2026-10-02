@@ -502,3 +502,145 @@ test('a preset on a radar layout has no slots to fill', async () => {
   assert.match(text(main), /Rain radar Radar/); /* the list names its layout */
   assert.match(text(main), /This layout draws the weather radar/);
 });
+
+/* ---- the split layout's editor (M6b, spec §5.2, §10.3, D31) ---- */
+
+/* The device's rules (GET /api/layouts, ui_catalog.c) for the kinds these tests use. */
+const SPLIT = {
+  x: 0, y: 21, w: 400, h: 279, cells: 8, min_w: 90, min_h: 40, narrow_w: 150, inset: 8,
+  ratios: ['1/4', '1/3', '1/2', '2/3', '3/4'],
+  sizes: [
+    { size: 'XL', min_w: 400, min_h: [120, 120], kinds: { time: [120, 120], number: [120, 120] } },
+    { size: 'L', min_w: 200, min_h: [150, 150], kinds: { time: [150, 150], number: [150, 150] } },
+    { size: 'M', min_w: 130, min_h: [80, 80], kinds: { time: [80, 80], number: [80, 80], series: [80, 80] } },
+    { size: 'S', min_w: 90, min_h: [80, 40], kinds: { time: [80, 40], number: [80, 40] } },
+  ],
+};
+const SPLIT_CATALOGUE = { ...CATALOGUE, layouts: [...CATALOGUE.layouts, { id: 'split', slots: [] }], split: SPLIT };
+const SPLIT_FIELDS = { fields: [...FIELDS.fields, { id: 'wx.hourly', kind: 'series', label: 'Next hours', value: '' }] };
+
+/* A device with one preset, Home: Classic, or on the split layout with `tree`. */
+function splitDevice(saved, tree) {
+  const home = tree ? { id: 'home', name: 'Home', layout: 'split', in_cycle: true, split: tree, options: {} }
+                    : preset('home', 'Home', true);
+  const doc = { schema: 1, active: 'home', presets: [home], cycle: { enabled: false, interval_s: 60 },
+                schedule: { enabled: false, entries: [] } };
+  return {
+    'GET /api/layouts': () => reply(200, SPLIT_CATALOGUE),
+    'GET /api/presets': () => reply(200, JSON.parse(JSON.stringify(doc))),
+    'GET /api/fields': () => reply(200, SPLIT_FIELDS),
+    'POST /api/preview.bmp': () => reply(200, 'BM', 'image/bmp'),
+    'PUT /api/presets': (init) => { saved.push(JSON.parse(init.body)); return reply(200, JSON.parse(init.body)); },
+  };
+}
+
+async function change(el, value) {
+  if (el.attrs.type === 'checkbox') el.checked = value;
+  else el.value = value;
+  await Promise.all((el.listeners.change || []).map((fn) => fn({ target: el })));
+}
+
+const ratioSelects = (root) => below(root).filter((e) => e.tag === 'select' && options(e).includes('1/4'));
+const cellLabels = (root) => below(root).filter((e) => e.className === 'cell-name').map(text);
+
+async function savedTree(main, saved) {
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  return saved.at(-1).presets[0];
+}
+
+test('switching a preset to Split starts from one cell holding its first field', async () => {
+  const saved = [];
+  const { ctx, main } = await load(splitDevice(saved));
+  await ctx.presetsPage();
+  await change(control(main, 'Layout'), 'split');
+  assert.deepEqual(cellLabels(main), ['1 · 400×279 · XL']);
+  const p = await savedTree(main, saved);
+  assert.deepEqual(p.split, { field: 'time.clock' });
+  assert.equal(p.slots, undefined, 'a split preset has its tree instead of slots');
+});
+
+test('Split into rows halves a cell, its field going to the first part', async () => {
+  const saved = [];
+  const { ctx, main } = await load(splitDevice(saved, { field: 'time.clock' }));
+  await ctx.presetsPage();
+  await buttonNamed(main, 'Split into rows').click();
+  assert.deepEqual(cellLabels(main), ['1 · 400×139 · XL', '2 · 400×139 · XL']); /* XL from 120 px */
+  const tags = below(main).filter((e) => e.className.split(' ').includes('slot-tag'));
+  assert.deepEqual(tags.map((e) => [text(e), e.style.left, e.style.top]),
+                   [['1', '100%', '7%'], ['2', '100%', '53.667%']]); /* each cell's number at its top right */
+  const p = await savedTree(main, saved);
+  assert.deepEqual(p.split, { split: 'rows', ratio: '1/2', line: true, a: { field: 'time.clock' }, b: {} });
+});
+
+test('a split offers only the ratios that leave every part 90×40', async () => {
+  const { ctx, main } = await load(splitDevice([], { split: 'rows', ratio: '1/2', line: true, a: {},
+                                                     b: { split: 'rows', ratio: '1/2', line: true, a: {}, b: {} } }));
+  await ctx.presetsPage();
+  const [outer, inner] = ratioSelects(main);
+  const disabled = (sel) => sel.children.filter((o) => o.disabled).map((o) => o.value);
+  assert.deepEqual(disabled(outer), ['3/4']);        /* 69 px below, split in two: 34 */
+  assert.deepEqual(disabled(inner), ['1/4', '3/4']); /* 139 px: 34 at a quarter */
+  const splitButtons = below(main).filter((e) => e.tag === 'button' && /^Split into/.test(text(e)));
+  assert.deepEqual(splitButtons.map((b) => b.disabled), [false, false, true, false, true, false]); /* 400×69 */
+});
+
+test('a cell offers only the fields that fit it', async () => {
+  const { ctx, main } = await load(splitDevice([], { split: 'rows', ratio: '3/4', line: true, a: {}, b: {} }));
+  await ctx.presetsPage();
+  const fieldSelects = below(main).filter((e) => e.tag === 'select' && options(e).includes(''));
+  assert.deepEqual(options(fieldSelects[0]), ['', 'time.clock', 'env.temp', 'wx.hourly']); /* 400×209 */
+  assert.deepEqual(options(fieldSelects[1]), ['', 'time.clock', 'env.temp']); /* 400×69: no series */
+});
+
+test('Join keeps the first field found inside the split', async () => {
+  const saved = [];
+  const { ctx, main } = await load(splitDevice(saved, { split: 'columns', ratio: '1/2', line: true, a: {},
+    b: { split: 'rows', ratio: '1/2', line: true, a: { field: 'env.temp' }, b: { field: 'time.clock' } } }));
+  await ctx.presetsPage();
+  await buttonNamed(main, 'Join').click(); /* the outer split's, the first */
+  const p = await savedTree(main, saved);
+  assert.deepEqual(p.split, { field: 'env.temp' });
+});
+
+test('each split keeps its own separator', async () => {
+  const saved = [];
+  const { ctx, main } = await load(splitDevice(saved, { split: 'rows', ratio: '1/2', line: true, a: {},
+                                                        b: { split: 'columns', ratio: '1/2', line: true, a: {}, b: {} } }));
+  await ctx.presetsPage();
+  const boxes = below(main).filter((e) => e.tag === 'label' && text(e) === 'Separator').map((l) => l.children[0]);
+  assert.equal(boxes.length, 2);
+  await change(boxes[1], false);
+  const p = await savedTree(main, saved);
+  assert.equal(p.split.line, true);
+  assert.equal(p.split.b.line, false);
+});
+
+test('a ratio that leaves a field without room empties its cell, and says so', async () => {
+  const saved = [];
+  const { ctx, main, byId } = await load(splitDevice(saved, { split: 'rows', ratio: '1/2', line: true, a: {},
+                                                              b: { field: 'wx.hourly' } }));
+  await ctx.presetsPage();
+  await change(ratioSelects(main)[0], '3/4'); /* the bottom cell: 400×69, too low for a series */
+  assert.equal(text(byId.toast), 'No room for Next hours');
+  const p = await savedTree(main, saved);
+  assert.deepEqual(p.split.b, {});
+});
+
+test('a split that leaves no room for the cell\'s field says so', async () => {
+  const saved = [];
+  const { ctx, main, byId } = await load(splitDevice(saved, { split: 'rows', ratio: '1/2', line: true,
+                                                              a: { field: 'wx.hourly' }, b: {} }));
+  await ctx.presetsPage();
+  await buttonNamed(main, 'Split into rows').click(); /* the first cell's: 400×69 halves, too low for a series */
+  assert.equal(text(byId.toast), 'No room for Next hours');
+  const p = await savedTree(main, saved);
+  assert.deepEqual(p.split.a, { split: 'rows', ratio: '1/2', line: true, a: {}, b: {} });
+});
+
+test('a cell says when its field draws at a smaller size than the cell\'s', async () => {
+  const { ctx, main } = await load(splitDevice([], { split: 'rows', ratio: '3/4', line: true,
+                                                     a: { field: 'wx.hourly' }, b: { field: 'env.temp' } }));
+  await ctx.presetsPage();
+  assert.deepEqual(cellLabels(main), ['1 · 400×209 · XL (Next hours at M)', '2 · 400×69 · S']);
+});

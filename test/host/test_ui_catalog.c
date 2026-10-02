@@ -5,9 +5,10 @@
 #include "cJSON.h"
 #include "context_fixtures.h"
 #include "ui_catalog.h"
+#include "ui_split.h"
 #include "unity.h"
 
-static char s_out[8192];
+static char s_out[8192]; /* the layouts take 4 473 bytes with the split rules */
 static cJSON *s_root;
 
 void setUp(void)
@@ -83,6 +84,72 @@ static void test_layouts_list_their_slots_with_rectangles_sizes_and_kinds(void)
     TEST_ASSERT_EQUAL_STRING("rain_map", last->valuestring); /* a medium slot takes the rain map */
 }
 
+/* The size a field draws at by the published rules, as the editor reads them (web/app.js). */
+static const char *rule_size(const cJSON *split, const char *kind, int w, int h)
+{
+    int wide = w >= num(split, "narrow_w");
+    const cJSON *size;
+    cJSON_ArrayForEach(size, cJSON_GetObjectItemCaseSensitive(split, "sizes"))
+    {
+        const cJSON *need = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(size, "kinds"), kind);
+        if (w >= num(size, "min_w") && need != NULL && h >= cJSON_GetArrayItem(need, wide)->valueint) {
+            return str(size, "size");
+        }
+    }
+    return NULL;
+}
+
+/* M6b (spec §5.2, D31): the split layout's rules, so the editor offers each cell only the fields
+ * that fit it. */
+static void test_layouts_publish_the_split_rules(void)
+{
+    TEST_ASSERT_TRUE(ui_catalog_layouts_json(s_out, sizeof(s_out)) > 0);
+    s_root = cJSON_Parse(s_out);
+    const cJSON *split = cJSON_GetObjectItemCaseSensitive(s_root, "split");
+    TEST_ASSERT_NOT_NULL(split);
+    TEST_ASSERT_EQUAL_INT(0, num(split, "x"));
+    TEST_ASSERT_EQUAL_INT(21, num(split, "y"));
+    TEST_ASSERT_EQUAL_INT(400, num(split, "w"));
+    TEST_ASSERT_EQUAL_INT(279, num(split, "h"));
+    TEST_ASSERT_EQUAL_INT(8, num(split, "cells"));
+    TEST_ASSERT_EQUAL_INT(90, num(split, "min_w"));
+    TEST_ASSERT_EQUAL_INT(40, num(split, "min_h"));
+    TEST_ASSERT_EQUAL_INT(150, num(split, "narrow_w"));
+    TEST_ASSERT_EQUAL_INT(8, num(split, "inset"));
+    const cJSON *ratios = cJSON_GetObjectItemCaseSensitive(split, "ratios");
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetArraySize(ratios));
+    TEST_ASSERT_EQUAL_STRING("1/4", cJSON_GetArrayItem(ratios, 0)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("3/4", cJSON_GetArrayItem(ratios, 4)->valuestring);
+    const cJSON *sizes = cJSON_GetObjectItemCaseSensitive(split, "sizes");
+    TEST_ASSERT_EQUAL_INT(4, cJSON_GetArraySize(sizes)); /* the largest first, as a cell takes the first that fits */
+    const cJSON *xl = cJSON_GetArrayItem(sizes, 0), *s = cJSON_GetArrayItem(sizes, 3);
+    TEST_ASSERT_EQUAL_STRING("XL", str(xl, "size"));
+    TEST_ASSERT_EQUAL_STRING("S", str(s, "size"));
+    TEST_ASSERT_EQUAL_INT(400, num(xl, "min_w"));
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(xl, "kinds"))); /* time, number */
+    const cJSON *s_min = cJSON_GetObjectItemCaseSensitive(s, "min_h");
+    TEST_ASSERT_EQUAL_INT(80, cJSON_GetArrayItem(s_min, 0)->valueint); /* narrow, then wide */
+    TEST_ASSERT_EQUAL_INT(40, cJSON_GetArrayItem(s_min, 1)->valueint);
+    const cJSON *wx = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(s, "kinds"), "weather_now");
+    TEST_ASSERT_EQUAL_INT(86, cJSON_GetArrayItem(wx, 0)->valueint);
+    TEST_ASSERT_EQUAL_INT(61, cJSON_GetArrayItem(wx, 1)->valueint);
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(s, "kinds"), "series"));
+    /* the rules give what the renderer does, everywhere */
+    static const char *const k_kinds[UI_FK_COUNT] = { "time", "date", "number", "battery", "moon", "text",
+                                                      "weather_now", "weather_day", "series", "sun", "level",
+                                                      "pollen", "rain_map" };
+    static const char *const k_names[] = { "S", "M", "L", "XL" };
+    for (int k = 0; k < UI_FK_COUNT; k++) {
+        for (int w = 90; w <= 400; w += 7) {
+            for (int h = 40; h <= 279; h += 3) {
+                int size = ui_split_field_size((ui_field_kind_t)k, w, h);
+                const char *published = rule_size(split, k_kinds[k], w, h);
+                TEST_ASSERT_EQUAL_STRING(size < 0 ? NULL : k_names[size], published);
+            }
+        }
+    }
+}
+
 /* GET /api/fields: the catalogue with values right now, labels in English (spec §5.8). */
 static void test_fields_carry_their_kind_label_and_current_value(void)
 {
@@ -115,6 +182,7 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_layouts_list_their_slots_with_rectangles_sizes_and_kinds);
+    RUN_TEST(test_layouts_publish_the_split_rules);
     RUN_TEST(test_fields_carry_their_kind_label_and_current_value);
     RUN_TEST(test_a_buffer_too_small_gives_nothing);
     return UNITY_END();

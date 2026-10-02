@@ -333,7 +333,8 @@ static int sync_body(int argc, char **argv)
                s->quiet_to / 60, s->quiet_to % 60, s->quiet ? "on" : "off", (unsigned long)app_sync_expected_s());
         const app_sync_state_t *st = &app_state()->sync;
         if (app_sync_active()) {
-            printf("running: %s\n", sync_running() ? sync_step_name(sync_step()) : "applying its report");
+            printf("running: %s%s\n", app_sync_refreshing() ? "radar refresh, " : "",
+                   sync_running() ? sync_step_name(sync_step()) : "applying its report");
         }
         print_time("last", st->last_at);
         if (st->last_at != 0) {

@@ -40,6 +40,11 @@ void radar_store_put(radar_store_t *s, radar_frame_t *f, int keep)
     s->frames[at] = *f;
     s->count++;
     f->levels = NULL; /* the store owns it now */
+    radar_store_keep(s, keep);
+}
+
+void radar_store_keep(radar_store_t *s, int keep)
+{
     keep = keep < 1 ? 1 : keep > RADAR_LOOP_FRAMES ? RADAR_LOOP_FRAMES : keep;
     while (s->count > keep) {
         drop(s, 0);
@@ -67,6 +72,23 @@ int radar_store_missing(const radar_store_t *s, uint32_t newest, uint32_t step_s
     for (int k = 0; k < RADAR_LOOP_FRAMES && n < max && (uint64_t)k * step_s <= newest; k++) {
         uint32_t t = newest - (uint32_t)k * step_s;
         if (!radar_store_has(s, t)) {
+            out[n++] = t;
+        }
+    }
+    return n;
+}
+
+int radar_wanted(uint32_t newest, uint32_t step_s, int want, const uint32_t *have, int have_count, uint32_t *out)
+{
+    want = want < 1 ? 1 : want > RADAR_LOOP_FRAMES ? RADAR_LOOP_FRAMES : want;
+    int n = 0;
+    for (int k = 0; k < want && (uint64_t)k * step_s <= newest; k++) {
+        uint32_t t = newest - (uint32_t)k * step_s;
+        bool kept = false;
+        for (int i = 0; i < have_count && !kept; i++) {
+            kept = have[i] == t;
+        }
+        if (!kept) {
             out[n++] = t;
         }
     }

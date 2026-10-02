@@ -2,5 +2,5 @@
 # pure C and also build on the host; sync.c is the task.
 idf_component_register(SRCS "sync_plan.c" "sync_ntp.c" "sync.c"
                        INCLUDE_DIRS "include"
-                       REQUIRES scheduler datastore storage esp_common
+                       REQUIRES scheduler datastore storage esp_common radar
                        PRIV_REQUIRES netmgr weather lwip esp_timer)

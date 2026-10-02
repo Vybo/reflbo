@@ -111,6 +111,21 @@ bool radar_rv_frame_alloc(radar_frame_t *f, const radar_rv_tiles_t *t, uint32_t 
     return true;
 }
 
+bool radar_frame_covers(const radar_frame_t *f, const map_view_t *v)
+{
+    if (f->source == RADAR_SOURCE_CHMU) {
+        return true;
+    }
+    radar_rv_tiles_t t;
+    radar_rv_tiles(v, &t);
+    double tiles = pow(2.0, t.z), world = 2 * PI * MAP_EARTH_R;
+    if (fabs(f->scale * MAP_TILE_PX * tiles - world) > 1.0) {
+        return false; /* another zoom's tiles */
+    }
+    int x0 = (int)lround((f->mx0 / world + 0.5) * tiles), y0 = (int)lround((0.5 - f->my0 / world) * tiles);
+    return t.x0 >= x0 && t.y0 >= y0 && t.x0 + t.nx <= x0 + f->w / MAP_TILE_PX && t.y0 + t.ny <= y0 + f->h / MAP_TILE_PX;
+}
+
 typedef struct {
     radar_frame_t *f;
     int ox, oy; /* the tile's top-left in the frame's grid */

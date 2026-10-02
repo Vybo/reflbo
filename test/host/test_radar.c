@@ -217,6 +217,26 @@ static void test_a_rainviewer_tile_decodes_by_its_colour_table(void)
     free(png);
 }
 
+static void test_a_frame_covers_the_views_it_has_the_rain_for(void)
+{
+    map_view_t v, slot, deeper, paris;
+    map_view_init(&v, 525200, 134050, 6.5, RADAR_VIEW_W, RADAR_VIEW_H); /* Berlin: RainViewer */
+    radar_rv_tiles_t t;
+    radar_rv_tiles(&v, &t);
+    radar_frame_t f;
+    TEST_ASSERT_TRUE(radar_rv_frame_alloc(&f, &t, 1790889000, NULL));
+    TEST_ASSERT_TRUE(radar_frame_covers(&f, &v));
+    map_view_init(&slot, 525200, 134050, 6.5, 196, 120); /* a slot's map: some of the same tiles */
+    TEST_ASSERT_TRUE(radar_frame_covers(&f, &slot));
+    map_view_init(&deeper, 525200, 134050, 7.0, RADAR_VIEW_W, RADAR_VIEW_H); /* zoom 7's tiles */
+    TEST_ASSERT_FALSE(radar_frame_covers(&f, &deeper));
+    map_view_init(&paris, 488566, 23522, 6.5, RADAR_VIEW_W, RADAR_VIEW_H);
+    TEST_ASSERT_FALSE(radar_frame_covers(&f, &paris));
+    radar_frame_free(&f, NULL);
+    radar_frame_t chmu = { .source = RADAR_SOURCE_CHMU };
+    TEST_ASSERT_TRUE(radar_frame_covers(&chmu, &deeper)); /* one grid for every view: its edge shows */
+}
+
 static int s_live;
 
 static void *counted_alloc(size_t n)
@@ -259,6 +279,10 @@ static void test_the_store_keeps_frames_in_order_and_frees_the_rest(void)
     TEST_ASSERT_EQUAL_UINT32(t0, missing[0]); /* newest first */
     TEST_ASSERT_EQUAL_UINT32(t0 - 8 * 300, missing[8]);
 
+    radar_store_keep(&s, 2); /* sync mode always ends: the hour goes */
+    TEST_ASSERT_EQUAL_INT(2, s.count);
+    TEST_ASSERT_EQUAL_INT(2, s_live);
+    TEST_ASSERT_EQUAL_UINT32(t0 + 600, s.frames[0].time);
     radar_frame_t f;
     TEST_ASSERT_TRUE(radar_frame_alloc(&f, 8, 8, &mem));
     f.time = t0 + 1200;
@@ -269,6 +293,59 @@ static void test_the_store_keeps_frames_in_order_and_frees_the_rest(void)
     radar_store_clear(&s);
     TEST_ASSERT_EQUAL_INT(0, s_live);
     TEST_ASSERT_NULL(radar_store_newest(&s));
+}
+
+static void test_a_fetch_wants_the_hour_it_lacks(void)
+{
+    const uint32_t t0 = 1790880000;
+    uint32_t out[RADAR_LOOP_FRAMES];
+    TEST_ASSERT_EQUAL_INT(1, radar_wanted(t0, 300, 1, NULL, 0, out)); /* outside sync mode always: the newest */
+    TEST_ASSERT_EQUAL_UINT32(t0, out[0]);
+    const uint32_t have[] = { t0 - 300, t0 - 900, t0 - 6000 }; /* the last one is older than the hour */
+    TEST_ASSERT_EQUAL_INT(10, radar_wanted(t0, 300, RADAR_LOOP_FRAMES, have, 3, out));
+    TEST_ASSERT_EQUAL_UINT32(t0, out[0]); /* newest first */
+    TEST_ASSERT_EQUAL_UINT32(t0 - 600, out[1]);
+    TEST_ASSERT_EQUAL_UINT32(t0 - 3300, out[9]);
+    TEST_ASSERT_EQUAL_INT(0, radar_wanted(t0 - 300, 300, 1, have, 3, out)); /* nothing new */
+    TEST_ASSERT_EQUAL_INT(6, radar_wanted(t0, 600, 6, NULL, 0, out)); /* RainViewer's hour */
+    TEST_ASSERT_EQUAL_UINT32(t0 - 3000, out[5]);
+    TEST_ASSERT_EQUAL_INT(RADAR_LOOP_FRAMES, radar_wanted(t0, 300, 40, NULL, 0, out)); /* never more than kept */
+}
+
+static void test_a_frame_survives_its_file_and_a_damaged_file_is_refused(void)
+{
+    radar_frame_t f, back;
+    TEST_ASSERT_TRUE(radar_frame_alloc(&f, 30, 10, NULL));
+    f.time = 1790880000;
+    f.source = RADAR_SOURCE_RAINVIEWER;
+    f.mx0 = 1254222.15;
+    f.my0 = 6702777.85;
+    f.scale = 1555.7;
+    radar_frame_set(&f, 29, 9, RADAR_HEAVY);
+    radar_frame_set(&f, 3, 4, RADAR_LIGHT);
+    static uint8_t file[512];
+    size_t n = radar_frame_to_file(&f, file, sizeof(file));
+    TEST_ASSERT_EQUAL_size_t(radar_frame_file_size(&f), n);
+    TEST_ASSERT_EQUAL_size_t(RADAR_FILE_HEADER + 75, n); /* 300 pixels at 2 bits */
+    TEST_ASSERT_TRUE(radar_frame_from_file(file, n, NULL, &back));
+    TEST_ASSERT_EQUAL_UINT32(f.time, back.time);
+    TEST_ASSERT_EQUAL_UINT8(RADAR_SOURCE_RAINVIEWER, back.source);
+    TEST_ASSERT_EQUAL_UINT16(30, back.w);
+    TEST_ASSERT_EQUAL_DOUBLE(f.my0, back.my0);
+    TEST_ASSERT_EQUAL_DOUBLE(f.scale, back.scale);
+    TEST_ASSERT_EQUAL_MEMORY(f.levels, back.levels, 75);
+    radar_frame_free(&back, NULL);
+
+    TEST_ASSERT_EQUAL_size_t(0, radar_frame_to_file(&f, file, n - 1)); /* too small: nothing written */
+    n = radar_frame_to_file(&f, file, sizeof(file));
+    TEST_ASSERT_FALSE(radar_frame_from_file(file, n - 1, NULL, &back)); /* cut short */
+    file[RADAR_FILE_HEADER + 10] ^= 0x10;
+    TEST_ASSERT_FALSE(radar_frame_from_file(file, n, NULL, &back)); /* its CRC */
+    file[RADAR_FILE_HEADER + 10] ^= 0x10;
+    file[0] ^= 1;
+    TEST_ASSERT_FALSE(radar_frame_from_file(file, n, NULL, &back)); /* not a frame */
+    TEST_ASSERT_NULL(back.levels);
+    radar_frame_free(&f, NULL);
 }
 
 int main(void)
@@ -282,6 +359,9 @@ int main(void)
     RUN_TEST(test_the_rainviewer_index_names_its_frames);
     RUN_TEST(test_rainviewer_tiles_cover_the_view);
     RUN_TEST(test_a_rainviewer_tile_decodes_by_its_colour_table);
+    RUN_TEST(test_a_frame_covers_the_views_it_has_the_rain_for);
     RUN_TEST(test_the_store_keeps_frames_in_order_and_frees_the_rest);
+    RUN_TEST(test_a_fetch_wants_the_hour_it_lacks);
+    RUN_TEST(test_a_frame_survives_its_file_and_a_damaged_file_is_refused);
     return UNITY_END();
 }

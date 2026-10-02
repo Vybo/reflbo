@@ -5,13 +5,15 @@
 
 #include "datastore.h"
 #include "esp_err.h"
+#include "radar_fetch.h"
 #include "settings.h"
 
 /*
- * The sync (spec §9.3): Wi-Fi, the time, the weather and the air quality, on a task of its own. It
- * only fetches: the app task applies the report, as it owns the clock, the RTC and the datastore
- * (spec §3.2). Wi-Fi stays on afterwards; the app turns it off unless config mode or sync mode
- * `always` keeps it.
+ * The sync (spec §9.3): Wi-Fi, the time, the weather, the air quality and the weather radar, on a
+ * task of its own; in sync mode `always` also a radar-only refresh. It only fetches: the app task
+ * applies the report, as it owns the clock, the RTC, the datastore and the radar's frames (spec
+ * §3.2). Wi-Fi stays on afterwards; the app turns it off unless config mode or sync mode `always`
+ * keeps it.
  */
 
 typedef enum {
@@ -19,6 +21,7 @@ typedef enum {
     SYNC_STEP_TIME,
     SYNC_STEP_WEATHER,
     SYNC_STEP_AIR,
+    SYNC_STEP_RADAR, /* M6 (spec §11.2) */
     SYNC_STEP_COUNT,
 } sync_step_t;
 
@@ -33,6 +36,8 @@ typedef enum {
 typedef struct {
     int32_t lat_e4, lon_e4;
     char ntp[SETTINGS_NTP_MAX][SETTINGS_HOST_LEN];
+    radar_fetch_req_t radar; /* its deadline is the sync's to set */
+    bool radar_only;         /* sync mode `always`'s radar refresh: Wi-Fi up already, the radar alone */
 } sync_request_t;
 
 typedef struct {
@@ -43,12 +48,15 @@ typedef struct {
     int64_t ntp_delay_us;
     ds_weather_t weather; /* SYNC_STEP_WEATHER; `fetched` is the app's to set */
     ds_air_t air;         /* SYNC_STEP_AIR */
+    radar_fetch_result_t radar; /* SYNC_STEP_RADAR: its frames are the app's to take or free */
+    bool radar_only;
 } sync_report_t;
 
 /* Starts a sync; `done` runs on the sync task when it ends, and must hand the report to the app task
- * without blocking (it stays valid until the next sync starts). ESP_ERR_INVALID_STATE while one runs. */
-esp_err_t sync_start(const sync_request_t *req, void (*done)(const sync_report_t *report));
+ * without blocking (it stays valid until the next sync starts, and the app takes its radar frames).
+ * ESP_ERR_INVALID_STATE while one runs. */
+esp_err_t sync_start(const sync_request_t *req, void (*done)(sync_report_t *report));
 bool sync_running(void);
 /* The step running now, for the progress the web UI shows; SYNC_STEP_COUNT when none runs. */
 sync_step_t sync_step(void);
-const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air" */
+const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air", "radar" */

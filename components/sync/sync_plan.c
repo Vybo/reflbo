@@ -204,3 +204,9 @@ int sync_parse_hhmm(const char *text)
     int h = (text[0] - '0') * 10 + (text[1] - '0'), m = (text[3] - '0') * 10 + (text[4] - '0');
     return text[5] == '\0' && h < 24 && m < 60 ? h * 60 + m : -1;
 }
+
+time_t sync_radar_next(time_t after, uint32_t step_s)
+{
+    time_t t = after - SYNC_RADAR_DELAY_S;
+    return t - t % (time_t)step_s + (time_t)step_s + SYNC_RADAR_DELAY_S;
+}

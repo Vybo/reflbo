@@ -531,7 +531,6 @@ static void draw_weather_now(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const u
     }
     const gfx_font_t *label = size == UI_SIZE_M ? &gfx_font_sans_12 : &gfx_font_sans_16;
     int top = r.y + label_line(fb, r, label, v->label);
-    const gfx_font_t *vf = size == UI_SIZE_M ? &gfx_font_num_cb_48 : &gfx_font_num_cb_72;
     const gfx_font_t *uf = size == UI_SIZE_M ? &gfx_font_sans_16 : &gfx_font_sans_bold_20;
     if (size == UI_SIZE_M && r.w < 150) { /* a tall, narrow grid cell: stacked */
         gfx_bitmap(fb, r.x + (r.w - 48) / 2, top, icon, GFX_BLACK);
@@ -543,17 +542,27 @@ static void draw_weather_now(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const u
         }
         return;
     }
+    /* "-13 °C" or "102 °F" beside the sky: smaller digits before they reach the cell's edges */
+    static const gfx_font_t *const k_fit_m[] = { &gfx_font_num_cb_48, &gfx_font_sans_bold_28 };
+    static const gfx_font_t *const k_fit_l[] = { &gfx_font_num_cb_72, &gfx_font_num_cb_48, &gfx_font_sans_bold_28 };
+    const gfx_font_t *const *fonts = size == UI_SIZE_M ? k_fit_m : k_fit_l;
+    int count = size == UI_SIZE_M ? 2 : 3;
+    const gfx_font_t *vf = fonts[0];
+    for (int i = 0; i < count; i++) {
+        vf = fonts[i];
+        if (48 + 10 + value_unit_width(vf, uf, v->text, v->unit) <= r.w - 8) {
+            break;
+        }
+    }
     int ih = ink_height(vf);
     int vw = value_unit_width(vf, uf, v->text, v->unit);
     int group = 48 + 10 + vw;
     int x = r.x + (r.w - group) / 2;
-    int body_h = size == UI_SIZE_M ? (r.y + r.h - top) : ih + 8;
-    int icon_y = top + (body_h - 48) / 2;
-    if (size != UI_SIZE_M) {
-        icon_y = top + (ih - 48) / 2 + 4;
-    }
+    int row_h = ih > 48 ? ih : 48; /* the digits, or the sky's icon when it is taller */
+    int body_h = size == UI_SIZE_M ? (r.y + r.h - top) : row_h + 8;
+    int icon_y = size == UI_SIZE_M ? top + (body_h - 48) / 2 : top + (row_h - 48) / 2 + 4;
     gfx_bitmap(fb, x, icon_y, icon, GFX_BLACK);
-    int base = size == UI_SIZE_M ? top + (body_h + ih) / 2 : top + ih + 4;
+    int base = size == UI_SIZE_M ? top + (body_h + ih) / 2 : top + (row_h + ih) / 2 + 4;
     value_unit(fb, vf, uf, x + 58, base, v->text, v->unit);
     if (size == UI_SIZE_M) {
         return; /* no room for the word below in a short slot */
@@ -633,6 +642,20 @@ static void draw_series(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     }
     bool daily = v->field == UI_FIELD_WX_DAILY;
     int col = r.w / n;
+    /* "-13°" in a frost or "102°" on a hot day is wider than a column: the strip's temperatures go
+     * smaller together, rather than one of them ending in "…" */
+    static const gfx_font_t *const k_temp_fonts[] = { &gfx_font_sans_bold_16, &gfx_font_sans_16, &gfx_font_sans_12 };
+    const gfx_font_t *tf = k_temp_fonts[0];
+    for (int f = 0; f < 3; f++) {
+        tf = k_temp_fonts[f];
+        bool fits = true;
+        for (int i = 0; i < n && fits; i++) {
+            fits = gfx_text_width(tf, v->series[i].temp) <= col - 2;
+        }
+        if (fits) {
+            break;
+        }
+    }
     int block = 13 + 2 + 24 + 2 + 16 + (daily ? 14 : 0);
     int top = v->state == UI_VALUE_STALE ? r.y + 3 : r.y + (r.h - block) / 2; /* the age mark goes below */
     for (int i = 0; i < n; i++) {
@@ -640,7 +663,7 @@ static void draw_series(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         gfx_rect_t c = { (int16_t)(r.x + i * col), r.y, (int16_t)col, r.h };
         centred_in(fb, &gfx_font_sans_12, c, 1, top + gfx_font_sans_12.ascent, p->label);
         gfx_bitmap(fb, c.x + (col - 24) / 2, top + 15, ui_sky_icon(p->sky, p->night, 24), GFX_BLACK);
-        centred_in(fb, &gfx_font_sans_bold_16, c, 1, top + 15 + 24 + 2 + gfx_font_sans_bold_16.ascent, p->temp);
+        centred_in(fb, tf, c, 1, top + 15 + 24 + 2 + tf->ascent, p->temp);
         if (daily) {
             centred_in(fb, &gfx_font_sans_12, c, 1, top + 15 + 24 + 2 + 16 + gfx_font_sans_12.ascent, p->temp2);
         }

@@ -176,8 +176,8 @@ static void test_a_number_keeps_its_size_as_its_digits_change(void)
 
 /* The data a split cell's field is drawn from: 0 fresh in English, 1 fresh in Czech (its decimal
  * comma and longer words), 2 three hours old in Czech with a forecast two days old, 3 nothing yet,
- * 4 a 12-hour clock, 5 a hot day in °F (100.8 °F), 6 frost in Czech (-12,5 °C, a dew point of
- * -18,7 °C), 7 the clock with its seconds. */
+ * 4 a 12-hour clock, 5 a hot day in °F (100.8 °F inside, 102 °F out), 6 frost in Czech (-12,5 °C
+ * inside, -13 °C out, a dew point of -18,7 °C), 7 the clock with its seconds. */
 static ui_context_t split_context(int variant)
 {
     ui_context_t ctx = fixture_context();
@@ -196,6 +196,9 @@ static ui_context_t split_context(int variant)
     } else {
         fixture_forecast(&s_fix_ds, variant == 2 ? FIX_NOW - 50 * 3600 : FIX_NOW - 3600);
         fixture_rain_now(&s_fix_ds);
+    }
+    if (variant == 5 || variant == 6) {
+        fixture_forecast_shift(&s_fix_ds, variant == 5 ? 388 : -125);
     }
     return ctx;
 }

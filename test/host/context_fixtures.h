@@ -97,6 +97,25 @@ static inline void fixture_forecast(ds_t *ds, time_t fetched)
     ds_take_changes(ds);
 }
 
+/* The stored forecast with every temperature in it moved, the current one to `now_c10`: a frosty
+ * morning or a hot day from the same fixture. */
+static inline void fixture_forecast_shift(ds_t *ds, int now_c10)
+{
+    static ds_weather_t w;
+    w = *ds_weather(ds);
+    int shift = now_c10 - w.now_temp_c10;
+    w.now_temp_c10 = (int16_t)now_c10;
+    w.now_feels_c10 = (int16_t)(w.now_feels_c10 + shift);
+    for (int i = 0; i < DS_WX_HOURS; i++) {
+        w.hours[i].temp_c10 = (int16_t)(w.hours[i].temp_c10 + shift);
+    }
+    for (int d = 0; d < DS_WX_DAYS; d++) {
+        w.days[d].min_c10 = (int16_t)(w.days[d].min_c10 + shift);
+        w.days[d].max_c10 = (int16_t)(w.days[d].max_c10 + shift);
+    }
+    ds_set_weather(ds, &w);
+}
+
 /* The stored forecast's rain changed: raining at 20:45 CEST (1.2 mm/h), easing off, one unlikely
  * quarter hour; or dry all day. */
 static inline void fixture_rain_now(ds_t *ds)

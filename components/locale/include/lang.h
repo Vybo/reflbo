@@ -199,6 +199,7 @@ typedef enum {
     LS_DIR_SW,
     LS_DIR_W,
     LS_DIR_NW,
+    LS_MESSAGE, /* ha.message: Home Assistant's message (M7, spec §12.7) */
     LS_COUNT,
 } lang_str_t;
 

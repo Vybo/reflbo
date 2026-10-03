@@ -20,6 +20,23 @@ void ui_draw_toast(gfx_fb_t *fb, const char *text)
     gfx_text_in_rect(fb, f, box, GFX_ALIGN_CENTER, fit, GFX_WHITE);
 }
 
+void ui_draw_message_banner(gfx_fb_t *fb, const ui_context_t *ctx)
+{
+    if (ctx->mqtt == NULL || !ha_store_banner(ctx->mqtt, ctx->now)) {
+        return;
+    }
+    const gfx_font_t *f = &gfx_font_sans_bold_16;
+    char line[HA_MESSAGE_LEN + 4];
+    gfx_text_ellipsize(f, ctx->mqtt->message, fb->width - 24, line, sizeof(line));
+    int h = 10 + f->line_height; /* one line: the slots above stay readable for the hours it may show */
+    gfx_rect_t box = { 0, (int16_t)(fb->height - h), fb->width, (int16_t)h };
+    gfx_reset_clip(fb);
+    /* a white rim keeps it apart from black content, such as an inverted preset */
+    gfx_fill_rect(fb, (gfx_rect_t){ 0, (int16_t)(box.y - 3), fb->width, 3 }, GFX_WHITE);
+    gfx_fill_rect(fb, box, GFX_BLACK);
+    gfx_text_in_rect(fb, f, box, GFX_ALIGN_CENTER, line, GFX_WHITE);
+}
+
 void ui_draw_critical(gfx_fb_t *fb, const ui_context_t *ctx)
 {
     gfx_reset_clip(fb);

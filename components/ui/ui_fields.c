@@ -40,6 +40,7 @@ static const ui_field_info_t k_fields[UI_FIELD_COUNT] = {
     [UI_FIELD_POLLEN_RAGWEED] = { "pollen.ragweed", UI_FK_POLLEN, LS_POLLEN_RAGWEED, -1 },
     [UI_FIELD_WX_RAIN2H] = { "wx.rain2h", UI_FK_SERIES, LS_RAIN_2H, -1 },
     [UI_FIELD_RAIN_MAP] = { "rain.map", UI_FK_RAIN_MAP, LS_RAIN_MAP, -1 },
+    [UI_FIELD_HA_MESSAGE] = { "ha.message", UI_FK_TEXT, LS_MESSAGE, -1 },
 };
 
 const ui_field_info_t *ui_field_info(ui_field_id_t field)
@@ -226,6 +227,18 @@ void ui_mqtt_value(const ui_context_t *ctx, int i, ui_value_t *out)
     snprintf(out->unit, sizeof(out->unit), "%s", e->unit);
 }
 
+/* ha.message (spec §12.7): the latest message until it is replaced or cleared, stale after 24 h. */
+static void resolve_message(const ui_context_t *ctx, ui_value_t *out)
+{
+    ha_freshness_t fresh = ctx->mqtt != NULL ? ha_store_message_freshness(ctx->mqtt, ctx->now) : HA_MISSING;
+    if (fresh == HA_MISSING) {
+        return;
+    }
+    out->state = fresh == HA_STALE ? UI_VALUE_STALE : UI_VALUE_FRESH;
+    out->age_s = (uint32_t)ctx->now > ctx->mqtt->message_at ? (uint32_t)ctx->now - ctx->mqtt->message_at : 0;
+    snprintf(out->text, sizeof(out->text), "%s", ctx->mqtt->message);
+}
+
 /* mqtt.<key> (spec §12.5): the mapping that names the key; a key no mapping names, or no store, is no
  * field at all, so its slot stays empty. */
 static void resolve_mqtt(const ui_context_t *ctx, int k, ui_value_t *out)
@@ -255,6 +268,8 @@ void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out)
     out->label = lang_str(ctx->lang, info->label);
     if (info->ds_field >= 0) {
         resolve_store(ctx, field, out);
+    } else if (field == UI_FIELD_HA_MESSAGE) {
+        resolve_message(ctx, out);
     } else if (!ui_resolve_forecast(ctx, field, out) && !ui_resolve_radar(ctx, field, out)) {
         resolve_clock(ctx, field, out);
     }

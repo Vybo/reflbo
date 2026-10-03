@@ -361,6 +361,27 @@ static void test_unmapped_keys_are_empty_slots(void)
     TEST_ASSERT_EQUAL(UI_FIELD_NONE, resolve(FIX_MQTT(0)).field);
 }
 
+/* ha.message (spec §5.1, §12.7): the latest message, stale after 24 h whatever KEY did, gone once cleared. */
+static void test_the_message_field(void)
+{
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_HA_MESSAGE).state); /* no store */
+    fixture_mqtt(&s_ctx);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_HA_MESSAGE).state); /* no message */
+    ha_store_set_message(&s_fix_mqtt, "Washing machine done", FIX_NOW - 600);
+    ha_store_dismiss(&s_fix_mqtt); /* the banner's; the field still shows it */
+    ui_value_t v = resolve(UI_FIELD_HA_MESSAGE);
+    TEST_ASSERT_EQUAL(UI_FK_TEXT, v.kind);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+    TEST_ASSERT_EQUAL_STRING("Message", v.label);
+    TEST_ASSERT_EQUAL_STRING("Washing machine done", v.text);
+    s_ctx.now = FIX_NOW + 86400;
+    v = resolve(UI_FIELD_HA_MESSAGE);
+    TEST_ASSERT_EQUAL(UI_VALUE_STALE, v.state);
+    TEST_ASSERT_EQUAL_UINT32(86400 + 600, v.age_s);
+    ha_store_set_message(&s_fix_mqtt, "", FIX_NOW);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_HA_MESSAGE).state);
+}
+
 static void test_none_resolves_to_missing(void)
 {
     ui_value_t v = resolve(UI_FIELD_NONE);
@@ -393,5 +414,6 @@ int main(void)
     RUN_TEST(test_mqtt_fields_come_from_the_store);
     RUN_TEST(test_mqtt_values_go_stale_with_their_age);
     RUN_TEST(test_unmapped_keys_are_empty_slots);
+    RUN_TEST(test_the_message_field);
     return UNITY_END();
 }

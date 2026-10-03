@@ -15,10 +15,12 @@ sync           sync                  16
 sync_failed    cloud_off             16
 wifi           wifi                  16
 wifi_off       wifi_off              16
+mqtt_off       link_off              16
 air            air                   24 48
 particles      blur_on               24 48
 uv             light_mode            24 48
 pollen         local_florist         24 48
+message        chat                  24 48
 # Weather codes (spec §11), day and night where they differ, and the sun's times (M5).
 wx_clear_day        wi:day-sunny                24 48
 wx_clear_night      wi:night-clear              24 48

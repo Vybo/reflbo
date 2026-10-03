@@ -247,6 +247,7 @@ const lang_t lang_cs = {
         [LS_DIR_SW] = "JZ",
         [LS_DIR_W] = "Z",
         [LS_DIR_NW] = "SZ",
+        [LS_MESSAGE] = "Zpráva",
     },
     .weekdays = { "Neděle", "Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek", "Sobota" },
     .weekdays_short = { "Ne", "Po", "Út", "St", "Čt", "Pá", "So" },

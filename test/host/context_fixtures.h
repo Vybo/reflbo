@@ -209,3 +209,8 @@ static inline void fixture_mqtt(ui_context_t *ctx)
     ctx->mqtt = &s_fix_mqtt;
     ctx->mqtt_keys = &s_fix_keys;
 }
+
+/* Home Assistant's longest message (spec §12.7): 96 bytes, in the language of the fixture. */
+#define FIX_MESSAGE_EN "Washing machine done. The dryer is free until 21:30, and the laundry room window is still open!!"
+#define FIX_MESSAGE_CS "Pračka dokončila praní. Sušička je volná do 21:30 a okno v prádelně je stále otevřené"
+

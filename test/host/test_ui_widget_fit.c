@@ -200,6 +200,11 @@ static ui_context_t split_context(int variant)
     if (variant == 5 || variant == 6) {
         fixture_forecast_shift(&s_fix_ds, variant == 5 ? 388 : -125);
     }
+    if (variant != 3) { /* the longest message, stale in the stale set */
+        fixture_mqtt(&ctx);
+        ha_store_set_message(&s_fix_mqtt, ctx.lang == lang_get("cs") ? FIX_MESSAGE_CS : FIX_MESSAGE_EN,
+                             variant == 2 ? FIX_NOW - 2 * 86400 : FIX_NOW - 60);
+    }
     return ctx;
 }
 

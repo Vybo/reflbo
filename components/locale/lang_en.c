@@ -207,6 +207,7 @@ const lang_t lang_en = {
         [LS_DIR_SW] = "SW",
         [LS_DIR_W] = "W",
         [LS_DIR_NW] = "NW",
+        [LS_MESSAGE] = "Message",
     },
     .weekdays = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" },
     .weekdays_short = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" },

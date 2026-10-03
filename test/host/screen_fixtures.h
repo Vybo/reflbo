@@ -185,6 +185,18 @@ static inline bool fixture_screen(const char *name, gfx_fb_t *fb)
         snprintf(text, sizeof(text), "%s: %s", lang_str(lang, LS_T_PRESET), "Indoor");
         ui_draw_toast(fb, text);
         return true;
+    } else if (strncmp(name, "message", 7) == 0) { /* M7: Home Assistant's message over the dashboard */
+        ui_context_t ctx;
+        ui_preset_t preset;
+        bool inverted = strstr(name, "inverted") != NULL;
+        fixture_dashboard(inverted ? "home_inverted" : lang == lang_get("cs") ? "home_cs" : "home", &ctx, &preset);
+        fixture_mqtt(&ctx);
+        ctx.lang = lang;
+        ha_store_set_message(&s_fix_mqtt, strstr(name, "short") ? "Door open" :
+                             lang == lang_get("cs") ? FIX_MESSAGE_CS : FIX_MESSAGE_EN, FIX_NOW - 60);
+        ui_draw_dashboard(fb, &ctx, &preset);
+        ui_draw_message_banner(fb, &ctx);
+        return true;
     } else if (strncmp(name, "critical", 8) == 0) {
         ui_context_t ctx = fixture_context();
         ctx.lang = lang;
@@ -204,4 +216,5 @@ static const char *const k_screen_fixtures[] = { "menu_root_en", "menu_root_cs",
                                                  "menu_confirm_password_cs", "config_ap_en", "config_ap_url_cs",
                                                  "config_starting_en", "config_joining_en", "config_station_en",
                                                  "config_station_ap_cs", "config_station_back_en", "config_station_back_cs",
-                                                 "first_run_en", "first_run_invalid_cs" };
+                                                 "first_run_en", "first_run_invalid_cs", "message_short_en",
+                                                 "message_long_en", "message_long_cs", "message_inverted_en" };

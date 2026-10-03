@@ -539,6 +539,101 @@ bool app_mqtt_clear_value(const char *key)
     return ha_store_clear(&s_store, ha_store_find(&s_store, key));
 }
 
+static bool password_set(void)
+{
+    nvs_handle_t nvs;
+    size_t len = 0;
+    bool set = false;
+    if (nvs_open("secrets", NVS_READONLY, &nvs) == ESP_OK) {
+        set = nvs_get_str(nvs, NVS_KEY_PASS, NULL, &len) == ESP_OK && len > 1;
+        nvs_close(nvs);
+    }
+    return set;
+}
+
+/* PATCH /api/settings's mqtt.password (spec §12.1): into NVS `secrets`, never logged; "" forgets it. */
+esp_err_t app_mqtt_set_password(const char *password)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("secrets", NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = password[0] != '\0' ? nvs_set_str(nvs, NVS_KEY_PASS, password) : nvs_erase_key(nvs, NVS_KEY_PASS);
+    err = err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err; /* nothing to forget */
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "MQTT password %s", password[0] != '\0' ? "saved" : "forgotten");
+        app_mqtt_password_changed();
+    }
+    return err;
+}
+
+void app_mqtt_status(app_mqtt_status_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->on = app_mqtt_on();
+    out->keeping = s_keeping;
+    out->password_set = password_set();
+    ha_mqtt_status(&out->client);
+}
+
+size_t app_mqtt_fields_json(char *out, size_t size)
+{
+    load_fields();
+    return ha_fields_to_json(&s_fields, out, size);
+}
+
+/* PUT /api/mqtt_fields, a restore (spec §12.5): saved, then the values, the client and the screen follow. */
+esp_err_t app_mqtt_replace_fields(const ha_fields_t *f)
+{
+    size_t n = ha_fields_to_json(f, s_fields_json, sizeof(s_fields_json));
+    esp_err_t err = n == 0 ? ESP_ERR_INVALID_SIZE : storage_init();
+    if (err == ESP_OK) {
+        err = storage_write_atomic(STORAGE_MQTT_FIELDS_PATH, s_fields_json, n);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "saving the MQTT fields: %s", esp_err_to_name(err));
+        return err;
+    }
+    if (f != &s_fields) {
+        s_fields = *f;
+    }
+    s_fields_loaded = true;
+    ha_store_rebuild(&s_store, &s_fields); /* a key with the same kind keeps its value */
+    s_fields_sent = s_started;
+    if (s_started) {
+        ha_mqtt_set_fields(&s_fields); /* a kept connection subscribes to them at once */
+    }
+    ESP_LOGI(TAG, "%d MQTT fields saved", s_fields.count);
+    app_ui_render();
+    return ESP_OK;
+}
+
+/* POST /api/mqtt/test (spec §10.3): the saved broker, from the owner's network. */
+esp_err_t app_mqtt_test(void)
+{
+    if (app_settings()->mqtt_host[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    netmgr_status_t ns;
+    netmgr_status(&ns);
+    if (ns.state != NETMGR_STATION || ns.ip[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+    start();
+    if (!s_started) {
+        return ESP_FAIL;
+    }
+    ha_conn_t c;
+    make_conn(&c);
+    ha_mqtt_test(&c);
+    return ESP_OK;
+}
+
 bool app_mqtt_failed(void)
 {
     if (!app_mqtt_on()) {
@@ -579,18 +674,6 @@ void app_mqtt_summary(char *out, size_t size)
     const char *suffix;
     lang_format_time(local.tm_hour, local.tm_min, 0, app_settings()->clock_24h, false, when, sizeof(when), &suffix);
     snprintf(out, size, "%s%s%s %s", when, suffix[0] ? " " : "", suffix, r == SYNC_STEP_OK ? "OK" : st->mqtt_detail);
-}
-
-static bool password_set(void)
-{
-    nvs_handle_t nvs;
-    size_t len = 0;
-    bool set = false;
-    if (nvs_open("secrets", NVS_READONLY, &nvs) == ESP_OK) {
-        set = nvs_get_str(nvs, NVS_KEY_PASS, NULL, &len) == ESP_OK && len > 1;
-        nvs_close(nvs);
-    }
-    return set;
 }
 
 /* `mqtt status` (spec §15): the settings, the client, the last session, the mappings and the message. */

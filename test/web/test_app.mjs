@@ -202,6 +202,27 @@ test('Undo changes asks before it drops the edits', async () => {
   assert.match(text(main), /Weather copy/);
 });
 
+/* spec §12.5: a slot keeps an mqtt.<key> no mapping names; the editor shows it rather than an empty slot. */
+test('a slot whose MQTT key has no mapping shows it, and keeps it', async () => {
+  const saved = [];
+  const routes = presetDevice(saved);
+  const doc = JSON.parse(JSON.stringify(await (await routes['GET /api/presets']()).json()));
+  doc.presets[1].slots.s1 = 'mqtt.gone';
+  routes['GET /api/presets'] = () => reply(200, JSON.parse(JSON.stringify(doc)));
+  routes['GET /api/layouts'] = () => reply(200, { ...CATALOGUE, layouts: [{ id: 'classic', slots: [
+    CATALOGUE.layouts[0].slots[0], { ...CATALOGUE.layouts[0].slots[1], kinds: ['number', 'text'] }] }] });
+  const { ctx, main } = await load(routes);
+  await ctx.presetsPage(); /* Weather, the active one */
+  const opts = below(main).filter((e) => e.tag === 'option' && e.value === 'mqtt.gone');
+  assert.equal(opts.length, 1);
+  assert.equal(text(opts[0]), 'mqtt.gone (no mapping)');
+  assert.ok(opts[0].selected);
+  await buttonNamed(main, 'New preset').click();
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.equal(saved.at(-1).presets.find((p) => p.id === 'weather').slots.s1, 'mqtt.gone');
+});
+
 test('the preview names each slot where the layout puts it', async () => {
   const { ctx, main } = await load(presetDevice([]));
   await ctx.presetsPage();
@@ -643,4 +664,171 @@ test('a cell says when its field draws at a smaller size than the cell\'s', asyn
                                                      a: { field: 'wx.hourly' }, b: { field: 'env.temp' } }));
   await ctx.presetsPage();
   assert.deepEqual(cellLabels(main), ['1 · 400×209 · XL (Next hours at M)', '2 · 400×69 · S']);
+});
+
+/* ---- MQTT and Home Assistant (spec §12, D32) ---- */
+
+const MQTT_SETTINGS = { schema: 1, sync: { mode: 'times' },
+                        mqtt: { enabled: true, host: 'ha.local', port: 1883, user: 'reflbo', discovery: true,
+                                discovery_prefix: 'homeassistant' } };
+const OUTSIDE = { key: 'outdoor_temp', label: 'Outside', kind: 'number', unit: '°C', precision: 1,
+                  topic: 'ha/statestream/sensor/outdoor_temperature/state', json_path: null, ttl_s: 0 };
+const mqttStatus = (mqtt) => ({ device: {}, time: { valid: true }, battery: {}, sensors: {}, preset: {},
+                                sync: { mode: 'times', running: false }, wifi: { state: 'station' },
+                                mqtt: { enabled: true, connected: false, keep: false, password_set: true, ...mqtt } });
+
+function mqttDevice({ patches = [], puts = [], tests = [], status = () => mqttStatus({}), fields = [OUTSIDE] } = {}) {
+  return {
+    'GET /api/settings': () => reply(200, MQTT_SETTINGS),
+    'GET /api/status': () => reply(200, status()),
+    'GET /api/mqtt_fields': () => reply(200, { schema: 1, fields: JSON.parse(JSON.stringify(fields)) }),
+    'GET /api/fields': () => reply(200, { fields: [{ id: 'mqtt.outdoor_temp', kind: 'number', label: 'Outside',
+                                                     value: '12.5 °C', state: 'fresh' }] }),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, MQTT_SETTINGS); },
+    'PUT /api/mqtt_fields': (init) => { puts.push(JSON.parse(init.body)); return reply(200, JSON.parse(init.body)); },
+    'POST /api/mqtt/test': () => { tests.push(true); return reply(202, { started: true }); },
+  };
+}
+
+const mappings = (main) => below(main).filter((e) => e.className === 'mapping');
+
+test('the MQTT page keeps the saved password unless one is typed', async () => {
+  const patches = [];
+  const { ctx, main } = await load(mqttDevice({ patches }));
+  await ctx.mqttPage();
+  control(main, 'Host').value = 'mqtt.lan';
+  await buttonNamed(main, 'Save broker').click();
+  assert.deepEqual(patches.at(-1), { mqtt: { enabled: true, host: 'mqtt.lan', port: 1883, user: 'reflbo',
+                                             discovery: true, discovery_prefix: 'homeassistant' } });
+  control(main, 'Password').value = 'n3w-secret';
+  await buttonNamed(main, 'Save broker').click();
+  assert.equal(patches.at(-1).mqtt.password, 'n3w-secret');
+  assert.equal(control(main, 'Password').value, '', 'the field empties once saved');
+});
+
+test('the MQTT page can forget the saved password', async () => {
+  const patches = [];
+  const { ctx, main } = await load(mqttDevice({ patches }));
+  await ctx.mqttPage();
+  below(main).find((e) => e.tag === 'input' && e.attrs.name === 'forget').checked = true;
+  await buttonNamed(main, 'Save broker').click();
+  assert.equal(patches.at(-1).mqtt.password, null);
+});
+
+test('the MQTT page checks the broker before it saves', async () => {
+  const patches = [];
+  const { ctx, main } = await load(mqttDevice({ patches }));
+  await ctx.mqttPage();
+  for (const [label, value, error] of [['Host', '', /needs the broker's host/], ['Host', 'mqtt://ha.local', /Host: /],
+                                       ['Host', 'my_broker', /Host: /], ['Host', '192.168.1.10:1883', /Host: /],
+                                       ['User', 'u'.repeat(64), /User: /], ['User', 'tab\there', /User: /],
+                                       ['Port', '70000', /Port: 1 to 65535/], ['Discovery prefix', 'ha/', /Discovery prefix/]]) {
+    const el = control(main, label), before = el.value;
+    el.value = value;
+    await buttonNamed(main, 'Save broker').click();
+    assert.match(text(main), error);
+    el.value = before;
+  }
+  assert.equal(patches.length, 0);
+});
+
+test('Test connection follows the test to its result', async () => {
+  let polls = 0;
+  const tests = [];
+  const status = () => mqttStatus({ test: ++polls < 3 ? { running: true }
+    : { running: false, ok: false, detail: 'no broker' } });
+  const { ctx, main } = await load(mqttDevice({ tests, status }));
+  ctx.setTimeout = (fn) => { fn(); return 0; }; /* sleep() returns at once */
+  await ctx.mqttPage();
+  await buttonNamed(main, 'Test connection').click();
+  await settle();
+  assert.equal(tests.length, 1);
+  assert.match(text(main), /It couldn't connect: no broker/);
+});
+
+test('Test connection says why the device refused it', async () => {
+  const routes = mqttDevice();
+  routes['POST /api/mqtt/test'] = () => reply(409, { error: 'the device is on its own network only' });
+  const { ctx, main } = await load(routes);
+  await ctx.mqttPage();
+  await buttonNamed(main, 'Test connection').click();
+  await settle();
+  assert.match(text(main), /The device is on its own network only\./);
+});
+
+test('the MQTT page shows each field with its last value, and what publishers must do', async () => {
+  const { ctx, main } = await load(mqttDevice());
+  await ctx.mqttPage();
+  assert.equal(mappings(main).length, 1);
+  assert.match(text(mappings(main)[0]), /12\.5 °C/);
+  assert.match(text(main), /retain/);
+});
+
+test('a new field is saved with the others', async () => {
+  const puts = [];
+  const { ctx, main } = await load(mqttDevice({ puts }));
+  await ctx.mqttPage();
+  await buttonNamed(main, 'Add a field').click();
+  const row = mappings(main)[1];
+  control(row, 'Key').value = 'co2';
+  control(row, 'Label').value = 'CO2';
+  control(row, 'Unit').value = 'ppm';
+  control(row, 'Decimals').value = '0';
+  control(row, 'Topic').value = 'zigbee2mqtt/living_room';
+  control(row, 'JSON path').value = 'co2';
+  await buttonNamed(main, 'Save fields').click();
+  assert.deepEqual(puts.at(-1), { schema: 1, fields: [OUTSIDE, { key: 'co2', label: 'CO2', kind: 'number', unit: 'ppm',
+                                                                precision: 0, topic: 'zigbee2mqtt/living_room',
+                                                                json_path: 'co2', ttl_s: 0 }] });
+});
+
+test('the MQTT page refuses a key that is taken or malformed, and a topic with a wildcard', async () => {
+  const puts = [];
+  const { ctx, main } = await load(mqttDevice({ puts }));
+  await ctx.mqttPage();
+  await buttonNamed(main, 'Add a field').click();
+  const row = mappings(main)[1];
+  control(row, 'Topic').value = 't';
+  for (const [key, error] of [['outdoor_temp', /Two fields have the key outdoor_temp/], ['CO2', /a–z, 0–9 and _/],
+                              ['', /a–z, 0–9 and _/]]) {
+    control(row, 'Key').value = key;
+    await buttonNamed(main, 'Save fields').click();
+    assert.match(text(main), error);
+  }
+  control(row, 'Key').value = 'ok';
+  control(row, 'Topic').value = 'zigbee2mqtt/#';
+  await buttonNamed(main, 'Save fields').click();
+  assert.match(text(main), /without \+ or #/);
+  assert.equal(puts.length, 0);
+});
+
+test('Remove takes a field out of the mappings', async () => {
+  const puts = [];
+  const { ctx, main } = await load(mqttDevice({ puts }));
+  await ctx.mqttPage();
+  await buttonNamed(mappings(main)[0], 'Remove').click();
+  await buttonNamed(main, 'Save fields').click();
+  assert.deepEqual(puts.at(-1), { schema: 1, fields: [] });
+});
+
+test('a time to live the page has no option for is kept', async () => {
+  const puts = [];
+  const { ctx, main } = await load(mqttDevice({ puts, fields: [{ ...OUTSIDE, ttl_s: 5400 }] }));
+  await ctx.mqttPage();
+  assert.ok(options(control(mappings(main)[0], 'Stale after')).includes('5400'));
+  await buttonNamed(main, 'Save fields').click();
+  assert.equal(puts.at(-1).fields[0].ttl_s, 5400);
+});
+
+test('the Sync page shows the MQTT step and why it failed', async () => {
+  const last = { at: 1790880000, steps: { wifi: 'ok', time: 'ok', weather: 'ok', air: 'ok', radar: 'ok', mqtt: 'failed' } };
+  const status = syncStatus({ mode: 'times', running: false, last });
+  status.mqtt = { enabled: true, connected: false, last: { at: 1790880000, result: 'failed', detail: 'no broker' } };
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, SYNC_SETTINGS),
+    'GET /api/status': () => reply(200, status),
+  });
+  await ctx.syncPage();
+  assert.match(text(main), /MQTTfailed: no broker/); /* the steps' list: its name, then its result */
+  assert.match(text(main), /but MQTT failed \(no broker\)/);
 });

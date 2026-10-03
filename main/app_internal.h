@@ -8,6 +8,7 @@
 #include "board_buttons.h"
 #include "datastore.h"
 #include "esp_err.h"
+#include "ha_mqtt.h"
 #include "radar_fetch.h"
 #include "scheduler.h"
 #include "settings.h"
@@ -247,6 +248,20 @@ void app_mqtt_set_message(const char *text);
 bool app_mqtt_set_value(const char *key, const char *text, char *err, size_t size);
 bool app_mqtt_clear_value(const char *key);
 void app_mqtt_print_status(void);
+/* The web UI (spec §10.3). */
+typedef struct {
+    bool on;       /* app_mqtt_on() */
+    bool keeping;  /* sync mode `always` keeps the client */
+    bool password_set;
+    ha_mqtt_status_t client;
+} app_mqtt_status_t;
+void app_mqtt_status(app_mqtt_status_t *out);
+esp_err_t app_mqtt_set_password(const char *password); /* "" forgets it */
+size_t app_mqtt_fields_json(char *out, size_t size);   /* mqtt_fields.json as saved; 0 if it doesn't fit */
+esp_err_t app_mqtt_replace_fields(const ha_fields_t *f);
+/* Starts a test connection with the saved settings: ESP_ERR_INVALID_ARG without a host, ESP_ERR_INVALID_STATE
+ * while the board has only its own network; app_mqtt_status() reports how it went. */
+esp_err_t app_mqtt_test(void);
 
 /* The `field`, `preset` and `night` console commands (main/app_cmds.c); call after diag_start(). */
 void app_register_commands(void);

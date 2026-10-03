@@ -41,8 +41,8 @@ typedef struct {
     void (*event)(webui_event_t event);
 } webui_config_t;
 
-#define WEBUI_BODY_MAX  (24 * 1024) /* the largest request: a backup to restore, its presets up to 16 KB */
-#define WEBUI_REPLY_MAX (24 * 1024) /* the largest reply: a backup, or a BMP (15 662 bytes) */
+#define WEBUI_BODY_MAX  (40 * 1024) /* the largest request: a backup to restore with presets and MQTT fields */
+#define WEBUI_REPLY_MAX (40 * 1024) /* the largest reply: a backup, or a BMP (15 662 bytes) */
 /* The deepest request: a backup bundle, a file's own 16 levels inside the bundle's two
  * (storage_backup.c). Deeper ones are refused before anything parses them. */
 #define WEBUI_JSON_MAX_DEPTH 18

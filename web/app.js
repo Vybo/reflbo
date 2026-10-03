@@ -224,7 +224,7 @@ document.getElementById('done').onclick = async () => {
 /* ---- pages ---- */
 
 const pages = { status: statusPage, wifi: wifiPage, place: placePage, sync: syncPage, radar: radarPage,
-                device: devicePage, presets: presetsPage, firmware: firmwarePage, backup: backupPage };
+                mqtt: mqttPage, device: devicePage, presets: presetsPage, firmware: firmwarePage, backup: backupPage };
 
 function route() {
   const name = location.hash.slice(1) || 'status';
@@ -287,7 +287,7 @@ async function statusPage() {
       env.age_s !== undefined ? ['Measured', `${duration(env.age_s)} ago`] : null,
     ])),
     card('Wi-Fi', facts([['Now', wifiText(s.wifi)], s.wifi.ap_on ? ['On its network', `${s.wifi.ap_clients} device(s)`] : null])),
-    card('Sync', facts(syncFacts(s.sync)), actions(h('a', { class: 'btn', href: '#sync' }, 'Sync settings'))),
+    card('Sync', facts(syncFacts(s.sync, s.mqtt)), actions(h('a', { class: 'btn', href: '#sync' }, 'Sync settings'))),
     card('This page', passwordForm('Change password', null, async (password, old, note, form) => {
       await api('POST', '/api/auth/password', { old, password });
       form.reset();
@@ -307,7 +307,7 @@ async function statusPage() {
 /* ---- Sync (spec §9.3, D25) ---- */
 
 const SYNC_STEPS = [['wifi', 'Wi-Fi'], ['time', 'Time'], ['weather', 'Weather'], ['air', 'Air quality'],
-                    ['radar', 'Radar']];
+                    ['radar', 'Radar'], ['mqtt', 'MQTT']];
 const SYNC_INTERVALS = [15, 30, 60, 120, 180, 360, 720, 1440];
 const intervalLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} h`);
 
@@ -320,14 +320,19 @@ function when(epoch) {
   return `${hm} ${day}`;
 }
 
-function syncFacts(sync) {
+/* A failed MQTT session doesn't fail the sync (D32): it is said apart. */
+const mqttFailed = (last, mqtt) => (last && last.steps && last.steps.mqtt === 'failed'
+  ? `MQTT failed (${((mqtt || {}).last || {}).detail || 'no reason given'})` : null);
+
+function syncFacts(sync, mqtt) {
   if (!sync) return [];
-  const last = sync.last;
+  const last = sync.last, m = mqttFailed(last, mqtt);
   return [
     ['Last sync', sync.running ? `running: ${(SYNC_STEPS.find(([k]) => k === sync.step) || [0, '…'])[1]}`
       : !last ? 'not since the device started'
-        : last.failed ? `${when(last.at)}: ${(SYNC_STEPS.find(([k]) => k === last.failed) || [0, last.failed])[1]} failed (${last.detail})`
-          : `${when(last.at)}, all well`],
+        : last.failed ? `${when(last.at)}: ${(SYNC_STEPS.find(([k]) => k === last.failed) || [0, last.failed])[1]} failed ` +
+            `(${last.detail})${m ? `; ${m}` : ''}`
+          : `${when(last.at)}, ${m ? `but ${m}` : 'all well'}`],
     ['Next', sync.next ? `${when(sync.next)}${sync.next_retry ? ', a retry' : ''}` : sync.mode === 'manual' ? 'when you ask' : '—'],
     sync.weather_at ? ['Weather from', when(sync.weather_at)] : null,
   ];
@@ -339,14 +344,16 @@ async function syncPage() {
   const steps = h('dl', { class: 'facts' });
   const showSteps = (status) => {
     const last = status.sync.last;
+    const why = (k) => (k === 'mqtt' ? ((status.mqtt || {}).last || {}).detail : last.failed === k ? last.detail : null);
     steps.replaceChildren(...SYNC_STEPS.flatMap(([k, name]) => [h('dt', { text: name }),
       h('dd', { class: !last ? '' : last.steps[k] === 'ok' ? 'good' : last.steps[k] === 'failed' ? 'bad' : 'muted',
-                text: !last ? '—' : last.steps[k] === 'failed' && last.failed === k ? `failed: ${last.detail}` : last.steps[k] })]));
+                text: !last ? '—' : last.steps[k] === 'failed' && why(k) ? `failed: ${why(k)}`
+                  : last.steps[k] || 'skipped' })]));
   };
   const summary = h('div');
   const rtc = h('p', { class: 'muted small' });
   const showStatus = (status) => {
-    summary.replaceChildren(facts(syncFacts(status.sync)));
+    summary.replaceChildren(facts(syncFacts(status.sync, status.mqtt)));
     showSteps(status);
     const r = status.time.rtc || {};
     rtc.textContent = `The clock chip's trim: ${r.trim_steps ?? 0} steps` +
@@ -762,6 +769,185 @@ async function radarPage() {
   await Promise.all([radarPreview(wxImg, 'radar'), radarPreview(flImg, 'flights')]).catch(() => {});
 }
 
+/* ---- MQTT and Home Assistant (spec §12, D32) ---- */
+
+const STALE_AFTER = [[0, 'Twice the sync interval'], [3600, '1 h'], [7200, '2 h'], [21600, '6 h'], [43200, '12 h'],
+                     [86400, '1 day'], [172800, '2 days'], [604800, '7 days'], [2592000, '30 days']];
+const DECIMALS = [['auto', 'As the value comes, up to 3'], ['0', 'None'], ['1', '1'], ['2', '2'], ['3', '3']];
+const MQTT_FIELDS_MAX = 32;
+
+/* The last session (a sync's), or the kept connection in sync mode Always on. */
+function mqttFacts(st) {
+  const m = st.mqtt || {}, last = m.last;
+  if (!m.enabled) return [['Now', 'off']];
+  return [
+    m.keep ? ['Now', m.connected ? 'connected' : `not connected${m.detail ? ` (${m.detail})` : ''}; it tries again`] : null,
+    ['Last session', !last ? 'none yet: one runs with each sync'
+      : last.result === 'ok' ? `${when(last.at)}, all well` : `${when(last.at)}: failed (${last.detail || 'no reason given'})`],
+  ];
+}
+
+/* One mapping (spec §12.5): its controls, and the value it brought last. */
+function mappingBox(f, value, onRemove) {
+  const select = (pairs, current) => {
+    const el = h('select', {}, pairs.map(([v, t]) => h('option', { value: v, selected: v === current }, t)));
+    el.value = current;
+    return el;
+  };
+  const key = h('input', { type: 'text', value: f.key || '', autocapitalize: 'off', spellcheck: 'false' });
+  const label = h('input', { type: 'text', value: f.label || '' });
+  const kind = select([['number', 'Number'], ['text', 'Text']], f.kind === 'text' ? 'text' : 'number');
+  const unit = h('input', { type: 'text', value: f.unit || '' });
+  const decimals = select(DECIMALS, typeof f.precision === 'number' ? String(f.precision) : 'auto');
+  const topic = h('input', { type: 'text', value: f.topic || '', autocapitalize: 'off', spellcheck: 'false' });
+  const path = h('input', { type: 'text', value: f.json_path || '', autocapitalize: 'off', spellcheck: 'false' });
+  const ttl = f.ttl_s || 0;
+  const stale = select([...STALE_AFTER, ...(STALE_AFTER.some(([s]) => s === ttl) ? [] : [[ttl, duration(ttl)]])]
+    .map(([s, t]) => [String(s), t]), String(ttl));
+  const box = h('div', { class: 'mapping' },
+    h('div', { class: 'row' }, h('div', {}, field('Key', key)), h('div', {}, field('Label', label))),
+    h('div', { class: 'row' }, h('div', {}, field('Kind', kind)), h('div', {}, field('Unit', unit)),
+      h('div', {}, field('Decimals', decimals))),
+    field('Topic', topic), field('JSON path', path, 'Keys joined by dots, such as co2 or state.temperature; empty ' +
+      'for the whole payload.'),
+    field('Stale after', stale),
+    h('p', { class: 'muted small', text: value ? `Last value: ${value.value || '—'}${value.state === 'stale' ? ', stale' : ''}`
+      : 'No value yet: it comes with the next sync.' }),
+    actions(button('Remove', onRemove)));
+  /* The mapping as mqtt_fields.json has it, checked as the device would (spec §12.5); `n` names it. */
+  box.read = (n) => {
+    const k = key.value.trim(), name = k || `number ${n}`;
+    if (!/^[a-z0-9_]{1,23}$/.test(k)) throw new ApiError(`Field ${name}: a key is 1 to 23 characters of a–z, 0–9 and _.`);
+    const t = topic.value.trim();
+    if (!t || bytes(t) > 127 || !/^[\x20-\x7e]+$/.test(t) || /["\\]/.test(t)) {
+      throw new ApiError(`Field ${k}: a topic of 1 to 127 plain characters.`);
+    }
+    if (/[+#]/.test(t)) throw new ApiError(`Field ${k}: a topic without + or #.`);
+    const pth = path.value.trim();
+    if (pth && (bytes(pth) > 47 || !/^[\x20-\x7e]+$/.test(pth) || /["\\]|^\.|\.$|\.\./.test(pth))) {
+      throw new ApiError(`Field ${k}: the JSON path is keys joined by dots, up to 47 characters.`);
+    }
+    if (bytes(label.value) > 23) throw new ApiError(`Field ${k}: a label of up to 23 bytes.`);
+    if (bytes(unit.value) > 7) throw new ApiError(`Field ${k}: a unit of up to 7 bytes.`);
+    return { key: k, label: label.value.trim() || k, kind: kind.value, unit: unit.value.trim(),
+             precision: decimals.value === 'auto' ? null : Number(decimals.value), topic: t, json_path: pth || null,
+             ttl_s: Number(stale.value) };
+  };
+  return box;
+}
+
+async function mqttPage() {
+  const [s, st, doc, cat] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status'),
+    api('GET', '/api/mqtt_fields'), api('GET', '/api/fields')]);
+  const m = s.mqtt || {}, now = st.mqtt || {};
+
+  const enabled = h('input', { type: 'checkbox', checked: !!m.enabled });
+  const host = h('input', { type: 'text', value: m.host || '', autocapitalize: 'off', spellcheck: 'false' });
+  const port = h('input', { type: 'number', min: 1, max: 65535, value: m.port ?? 1883 });
+  const user = h('input', { type: 'text', value: m.user || '', autocapitalize: 'off', autocomplete: 'off' });
+  const password = h('input', { type: 'password', autocomplete: 'new-password' });
+  const forget = now.password_set ? h('input', { type: 'checkbox', name: 'forget' }) : null;
+  const discovery = h('input', { type: 'checkbox', checked: m.discovery !== false });
+  const prefix = h('input', { type: 'text', value: m.discovery_prefix || 'homeassistant', autocapitalize: 'off' });
+  const brokerNote = h('p');
+  const brokerCard = card('Broker',
+    h('label', { class: 'check' }, enabled, 'Connect to an MQTT broker'),
+    field('Host', host, 'Its name or address, such as homeassistant.local or 192.168.1.10.'), field('Port', port),
+    field('User', user), field('Password', password, now.password_set ? 'Saved on the device, which never shows it. Leave ' +
+      'it empty to keep it.' : 'None saved.'),
+    forget ? h('label', { class: 'check' }, forget, 'Forget the saved password') : null,
+    h('label', { class: 'check' }, discovery, 'Home Assistant discovery: the device appears in Home Assistant by itself'),
+    field('Discovery prefix', prefix, 'Home Assistant\'s, "homeassistant" unless you changed it there.'),
+    brokerNote,
+    actions(button('Save broker', () => busy(brokerCard, brokerNote, async () => {
+      const h_ = host.value.trim(), pr = prefix.value.trim(), po = Number(port.value);
+      if (enabled.checked && !h_) throw new ApiError('MQTT needs the broker\'s host.');
+      if (h_ && (bytes(h_) > 63 || !/^[A-Za-z0-9.-]+$/.test(h_))) { /* settings.c's host_name() */
+        throw new ApiError('Host: a name or an address, of letters, digits, dots and dashes; no mqtt:// or port.');
+      }
+      if (bytes(user.value.trim()) > 63 || /[\x00-\x1f\x7f]/.test(user.value)) {
+        throw new ApiError('User: up to 63 bytes, without control characters.');
+      }
+      if (!Number.isInteger(po) || po < 1 || po > 65535) throw new ApiError('Port: 1 to 65535.');
+      if (!pr || bytes(pr) > 31 || /^\/|\/$|[+#\s]/.test(pr) || !/^[\x21-\x7e]+$/.test(pr)) {
+        throw new ApiError('Discovery prefix: up to 31 characters, without spaces, + or #, and not starting or ' +
+          'ending with /.');
+      }
+      if (bytes(password.value) > 63) throw new ApiError('Password: up to 63 bytes.');
+      const patch = { enabled: enabled.checked, host: h_, port: po, user: user.value.trim(), discovery: discovery.checked,
+                      discovery_prefix: pr };
+      if (password.value) patch.password = password.value;
+      else if (forget && forget.checked) patch.password = null;
+      await api('PATCH', '/api/settings', { mqtt: patch });
+      password.value = '';
+      brokerNote.className = 'good';
+      brokerNote.textContent = 'Saved. The next sync connects with it.';
+      toast('Broker saved');
+    }), 'primary')));
+
+  const status = h('div', {}, facts(mqttFacts(st)));
+  const testNote = h('p');
+  const testCard = card('Connection', status,
+    h('p', { class: 'muted small', text: 'A session runs with each sync: it sends the device\'s state and takes ' +
+      'Home Assistant\'s commands and the fields\' values. In sync mode Always on the device stays connected. Test ' +
+      'connection tries the saved broker, which needs the device on your network.' }),
+    testNote,
+    actions(button('Test connection', () => busy(testCard, testNote, async () => {
+      await api('POST', '/api/mqtt/test');
+      testNote.className = 'muted';
+      testNote.textContent = 'Connecting…';
+      for (let i = 0; i < 30; i++) { /* it gives up after 10 s */
+        await sleep(1000);
+        const t = await api('GET', '/api/status');
+        status.replaceChildren(facts(mqttFacts(t)));
+        const r = (t.mqtt || {}).test || {};
+        if (!r.running) {
+          testNote.className = r.ok ? 'good' : 'bad';
+          testNote.textContent = r.ok ? 'Connected to the broker.' : `It couldn't connect: ${r.detail || 'no reason given'}.`;
+          return;
+        }
+      }
+    }))));
+
+  const values = Object.fromEntries((cat.fields || []).map((f) => [f.id, f]));
+  const list = h('div');
+  let boxes = [];
+  const fieldsNote = h('p');
+  const add = (f) => {
+    const box = mappingBox(f, values[`mqtt.${f.key}`], () => { boxes = boxes.filter((b) => b !== box); show(); });
+    boxes.push(box);
+  };
+  const show = () => list.replaceChildren(...boxes, ...(boxes.length < MQTT_FIELDS_MAX ? []
+    : [h('p', { class: 'muted small', text: `${MQTT_FIELDS_MAX} fields at most.` })]));
+  (doc.fields || []).forEach(add);
+  show();
+  const fieldsCard = card('Fields',
+    h('p', { class: 'muted small', text: 'Values from Home Assistant and other devices, shown on the dashboard as ' +
+      'mqtt.<key> fields; choose them for a preset\'s slots on the Presets page.' }),
+    h('p', { class: 'muted small', text: 'The device sleeps between syncs, so it reads only retained messages: ' +
+      'publishers must retain theirs, or go through Home Assistant\'s MQTT statestream. Zigbee2MQTT needs retain: true ' +
+      'for each device.' }),
+    list, fieldsNote,
+    actions(button('Add a field', () => {
+      if (boxes.length >= MQTT_FIELDS_MAX) return;
+      add({ kind: 'number', precision: null, ttl_s: 0 });
+      show();
+    }), button('Save fields', () => busy(fieldsCard, fieldsNote, async () => {
+      const fields = boxes.map((b, i) => b.read(i + 1));
+      const keys = new Set();
+      for (const f of fields) {
+        if (keys.has(f.key)) throw new ApiError(`Two fields have the key ${f.key}.`);
+        keys.add(f.key);
+      }
+      await api('PUT', '/api/mqtt_fields', { schema: 1, fields });
+      fieldsNote.className = 'good';
+      fieldsNote.textContent = 'Saved. Their values come with the next sync.';
+      toast('Fields saved');
+    }), 'primary')));
+
+  main.replaceChildren(h('h1', { text: 'MQTT and Home Assistant' }), brokerCard, testCard, fieldsCard);
+}
+
 /* ---- Device: the settings the menu also has (spec §5.7, D19) ---- */
 
 const LANGUAGES = [['en', 'English'], ['cs', 'Čeština']];
@@ -874,6 +1060,11 @@ async function presetsPage() {
 
 /* The preview, with each slot's name at its top right corner, as the slot fields below call them
  * (the renderer puts captions top left); a split preset's cells by their numbers. */
+/* A slot's or a cell's field the catalogue doesn't list, such as an mqtt.<key> no mapping names (spec §12.5): an
+ * option of its own, so the slot shows it and keeps it. */
+const unlisted = (ed, id) => (id && !ed.fields.some((f) => f.id === id)
+  ? h('option', { value: id, selected: true }, id.startsWith('mqtt.') ? `${id} (no mapping)` : id) : null);
+
 function previewBox(ed, slots) {
   const pct = (v, of) => `${+(100 * v / of).toFixed(3)}%`;
   return h('div', { class: 'preview' }, ed.img, slots.map((slot) => {
@@ -952,7 +1143,8 @@ function splitEditor(ed, p) {
         else delete node.field;
         changed(ed, false);
       } }, h('option', { value: '' }, '(empty)'), fits.map((f) => h('option',
-        { value: f.id, selected: node.field === f.id }, `${f.label} — ${f.value || 'no data yet'}`)));
+        { value: f.id, selected: node.field === f.id }, `${f.label} — ${f.value || 'no data yet'}`)),
+      unlisted(ed, node.field));
       const splitButton = (dir, text) => {
         const half = { split: dir, ratio: '1/2', line: true, a: {}, b: {} }; /* the field goes to the first part */
         const b = button(text, () => {
@@ -1078,7 +1270,8 @@ function renderPresets(ed) {
       changed(ed, false);
     } }, h('option', { value: '' }, '(empty)'),
     ed.fields.filter((f) => slot.kinds.includes(f.kind)).map((f) => h('option',
-      { value: f.id, selected: p.slots[slot.id] === f.id }, `${f.label} — ${f.value || 'no data yet'}`))))));
+      { value: f.id, selected: p.slots[slot.id] === f.id }, `${f.label} — ${f.value || 'no data yet'}`)),
+    unlisted(ed, p.slots[slot.id])))));
 
   const o = p.options;
   const check = (key, text) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!o[key],

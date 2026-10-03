@@ -174,6 +174,12 @@ target_include_directories(storage_logic PUBLIC ${REPO_ROOT}/components/storage/
 target_compile_options(storage_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(storage_logic PRIVATE cjson util m)
 
+# ha_mqtt: MQTT and Home Assistant's mappings, payloads and store build on the host; the client does not.
+add_library(ha_mqtt_logic STATIC ${REPO_ROOT}/components/ha_mqtt/ha_fields.c)
+target_include_directories(ha_mqtt_logic PUBLIC ${REPO_ROOT}/components/ha_mqtt/include)
+target_compile_options(ha_mqtt_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(ha_mqtt_logic PRIVATE cjson util m)
+
 # weather: the Open-Meteo requests, replies, bands and levels build on the host; the fetch does not.
 add_library(weather_logic STATIC ${REPO_ROOT}/components/weather/weather_url.c
             ${REPO_ROOT}/components/weather/weather_parse.c ${REPO_ROOT}/components/weather/weather_levels.c)
@@ -260,6 +266,7 @@ reflbo_host_test(test_settings storage_logic)
 reflbo_host_test(test_storage_file storage_logic)
 target_compile_definitions(test_storage_file PRIVATE TEST_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/storage_tmp")
 reflbo_host_test(test_storage_backup storage_logic)
+reflbo_host_test(test_ha_fields ha_mqtt_logic)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

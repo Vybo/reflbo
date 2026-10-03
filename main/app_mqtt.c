@@ -1,35 +1,63 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "app.h"
 #include "app_internal.h"
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "ha_mqtt.h"
 #include "ha_session.h"
+#include "ha_store.h"
 #include "lang.h"
 #include "netmgr.h"
 #include "nvs.h"
+#include "storage.h"
 #include "sync_plan.h"
 #include "timekeeping.h"
 
 /* MQTT and Home Assistant on the app's side (spec §12, D32): the client's hooks, the sync's step, sync mode
- * `always`'s connection and its state, and what the status bar and Info say about them. It belongs to the
- * app task, but for the hooks, which run on the client's and the sync's tasks and hand over to it. */
+ * `always`'s connection and its state, the mapped fields' values and the message, the key presses HA hears,
+ * and what the status bar and Info say about them. It belongs to the app task, but for the hooks, which run
+ * on the client's and the sync's tasks and hand over to it. */
 
 static const char *TAG = "app_mqtt";
 
 #define NVS_KEY_PASS "mqtt_pass" /* in `secrets`: write-only (spec §12.1) */
 #define CHECK_MS 30000           /* sync mode `always`: how often the state is looked at (spec §12.9) */
+#define RESUBSCRIBE_MS 300000    /* sync mode `always`: the retained values again, with the 5-min state */
 
 static bool s_started;           /* the client's task runs */
 static ha_conn_t s_conn;         /* the next session's: set on the app task as a sync starts */
 static bool s_keeping;           /* sync mode `always` keeps the client */
 static int64_t s_published_ms = -1;
 static int64_t s_check_ms;
+static int64_t s_resubscribe_ms;
+static bool s_state_now;         /* a command changed the state: it goes out at once (spec §12.4) */
 EXT_RAM_BSS_ATTR static char s_published[HA_STATE_MAX]; /* the last state that went out, its uptime left out */
+
+/* The values and the message through deep sleep (spec §12.5): RTC FAST memory, kept powered as the heap
+ * may use it (CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP), since the snapshot fills RTC SLOW. */
+static RTC_FAST_ATTR ha_store_t s_store;
+_Static_assert(sizeof(ha_store_t) <= 4096, "the MQTT values' RTC block is at most 4 KB");
+EXT_RAM_BSS_ATTR static ha_fields_t s_fields; /* the mappings, read once a boot when something needs them */
+EXT_RAM_BSS_ATTR static char s_fields_json[HA_FIELDS_JSON_MAX];
+static bool s_fields_loaded, s_fields_sent;
+
+/* Values from the client's task wait here for the app task, so a burst of retained values draws once. */
+typedef struct {
+    char key[HA_KEY_LEN];
+    ha_value_t v;
+} staged_t;
+static SemaphoreHandle_t s_stage_lock;
+EXT_RAM_BSS_ATTR static staged_t s_staged[HA_FIELDS_MAX];
+static int s_staged_count;
+static bool s_drain_posted;
 
 static const char *bat_state_name(uint8_t state)
 {
@@ -78,6 +106,69 @@ static uint32_t expected_s(void)
     sync_schedule_t q = { .quiet = s->quiet, .quiet_from = s->quiet_from, .quiet_to = s->quiet_to };
     uint32_t quiet = sync_quiet_span_s(&q), night = ui_schedule_longest_night_s(&app_presets()->schedule);
     return ha_expected_s(s->sync_mode == SETTINGS_SYNC_ALWAYS, app_sync_expected_s(), quiet > night ? quiet : night);
+}
+
+static bool parse_fields(const char *text, void *ctx)
+{
+    char err[96];
+    if (!ha_fields_from_json(text, ctx, err, sizeof(err))) {
+        ESP_LOGW(TAG, "%s: %s", STORAGE_MQTT_FIELDS_PATH, err);
+        return false;
+    }
+    return true;
+}
+
+/* The mappings in /fs/cfg/mqtt_fields.json (spec §12.5), once a boot; none if it is missing or invalid. */
+static void load_fields(void)
+{
+    if (s_fields_loaded) {
+        return;
+    }
+    s_fields_loaded = true;
+    bool from_backup = false;
+    esp_err_t err = storage_init(); /* not mounted yet after a routine deep-sleep wake */
+    if (err == ESP_OK) {
+        err = storage_load(STORAGE_MQTT_FIELDS_PATH, s_fields_json, sizeof(s_fields_json), parse_fields, &s_fields,
+                           &from_backup);
+    }
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "%d MQTT fields%s", s_fields.count, from_backup ? ", from the backup" : "");
+    } else {
+        memset(&s_fields, 0, sizeof(s_fields)); /* a failed parse may have left it half-written */
+        if (err != ESP_ERR_NOT_FOUND) {
+            ESP_LOGW(TAG, "MQTT fields: %s; none", esp_err_to_name(err));
+        }
+    }
+}
+
+void app_mqtt_boot(bool warm)
+{
+    if (warm && ha_store_valid(&s_store)) {
+        return; /* a routine wake reads no file: the mappings load when a sync or the console needs them */
+    }
+    if (warm) {
+        ESP_LOGW(TAG, "the MQTT values' RTC block is invalid; starting it again");
+    }
+    ha_store_init(&s_store);
+    load_fields();
+    ha_store_rebuild(&s_store, &s_fields);
+}
+
+void app_mqtt_seal(void)
+{
+    ha_store_seal(&s_store);
+}
+
+void app_mqtt_clock_moved(int64_t delta_s)
+{
+    ha_store_shift_time(&s_store, delta_s); /* values that came before a sync set the clock keep their age */
+}
+
+const ha_store_t *app_mqtt_store(void)
+{
+    uint32_t expected = expected_s(); /* spec §12.5: twice the expected interval; never stale in manual mode */
+    ha_store_set_default_ttl(&s_store, expected <= UINT32_MAX / 2 ? expected * 2 : UINT32_MAX);
+    return &s_store;
 }
 
 /* The state (spec §12.2) as it is now; the strings point into the app's state. */
@@ -149,15 +240,120 @@ static bool on_payloads(ha_payloads_t *out)
     return app_execute(fill_payloads, out) == ESP_OK;
 }
 
+typedef struct {
+    ha_cmd_t cmd;
+    bool press;                /* the payload is a button's PRESS */
+    bool fits;                 /* the whole payload is in `text` */
+    char text[HA_MESSAGE_LEN]; /* a preset's id or name, or the message */
+} command_t;
+
+/* spec §12.4: on the app task, in the order the commands came. */
+static void apply_command(void *arg)
+{
+    command_t *c = arg;
+    const ui_presets_t *p = app_presets();
+    bool always = app_settings()->sync_mode == SETTINGS_SYNC_ALWAYS;
+    if ((c->cmd == HA_CMD_NEXT || c->cmd == HA_CMD_SYNC) && !c->press) {
+        ESP_LOGW(TAG, "command %d: \"%s\" isn't PRESS; ignored", c->cmd, c->text);
+    } else if (c->cmd == HA_CMD_PRESET) {
+        int i = c->fits ? ui_presets_lookup(p, c->text) : -1;
+        if (i < 0) {
+            ESP_LOGW(TAG, "cmd/preset: no preset \"%s\"; ignored", c->text);
+        } else {
+            ESP_LOGI(TAG, "cmd/preset: %s", p->presets[i].id);
+            app_ui_select(i, true); /* saved like a manual switch */
+            s_state_now = true;
+        }
+    } else if (c->cmd == HA_CMD_NEXT) {
+        app_ui_select(ui_presets_next(p, always), true); /* as KEY short (D32) */
+        ESP_LOGI(TAG, "cmd/next: %s", p->presets[p->active].id);
+        s_state_now = true;
+    } else if (c->cmd == HA_CMD_SYNC) {
+        if (app_sync_active()) { /* one that waited while the board slept comes in a sync (D32) */
+            ESP_LOGI(TAG, "cmd/sync: a sync runs; ignored");
+        } else if (!always) {
+            ESP_LOGI(TAG, "cmd/sync: only in sync mode always; ignored");
+        } else {
+            esp_err_t err = app_sync_now();
+            ESP_LOGI(TAG, "cmd/sync: %s", err == ESP_OK ? "a sync starts" : esp_err_to_name(err));
+        }
+    } else if (c->cmd == HA_CMD_MESSAGE) {
+        ha_store_set_message(&s_store, c->text, time(NULL));
+        ESP_LOGI(TAG, "cmd/message: %s", c->text[0] != '\0' ? c->text : "cleared");
+        app_ui_render();
+    }
+    if (s_state_now && s_keeping) {
+        s_check_ms = 0; /* sync mode `always`: the next tick publishes it; a sync's session does at its end */
+    }
+    free(c);
+}
+
 static void on_command(ha_cmd_t cmd, const char *payload, size_t len)
 {
-    ESP_LOGI(TAG, "command %d (%.*s): applied from M7's next step", cmd, (int)len, payload);
+    command_t *c = calloc(1, sizeof(*c));
+    if (c == NULL) {
+        ESP_LOGW(TAG, "no memory: command %d dropped", cmd);
+        return;
+    }
+    c->cmd = cmd;
+    c->press = ha_cmd_press(payload, len);
+    if (cmd == HA_CMD_MESSAGE) {
+        ha_message_text(payload, len, c->text, sizeof(c->text)); /* cut at a character (spec §12.7) */
+        c->fits = true;
+    } else {
+        c->fits = len < sizeof(c->text);
+        snprintf(c->text, sizeof(c->text), "%.*s", (int)(c->fits ? len : sizeof(c->text) - 1), payload);
+    }
+    if (app_post(apply_command, c) != ESP_OK) {
+        ESP_LOGW(TAG, "the app is busy: command %d dropped", cmd);
+        free(c);
+    }
+}
+
+/* On the app task: the values that came since the last time, then one render if any shows differently. */
+static void drain_values(void *arg)
+{
+    (void)arg;
+    EXT_RAM_BSS_ATTR static staged_t batch[HA_FIELDS_MAX];
+    xSemaphoreTake(s_stage_lock, portMAX_DELAY);
+    int n = s_staged_count;
+    memcpy(batch, s_staged, (size_t)n * sizeof(batch[0]));
+    s_staged_count = 0;
+    s_drain_posted = false;
+    xSemaphoreGive(s_stage_lock);
+    time_t now = time(NULL);
+    bool changed = false;
+    for (int i = 0; i < n; i++) {
+        changed |= ha_store_set(&s_store, ha_store_find(&s_store, batch[i].key), &batch[i].v, now);
+    }
+    if (changed) {
+        app_ui_render();
+    }
 }
 
 static void on_value(const char *key, const ha_value_t *v)
 {
-    (void)v;
-    ESP_LOGD(TAG, "value for %s", key);
+    xSemaphoreTake(s_stage_lock, portMAX_DELAY);
+    int i = 0;
+    while (i < s_staged_count && strcmp(s_staged[i].key, key) != 0) {
+        i++;
+    }
+    if (i == s_staged_count && i < HA_FIELDS_MAX) {
+        snprintf(s_staged[i].key, sizeof(s_staged[i].key), "%s", key);
+        s_staged_count++;
+    }
+    if (i < HA_FIELDS_MAX) {
+        s_staged[i].v = *v; /* the latest one wins */
+    }
+    bool post = !s_drain_posted;
+    s_drain_posted = true;
+    xSemaphoreGive(s_stage_lock);
+    if (post && app_post(drain_values, NULL) != ESP_OK) {
+        xSemaphoreTake(s_stage_lock, portMAX_DELAY);
+        s_drain_posted = false; /* the next value tries again */
+        xSemaphoreGive(s_stage_lock);
+        ESP_LOGW(TAG, "the app is busy: the values wait");
+    }
 }
 
 static void status_changed(void *arg)
@@ -171,19 +367,25 @@ static void on_status(void)
     app_post(status_changed, NULL);
 }
 
+/* The client's task, once, and the mappings it subscribes to, once a boot. */
 static void start(void)
 {
-    if (s_started) {
-        return;
+    if (!s_started) {
+        static const ha_hooks_t k_hooks = { .command = on_command, .value = on_value, .status = on_status,
+                                            .payloads = on_payloads };
+        s_stage_lock = s_stage_lock != NULL ? s_stage_lock : xSemaphoreCreateMutex();
+        esp_err_t err = s_stage_lock != NULL ? ha_mqtt_init(&k_hooks) : ESP_ERR_NO_MEM;
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "the client didn't start: %s", esp_err_to_name(err));
+            return;
+        }
+        s_started = true;
     }
-    static const ha_hooks_t k_hooks = { .command = on_command, .value = on_value, .status = on_status,
-                                        .payloads = on_payloads };
-    esp_err_t err = ha_mqtt_init(&k_hooks);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "the client didn't start: %s", esp_err_to_name(err));
-        return;
+    if (!s_fields_sent) {
+        load_fields();
+        ha_mqtt_set_fields(&s_fields);
+        s_fields_sent = true;
     }
-    s_started = true;
 }
 
 void app_mqtt_prepare(void)
@@ -202,7 +404,7 @@ esp_err_t app_mqtt_sync_step(int budget_ms, char *detail, size_t size) /* on the
 }
 
 /* Sync mode `always` (spec §12.9): connected while it keeps Wi-Fi on the network; the state on a change, at
- * most every 30 s, and every 5 min. */
+ * most every 30 s, at once after a command, and every 5 min, with the retained values again. */
 void app_mqtt_tick(void)
 {
     bool want = app_mqtt_on() && app_sync_lan_ui();
@@ -216,6 +418,8 @@ void app_mqtt_tick(void)
         ha_mqtt_keep(&c);
         s_keeping = true;
         s_published_ms = -1;
+        s_state_now = false;
+        s_resubscribe_ms = app_uptime_ms() + RESUBSCRIBE_MS; /* connecting subscribes */
         ESP_LOGI(TAG, "sync mode always: connecting to %s", c.host);
     } else if (!want && s_keeping) {
         ha_mqtt_drop();
@@ -232,6 +436,10 @@ void app_mqtt_tick(void)
     if (!hs.connected) {
         return;
     }
+    if (now >= s_resubscribe_ms) {
+        ha_mqtt_resubscribe(); /* a value that doesn't change stays fresh */
+        s_resubscribe_ms = now + RESUBSCRIBE_MS;
+    }
     ha_state_t state;
     build_state(&state);
     EXT_RAM_BSS_ATTR static char json[HA_STATE_MAX], same[HA_STATE_MAX];
@@ -240,11 +448,12 @@ void app_mqtt_tick(void)
     still.has_rssi = false; /* the signal jitters: it goes out with the 5-min state, not as a change */
     ha_state_json(&still, same, sizeof(same));
     bool changed = strcmp(same, s_published) != 0;
-    if (ha_state_due(changed, s_published_ms < 0 ? -1 : (now - s_published_ms) / 1000)) {
+    if (s_state_now || ha_state_due(changed, s_published_ms < 0 ? -1 : (now - s_published_ms) / 1000)) {
         ha_state_json(&state, json, sizeof(json));
         ha_mqtt_publish_state(json);
         memcpy(s_published, same, sizeof(s_published));
         s_published_ms = now;
+        s_state_now = false;
     }
 }
 
@@ -274,6 +483,60 @@ void app_mqtt_password_changed(void)
         ha_mqtt_drop();
         s_keeping = false;
     }
+}
+
+/* spec §12.8: while connected, a dashboard gesture goes to HA too; at other times nothing is sent. */
+void app_mqtt_key(board_button_t button, gesture_t gesture)
+{
+    if (!s_started || gesture < GESTURE_SHORT || gesture > GESTURE_LONG) {
+        return;
+    }
+    ha_press_t press = gesture == GESTURE_SHORT ? HA_PRESS_SHORT : gesture == GESTURE_DOUBLE ? HA_PRESS_DOUBLE
+                                                                                          : HA_PRESS_LONG;
+    ha_mqtt_publish_action(ha_action_payload(button == BOARD_BUTTON_BOOT, press));
+}
+
+bool app_mqtt_banner(void)
+{
+    return ha_store_banner(&s_store, time(NULL));
+}
+
+void app_mqtt_dismiss(void)
+{
+    ha_store_dismiss(&s_store);
+    ESP_LOGI(TAG, "KEY short: the message's banner dismissed");
+}
+
+void app_mqtt_set_message(const char *text)
+{
+    char clean[HA_MESSAGE_LEN];
+    ha_message_text(text, strlen(text), clean, sizeof(clean));
+    ha_store_set_message(&s_store, clean, time(NULL));
+}
+
+/* As a payload would bring it at the mapping's path (spec §15): the console's `field set mqtt.<key>`. */
+bool app_mqtt_set_value(const char *key, const char *text, char *err, size_t size)
+{
+    load_fields();
+    int m = ha_fields_find(&s_fields, key), i = ha_store_find(&s_store, key);
+    if (m < 0 || i < 0) {
+        snprintf(err, size, "no MQTT field \"%s\" (see `mqtt status`)", key);
+        return false;
+    }
+    ha_field_t f = s_fields.field[m];
+    f.json_path[0] = '\0';
+    ha_value_t v;
+    if (!ha_value_parse(&f, text, strlen(text), &v)) {
+        snprintf(err, size, "mqtt.%s takes a %s", key, f.kind == HA_KIND_NUMBER ? "number" : "text");
+        return false;
+    }
+    ha_store_set(&s_store, i, &v, time(NULL));
+    return true;
+}
+
+bool app_mqtt_clear_value(const char *key)
+{
+    return ha_store_clear(&s_store, ha_store_find(&s_store, key));
 }
 
 bool app_mqtt_failed(void)
@@ -316,4 +579,75 @@ void app_mqtt_summary(char *out, size_t size)
     const char *suffix;
     lang_format_time(local.tm_hour, local.tm_min, 0, app_settings()->clock_24h, false, when, sizeof(when), &suffix);
     snprintf(out, size, "%s%s%s %s", when, suffix[0] ? " " : "", suffix, r == SYNC_STEP_OK ? "OK" : st->mqtt_detail);
+}
+
+static bool password_set(void)
+{
+    nvs_handle_t nvs;
+    size_t len = 0;
+    bool set = false;
+    if (nvs_open("secrets", NVS_READONLY, &nvs) == ESP_OK) {
+        set = nvs_get_str(nvs, NVS_KEY_PASS, NULL, &len) == ESP_OK && len > 1;
+        nvs_close(nvs);
+    }
+    return set;
+}
+
+/* `mqtt status` (spec §15): the settings, the client, the last session, the mappings and the message. */
+void app_mqtt_print_status(void)
+{
+    const settings_t *s = app_settings();
+    printf("mqtt %s, broker %s:%u, user \"%s\", password %s, discovery %s (prefix %s)\n",
+           s->mqtt_enabled ? "on" : "off", s->mqtt_host[0] ? s->mqtt_host : "-", s->mqtt_port, s->mqtt_user,
+           password_set() ? "set" : "none", s->mqtt_discovery ? "on" : "off", s->mqtt_prefix);
+    ha_mqtt_status_t hs;
+    ha_mqtt_status(&hs);
+    char summary[48];
+    app_mqtt_summary(summary, sizeof(summary));
+    printf("client: %s, %s%s%s; last: %s\n",
+           !s_started  ? "not started"
+           : s_keeping ? "kept connected (sync mode always)"
+                       : "a session in each sync",
+           hs.connected ? "connected" : "not connected", hs.detail[0] ? ": " : "", hs.detail, summary);
+    if (hs.test_running || hs.test_done) {
+        printf("test: %s%s\n", hs.test_running ? "running" : hs.test_ok ? "connected" : "failed: ",
+               hs.test_running || hs.test_ok ? "" : hs.test_detail);
+    }
+    load_fields();
+    const ha_store_t *st = app_mqtt_store();
+    printf("%d of %d fields mapped; values stale by default after %lu s%s\n", s_fields.count, HA_FIELDS_MAX,
+           (unsigned long)st->default_ttl_s, st->default_ttl_s == 0 ? " (never)" : "");
+    time_t now = time(NULL);
+    for (int i = 0; i < s_fields.count; i++) {
+        const ha_field_t *f = &s_fields.field[i];
+        printf("  mqtt.%-23s %-6s %s%s%s: ", f->key, f->kind == HA_KIND_NUMBER ? "number" : "text", f->topic,
+               f->json_path[0] ? " at " : "", f->json_path);
+        int k = ha_store_find(st, f->key);
+        if (k < 0 || st->entry[k].updated == 0) {
+            printf("no value\n");
+            continue;
+        }
+        const ha_entry_t *e = &st->entry[k];
+        char value[HA_TEXT_LEN];
+        if (e->kind == HA_KIND_NUMBER) {
+            lang_format_decimal(lang_get("en"), e->number, e->decimals, value, sizeof(value));
+        } else {
+            snprintf(value, sizeof(value), "%s", e->text);
+        }
+        printf("%s%s%s, %lu s old%s\n", value, e->unit[0] ? " " : "", e->unit,
+               (unsigned long)(now > (time_t)e->updated ? now - (time_t)e->updated : 0),
+               ha_store_freshness(st, k, now) == HA_STALE ? ", stale" : "");
+    }
+    uint32_t disc = ha_mqtt_discovery_hash();
+    printf("discovery: %s", disc != 0 ? "sent, hash " : "not sent yet\n");
+    if (disc != 0) {
+        printf("%08lx\n", (unsigned long)disc);
+    }
+    if (st->message_at == 0) {
+        printf("message: none\n");
+    } else {
+        printf("message: \"%s\", %lu s old, banner %s\n", st->message,
+               (unsigned long)(now > (time_t)st->message_at ? now - (time_t)st->message_at : 0),
+               ha_store_banner(st, now) ? "shown" : st->message_dismissed ? "dismissed" : "over");
+    }
 }

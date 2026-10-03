@@ -282,6 +282,32 @@ static void test_the_largest_discovery_message_fits(void)
     printf("the largest discovery payload: %d bytes of %d\n", largest, HA_PAYLOAD_MAX);
 }
 
+/* spec §12.8: each dashboard gesture's payload on reflbo/<id>/action, which a device trigger of discovery
+ * waits for. */
+static void test_key_presses_have_their_payloads(void)
+{
+    TEST_ASSERT_EQUAL_STRING("key_short", ha_action_payload(false, HA_PRESS_SHORT));
+    TEST_ASSERT_EQUAL_STRING("key_double", ha_action_payload(false, HA_PRESS_DOUBLE));
+    TEST_ASSERT_EQUAL_STRING("key_long", ha_action_payload(false, HA_PRESS_LONG));
+    TEST_ASSERT_EQUAL_STRING("boot_short", ha_action_payload(true, HA_PRESS_SHORT));
+    TEST_ASSERT_EQUAL_STRING("boot_double", ha_action_payload(true, HA_PRESS_DOUBLE));
+    TEST_ASSERT_EQUAL_STRING("boot_long", ha_action_payload(true, HA_PRESS_LONG));
+    TEST_ASSERT_NULL(ha_action_payload(false, (ha_press_t)3));
+    ha_disc_t d = discovery();
+    for (int boot = 0; boot < 2; boot++) {
+        for (int p = HA_PRESS_SHORT; p <= HA_PRESS_LONG; p++) {
+            char want[48];
+            snprintf(want, sizeof(want), "\"payload\":\"%s\"", ha_action_payload(boot != 0, (ha_press_t)p));
+            bool found = false;
+            for (int i = 0; i < HA_DISC_COUNT && !found; i++) {
+                TEST_ASSERT_TRUE(ha_disc_message(&d, i, s_topic, sizeof(s_topic), s_payload, sizeof(s_payload)));
+                found = strstr(s_payload, want) != NULL;
+            }
+            TEST_ASSERT_TRUE_MESSAGE(found, want);
+        }
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -297,5 +323,6 @@ int main(void)
     RUN_TEST(test_discovery_matches_its_golden);
     RUN_TEST(test_the_hash_follows_what_discovery_says);
     RUN_TEST(test_the_largest_discovery_message_fits);
+    RUN_TEST(test_key_presses_have_their_payloads);
     return UNITY_END();
 }

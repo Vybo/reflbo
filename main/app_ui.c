@@ -226,7 +226,8 @@ void app_ui_context(ui_context_t *ctx)
     localtime_r(&now, &ctx->local);
     ctx->local_day = local_day(&ctx->local);
     ctx->radar = app_radar_ui(); /* M6 */
-    ctx->mqtt_keys = &s.presets.mqtt; /* M7: the store comes with its task */
+    ctx->mqtt = app_mqtt_store(); /* M7 */
+    ctx->mqtt_keys = &s.presets.mqtt;
 }
 
 void app_ui_render(void)
@@ -254,6 +255,9 @@ void app_ui_render(void)
         ui_draw_first_run(fb, &ctx);
     } else {
         ui_draw_dashboard(fb, &ctx, &s.presets.presets[s.presets.active]);
+        if (!app_config_active()) { /* spec §12.7: not in config mode, even on its dashboard (D20) */
+            ui_draw_message_banner(fb, &ctx);
+        }
     }
     if (app_ui_toast_active()) {
         ui_draw_toast(fb, s_toast);

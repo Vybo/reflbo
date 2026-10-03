@@ -70,6 +70,15 @@ void ha_message_text(const char *payload, size_t len, char *out, size_t size)
     copy_cut(payload, len, out, size < HA_MESSAGE_LEN ? size : HA_MESSAGE_LEN);
 }
 
+const char *ha_action_payload(bool boot, ha_press_t press)
+{
+    static const char *const k_payloads[2][3] = {
+        { "key_short", "key_double", "key_long" },
+        { "boot_short", "boot_double", "boot_long" },
+    };
+    return (unsigned)press < 3 ? k_payloads[boot ? 1 : 0][press] : NULL;
+}
+
 /* A number as field `f` keeps it: rounded to its precision, or to its own decimals up to 3; fewer when
  * the value with them doesn't fit an int32. */
 static bool scale_number(const ha_field_t *f, double v, ha_value_t *out)

@@ -60,6 +60,9 @@ typedef struct {
 esp_err_t ha_mqtt_init(const ha_hooks_t *hooks);
 /* The mappings changed (a cold boot, the MQTT page, a restore): a kept connection subscribes again. */
 void ha_mqtt_set_fields(const ha_fields_t *f);
+/* A kept connection subscribes again, so the broker sends each mapped topic's retained value again: a value
+ * that doesn't change stays fresh in sync mode `always` (spec §12.9). */
+void ha_mqtt_resubscribe(void);
 /* A sync's step (spec §9.3 step 6): connect, subscribe, collect, publish the state and any discovery
  * configs whose hash changed, and disconnect, within `budget_ms`; with the client kept, publish on it. ESP_OK,
  * or ESP_FAIL with why in `detail`. */
@@ -68,9 +71,12 @@ esp_err_t ha_mqtt_session(const ha_conn_t *c, int budget_ms, char *detail, size_
 void ha_mqtt_keep(const ha_conn_t *c);
 void ha_mqtt_drop(void);
 void ha_mqtt_publish_state(const char *json);     /* while connected: retained, QoS 1 */
-void ha_mqtt_publish_action(const char *payload); /* while connected: reflbo/<id>/action, QoS 0 (spec §12.8) */
+/* While connected: reflbo/<id>/action at QoS 0 (spec §12.8), at once from the caller's task, even in a sync's
+ * session; dropped otherwise. */
+void ha_mqtt_publish_action(const char *payload);
 /* Test connection (spec §10.3): connects with `c` and leaves; ha_mqtt_status() reports how it went. */
 void ha_mqtt_test(const ha_conn_t *c);
 /* Discovery was turned off: the next time it is on, the configs go out again (NVS sys/mqtt_disc). */
 void ha_mqtt_forget_discovery(void);
+uint32_t ha_mqtt_discovery_hash(void); /* what NVS sys/mqtt_disc holds: 0 if no configs went out */
 void ha_mqtt_status(ha_mqtt_status_t *out);

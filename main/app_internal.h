@@ -233,6 +233,20 @@ void app_mqtt_settings_changed(const settings_t *before); /* a kept connection s
 void app_mqtt_password_changed(void);
 bool app_mqtt_failed(void); /* the status bar's MQTT mark (spec §5.2) */
 void app_mqtt_summary(char *out, size_t size); /* Info ▸ MQTT: "Off", "12:05 OK", "Connected" */
+/* The mapped fields' values and the message (spec §12.5, §12.7), kept in RTC memory through deep sleep: a
+ * routine wake keeps them, anything else reads the mappings again. */
+void app_mqtt_boot(bool warm);
+void app_mqtt_seal(void); /* before a deep sleep */
+void app_mqtt_clock_moved(int64_t delta_s); /* the clock moved: values keep their age */
+const ha_store_t *app_mqtt_store(void); /* as a render draws them */
+void app_mqtt_key(board_button_t button, gesture_t gesture); /* a dashboard gesture, for HA (spec §12.8) */
+bool app_mqtt_banner(void);  /* the message's banner shows (spec §12.7) */
+void app_mqtt_dismiss(void); /* KEY short took it away */
+/* The console (spec §15): `field set ha.message`, `field set|clear mqtt.<key>` and `mqtt status`. */
+void app_mqtt_set_message(const char *text);
+bool app_mqtt_set_value(const char *key, const char *text, char *err, size_t size);
+bool app_mqtt_clear_value(const char *key);
+void app_mqtt_print_status(void);
 
 /* The `field`, `preset` and `night` console commands (main/app_cmds.c); call after diag_start(). */
 void app_register_commands(void);

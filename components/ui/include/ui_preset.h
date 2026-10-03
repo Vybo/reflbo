@@ -120,6 +120,8 @@ int ui_preset_slots(const ui_preset_t *p);
 /* The built-in presets (spec §5.4): used when presets.json is missing or invalid. */
 void ui_presets_defaults(ui_presets_t *p);
 int ui_presets_find(const ui_presets_t *p, const char *id); /* index, or -1 */
+/* A preset by its name, as HA's select sends it (spec §12.4), else by its id; -1 if neither. */
+int ui_presets_lookup(const ui_presets_t *p, const char *text);
 /* The next preset in cycle order after the active one, wrapping; the active one if no other
  * preset is in the cycle (spec §5.4, KEY short). Presets on the Flights layout are in it only in
  * sync mode `always` (D28). */

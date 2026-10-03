@@ -13,6 +13,7 @@
 
 #define STORAGE_SETTINGS_PATH "/fs/cfg/settings.json"
 #define STORAGE_PRESETS_PATH "/fs/cfg/presets.json"
+#define STORAGE_MQTT_FIELDS_PATH "/fs/cfg/mqtt_fields.json" /* M7 (spec §12.5) */
 
 esp_err_t storage_init(void);
 bool storage_ready(void);

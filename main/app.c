@@ -96,7 +96,7 @@ typedef struct {
     app_ui_state_t ui;
     time_t next_alarm;
 } app_snapshot_t;
-_Static_assert(sizeof(app_snapshot_t) <= 4096, "the RTC-RAM snapshot is at most 4 KB (spec §6)");
+_Static_assert(sizeof(app_snapshot_t) <= 5120, "the RTC-RAM snapshot is at most 5 KB (spec §6)");
 
 static RTC_DATA_ATTR app_snapshot_t s_snap;
 static QueueHandle_t s_queue;

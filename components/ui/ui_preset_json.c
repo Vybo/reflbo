@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "ha_fields.h"
 #include "ui_fields.h"
 #include "ui_preset.h"
 #include "ui_split.h"
@@ -82,7 +83,53 @@ static bool parse_hhmm(const cJSON *item, uint16_t *out)
     return true;
 }
 
-static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_preset_t *out, char *err, size_t size)
+/* A field as presets.json names it: a built-in one, or mqtt.<key>, whose key joins the presets' key table
+ * (spec §12.5). UI_FIELD_NONE for neither, and *full when it would be a 33rd key. */
+static int field_by_name(ui_presets_t *doc, const char *name, bool *full)
+{
+    ui_field_id_t f = ui_field_by_name(name);
+    if (f != UI_FIELD_NONE || strncmp(name, "mqtt.", 5) != 0 || !ha_key_valid(name + 5)) {
+        return f;
+    }
+    for (int k = 0; k < doc->mqtt.count; k++) {
+        if (strcmp(doc->mqtt.key[k], name + 5) == 0) {
+            return UI_FIELD_MQTT + k;
+        }
+    }
+    if (doc->mqtt.count >= UI_MQTT_KEYS) {
+        *full = true;
+        return UI_FIELD_NONE;
+    }
+    snprintf(doc->mqtt.key[doc->mqtt.count], HA_KEY_LEN, "%s", name + 5);
+    return UI_FIELD_MQTT + doc->mqtt.count++;
+}
+
+/* The kinds a field may be: an MQTT field's mapping says a number or a text, so a slot takes one wherever
+ * it takes either (spec §12.5). */
+static uint32_t field_kinds(int field)
+{
+    return ui_field_is_mqtt(field) ? UI_KIND(UI_FK_NUMBER) | UI_KIND(UI_FK_TEXT)
+                                   : UI_KIND(ui_field_info((ui_field_id_t)field)->kind);
+}
+
+static void field_name(const ui_presets_t *doc, int field, char *out, size_t size)
+{
+    const ui_field_info_t *info = ui_field_info((ui_field_id_t)field);
+    if (ui_field_is_mqtt(field) && field - UI_FIELD_MQTT < doc->mqtt.count) {
+        snprintf(out, size, "mqtt.%s", doc->mqtt.key[field - UI_FIELD_MQTT]);
+    } else {
+        snprintf(out, size, "%s", info != NULL ? info->id : "");
+    }
+}
+
+static bool unknown_field(const char *id, const char *name, bool full, char *err, size_t size)
+{
+    return full ? fail(err, size, "preset \"%s\": at most %d different MQTT fields", id, UI_MQTT_KEYS)
+                : fail(err, size, "preset \"%s\": unknown field \"%s\"", id, name);
+}
+
+static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_presets_t *doc, ui_preset_t *out, char *err,
+                        size_t size)
 {
     if (!cJSON_IsObject(slots)) {
         return fail(err, size, "preset \"%s\": slots must be an object of slot names", out->id);
@@ -100,11 +147,12 @@ static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_preset
         if (!cJSON_IsString(slot)) {
             return fail(err, size, "preset \"%s\": slot %s needs a field id", out->id, slot->string);
         }
-        ui_field_id_t field = ui_field_by_name(slot->valuestring);
+        bool full = false;
+        int field = field_by_name(doc, slot->valuestring, &full);
         if (field == UI_FIELD_NONE) {
-            return fail(err, size, "preset \"%s\": unknown field \"%s\"", out->id, slot->valuestring);
+            return unknown_field(out->id, slot->valuestring, full, err, size);
         }
-        if (!(layout->slots[index].kinds & UI_KIND(ui_field_info(field)->kind))) {
+        if (!(layout->slots[index].kinds & field_kinds(field))) {
             return fail(err, size, "preset \"%s\": slot %s can't show %s", out->id, slot->string, slot->valuestring);
         }
         out->slots[index] = (uint8_t)field;
@@ -113,6 +161,7 @@ static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_preset
 }
 
 typedef struct {
+    ui_presets_t *doc;
     ui_preset_t *out;
     int nodes; /* taken so far, in preorder */
     int cells;
@@ -136,9 +185,10 @@ static bool parse_node(tree_t *t, const cJSON *node)
             if (!cJSON_IsString(field)) {
                 return fail(t->err, t->size, "preset \"%s\": a cell's field must be a field id", id);
             }
-            ui_field_id_t f = ui_field_by_name(field->valuestring);
+            bool full = false;
+            int f = field_by_name(t->doc, field->valuestring, &full);
             if (f == UI_FIELD_NONE) {
-                return fail(t->err, t->size, "preset \"%s\": unknown field \"%s\"", id, field->valuestring);
+                return unknown_field(id, field->valuestring, full, t->err, t->size);
             }
             t->out->slots[t->cells] = (uint8_t)f;
         }
@@ -164,8 +214,18 @@ static bool parse_node(tree_t *t, const cJSON *node)
     return parse_node(t, a) && parse_node(t, b);
 }
 
+/* The cell can show the field: an MQTT field as a number or as a text. */
+static bool cell_shows(int field, gfx_rect_t cell)
+{
+    if (ui_field_is_mqtt(field)) {
+        return ui_split_field_size(UI_FK_NUMBER, cell.w, cell.h) >= 0 || ui_split_field_size(UI_FK_TEXT, cell.w, cell.h) >= 0;
+    }
+    const ui_field_info_t *info = ui_field_info((ui_field_id_t)field);
+    return info == NULL || ui_split_field_size(info->kind, cell.w, cell.h) >= 0;
+}
+
 /* The split layout's tree, then its geometry and what each cell can show (spec §5.2). */
-static bool parse_split(const cJSON *split, ui_preset_t *out, char *err, size_t size)
+static bool parse_split(const cJSON *split, ui_presets_t *doc, ui_preset_t *out, char *err, size_t size)
 {
     if (split == NULL || cJSON_IsNull(split)) {
         return true; /* one empty cell */
@@ -173,7 +233,7 @@ static bool parse_split(const cJSON *split, ui_preset_t *out, char *err, size_t 
     if (!cJSON_IsObject(split)) {
         return fail(err, size, "preset \"%s\": split must be a tree of splits and cells", out->id);
     }
-    tree_t t = { .out = out, .err = err, .size = size };
+    tree_t t = { .doc = doc, .out = out, .err = err, .size = size };
     if (!parse_node(&t, split)) {
         return false;
     }
@@ -183,16 +243,17 @@ static bool parse_split(const cJSON *split, ui_preset_t *out, char *err, size_t 
                     UI_SPLIT_MIN_H);
     }
     for (int i = 0; i < g.cells; i++) {
-        const ui_field_info_t *info = ui_field_info((ui_field_id_t)out->slots[i]);
-        if (info != NULL && ui_split_field_size(info->kind, g.cell[i].w, g.cell[i].h) < 0) {
+        if (!cell_shows(out->slots[i], g.cell[i])) {
+            char name[HA_KEY_LEN + 8];
+            field_name(doc, out->slots[i], name, sizeof(name));
             return fail(err, size, "preset \"%s\": cell %d (%d×%d) can't show %s", out->id, i + 1, g.cell[i].w,
-                        g.cell[i].h, info->id);
+                        g.cell[i].h, name);
         }
     }
     return true;
 }
 
-static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t size)
+static bool parse_preset(const cJSON *item, ui_presets_t *doc, ui_preset_t *out, char *err, size_t size)
 {
     memset(out, 0, sizeof(*out));
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
@@ -215,10 +276,11 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
     out->in_cycle = optional_bool(item, "in_cycle", true);
     const cJSON *slots = cJSON_GetObjectItemCaseSensitive(item, "slots");
     if (slots != NULL && !cJSON_IsNull(slots) &&
-        !parse_slots(slots, ui_layout((ui_layout_id_t)layout), out, err, size)) {
+        !parse_slots(slots, ui_layout((ui_layout_id_t)layout), doc, out, err, size)) {
         return false;
     }
-    if (layout == UI_LAYOUT_SPLIT && !parse_split(cJSON_GetObjectItemCaseSensitive(item, "split"), out, err, size)) {
+    if (layout == UI_LAYOUT_SPLIT &&
+        !parse_split(cJSON_GetObjectItemCaseSensitive(item, "split"), doc, out, err, size)) {
         return false;
     }
     const cJSON *options = cJSON_GetObjectItemCaseSensitive(item, "options");
@@ -331,7 +393,7 @@ static bool parse(const cJSON *root, ui_presets_t *out, char *err, size_t size)
     cJSON_ArrayForEach(item, presets)
     {
         ui_preset_t *p = &out->presets[out->count];
-        if (!parse_preset(item, p, err, size)) {
+        if (!parse_preset(item, out, p, err, size)) {
             return false;
         }
         if (ui_presets_find(out, p->id) >= 0) {
@@ -379,26 +441,27 @@ bool ui_presets_from_json(const char *json, ui_presets_t *out, char *err, size_t
 }
 
 /* A split tree's node and everything under it, in preorder: `at` the node, `cell` its first cell. */
-static cJSON *node_json(const ui_preset_t *p, int *at, int *cell)
+static cJSON *node_json(const ui_presets_t *doc, const ui_preset_t *p, int *at, int *cell)
 {
     cJSON *obj = cJSON_CreateObject();
     uint8_t node = p->split[(*at)++];
     if ((node & UI_SPLIT_RATIO) == 0) {
-        const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[(*cell)++]);
-        if (info != NULL) {
-            cJSON_AddStringToObject(obj, "field", info->id);
+        char name[HA_KEY_LEN + 8];
+        field_name(doc, p->slots[(*cell)++], name, sizeof(name));
+        if (name[0] != '\0') {
+            cJSON_AddStringToObject(obj, "field", name);
         }
         return obj;
     }
     cJSON_AddStringToObject(obj, "split", node & UI_SPLIT_COLUMNS ? "columns" : "rows");
     cJSON_AddStringToObject(obj, "ratio", ui_split_ratio_name(node & UI_SPLIT_RATIO));
     cJSON_AddBoolToObject(obj, "line", !(node & UI_SPLIT_NO_LINE));
-    cJSON_AddItemToObject(obj, "a", node_json(p, at, cell));
-    cJSON_AddItemToObject(obj, "b", node_json(p, at, cell));
+    cJSON_AddItemToObject(obj, "a", node_json(doc, p, at, cell));
+    cJSON_AddItemToObject(obj, "b", node_json(doc, p, at, cell));
     return obj;
 }
 
-static cJSON *preset_json(const ui_preset_t *p)
+static cJSON *preset_json(const ui_presets_t *doc, const ui_preset_t *p)
 {
     const ui_layout_t *layout = ui_layout((ui_layout_id_t)p->layout);
     cJSON *obj = cJSON_CreateObject();
@@ -409,13 +472,14 @@ static cJSON *preset_json(const ui_preset_t *p)
     if (p->layout == UI_LAYOUT_SPLIT) {
         int at = 0, cell = 0;
         bool whole = ui_split_nodes(p->split) > 0; /* a tree cut short can't be walked: one empty cell */
-        cJSON_AddItemToObject(obj, "split", whole ? node_json(p, &at, &cell) : cJSON_CreateObject());
+        cJSON_AddItemToObject(obj, "split", whole ? node_json(doc, p, &at, &cell) : cJSON_CreateObject());
     } else {
         cJSON *slots = cJSON_AddObjectToObject(obj, "slots");
         for (int i = 0; i < layout->slot_count; i++) {
-            const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[i]);
-            if (info != NULL) {
-                cJSON_AddStringToObject(slots, layout->slots[i].name, info->id);
+            char name[HA_KEY_LEN + 8];
+            field_name(doc, p->slots[i], name, sizeof(name));
+            if (name[0] != '\0') {
+                cJSON_AddStringToObject(slots, layout->slots[i].name, name);
             }
         }
     }
@@ -446,7 +510,7 @@ size_t ui_presets_to_json(const ui_presets_t *p, char *out, size_t size)
     cJSON_AddNumberToObject(cycle, "interval_s", p->cycle_interval_s);
     cJSON *presets = cJSON_AddArrayToObject(root, "presets");
     for (int i = 0; i < p->count; i++) {
-        cJSON_AddItemToArray(presets, preset_json(&p->presets[i]));
+        cJSON_AddItemToArray(presets, preset_json(p, &p->presets[i]));
     }
     if (p->schedule.enabled || p->schedule.count) {
         cJSON *schedule = cJSON_AddObjectToObject(root, "schedule");

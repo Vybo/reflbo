@@ -132,5 +132,24 @@ size_t ui_catalog_fields_json(const ui_context_t *ctx, char *out, size_t size)
         }
         cJSON_AddItemToArray(fields, fo);
     }
+    for (int i = 0; ctx->mqtt != NULL && i < ctx->mqtt->count; i++) { /* the mapped ones (spec §12.5) */
+        static ui_value_t v;
+        memset(&v, 0, sizeof(v));
+        ui_mqtt_value(ctx, i, &v);
+        char id[HA_KEY_LEN + 8], value[sizeof(v.text) + sizeof(v.unit) + 2];
+        snprintf(id, sizeof(id), "mqtt.%s", ctx->mqtt->entry[i].key);
+        snprintf(value, sizeof(value), "%s%s%s", v.state == UI_VALUE_MISSING ? "" : v.text,
+                 v.state != UI_VALUE_MISSING && v.unit[0] ? " " : "", v.state == UI_VALUE_MISSING ? "" : v.unit);
+        cJSON *fo = cJSON_CreateObject();
+        cJSON_AddStringToObject(fo, "id", id);
+        cJSON_AddStringToObject(fo, "kind", k_kinds[v.kind]);
+        cJSON_AddStringToObject(fo, "label", v.label);
+        cJSON_AddStringToObject(fo, "value", value);
+        cJSON_AddStringToObject(fo, "state", k_states[v.state]);
+        if (v.state == UI_VALUE_STALE) {
+            cJSON_AddNumberToObject(fo, "age_s", v.age_s);
+        }
+        cJSON_AddItemToArray(fields, fo);
+    }
     return print(root, out, size);
 }

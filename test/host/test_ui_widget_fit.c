@@ -274,6 +274,55 @@ static void test_every_field_fits_every_cell_a_split_can_make(void)
     }
 }
 
+/* MQTT fields at their longest (spec §12.5): a 23-byte label, a 7-byte unit, a number of 8 digits with a
+ * decimal and a 47-byte text, in English and in Czech, fresh and stale, in every cell a tree can make. */
+static void test_mqtt_fields_fit_every_cell_a_split_can_make(void)
+{
+    static ha_fields_t f;
+    static ha_store_t store;
+    static ui_mqtt_keys_t keys;
+    memset(&f, 0, sizeof(f));
+    f.count = 2;
+    f.field[0] = (ha_field_t){ .key = "n", .label = "Teplota u garáže dole", .kind = HA_KIND_NUMBER,
+                               .unit = "\xC2\xB5g/m\xC2\xB3" };
+    f.field[1] = (ha_field_t){ .key = "t", .label = "Waschmaschine im Keller", .kind = HA_KIND_TEXT };
+    ha_store_init(&store);
+    ha_store_rebuild(&store, &f);
+    ha_store_set_default_ttl(&store, 3600);
+    keys = (ui_mqtt_keys_t){ .count = 2, .key = { "n", "t" } };
+    s_cell_count = 0;
+    reach(400, 279, 0);
+    for (int variant = 0; variant < 4; variant++) {
+        ui_context_t ctx = split_context(variant % 2);
+        ctx.mqtt = &store;
+        ctx.mqtt_keys = &keys;
+        time_t at = variant < 2 ? FIX_NOW : FIX_NOW - 2 * 3600; /* stale: its age at the bottom right */
+        ha_value_t v = { .kind = HA_KIND_NUMBER, .number = -12345678, .decimals = 1 };
+        ha_store_set(&store, 0, &v, at);
+        v = (ha_value_t){ .kind = HA_KIND_TEXT, .text = "Wäsche fertig: bitte ausräumen und aufhängen" };
+        ha_store_set(&store, 1, &v, at);
+        for (int i = 0; i < s_cell_count; i++) {
+            int w = s_cells[i].w, h = s_cells[i].h;
+            for (int k = 0; k < 2; k++) {
+                if (ui_split_field_size(k == 0 ? UI_FK_NUMBER : UI_FK_TEXT, w, h) < 0) {
+                    continue; /* no room: drawn as nothing, and refused in a preset */
+                }
+                gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), (int16_t)w, (int16_t)h };
+                gfx_fb_init(&s_fb, s_buf, 400, 300);
+                gfx_clear(&s_fb, GFX_WHITE);
+                ui_draw_cell(&s_fb, r, &ctx, (ui_field_id_t)(UI_FIELD_MQTT + k), UI_STALE_STALE);
+                char msg[80];
+                snprintf(msg, sizeof(msg), "mqtt %s at %d×%d, variant %d", keys.key[k], w, h, variant);
+                TEST_ASSERT_TRUE_MESSAGE(inked(r.x + 2, r.x + w - 3, r.y + 2, r.y + h - 3), msg);
+                TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y, r.y + 1), msg);
+                TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y + h - 2, r.y + h - 1), msg);
+                TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + 1, r.y, r.y + h - 1), msg);
+                TEST_ASSERT_FALSE_MESSAGE(inked(r.x + w - 2, r.x + w - 1, r.y, r.y + h - 1), msg);
+            }
+        }
+    }
+}
+
 /* A field with no room in its cell isn't drawn at all, rather than cut. */
 static void test_a_field_without_room_draws_nothing(void)
 {
@@ -296,5 +345,6 @@ int main(void)
     RUN_TEST(test_a_number_keeps_its_size_as_its_digits_change);
     RUN_TEST(test_every_field_fits_every_cell_a_split_can_make);
     RUN_TEST(test_a_field_without_room_draws_nothing);
+    RUN_TEST(test_mqtt_fields_fit_every_cell_a_split_can_make);
     return UNITY_END();
 }

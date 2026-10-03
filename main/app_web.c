@@ -294,6 +294,7 @@ static void preview(const char *method, const char *query, const char *body, uin
         app_radar_prepare(&doc.presets[index]); /* its map, and the frame from its file if PSRAM has none */
         ui_context_t ctx;
         app_ui_context(&ctx);
+        ctx.mqtt_keys = &doc.mqtt; /* the posted document's own keys (spec §12.5) */
         ui_draw_dashboard(fb, &ctx, &doc.presets[index]);
     }
     reply_bmp(fb, out, size, reply);

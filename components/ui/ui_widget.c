@@ -279,6 +279,12 @@ static const char *display_text(const ui_value_t *v, ui_size_t size)
     }
 }
 
+/* An MQTT field has no icon (spec §12.5): its label stands where the icon would, in the small face. */
+static bool label_symbol(const ui_value_t *v)
+{
+    return ui_field_is_mqtt(v->field) && v->label != NULL && v->label[0] != '\0';
+}
+
 static bool numeric(const ui_value_t *v)
 {
     return v->state != UI_VALUE_MISSING &&
@@ -300,7 +306,13 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         int sym_size = v->kind == UI_FK_MOON ? 28 : f->icon;
         int sym_w = v->kind == UI_FK_BATTERY ? sym_size * 3 / 2 : sym_size;
         int sym_x = r.x + (r.w - sym_w) / 2;
-        draw_symbol(fb, v, sym_x, r.y + 12, sym_size);
+        if (label_symbol(v)) {
+            gfx_text_ellipsize(&gfx_font_sans_12, v->label, r.w - 8, fit, sizeof(fit));
+            gfx_text_in_rect(fb, &gfx_font_sans_12, (gfx_rect_t){ r.x, (int16_t)(r.y + 12), r.w, (int16_t)sym_size },
+                             GFX_ALIGN_CENTER, fit, GFX_BLACK);
+        } else {
+            draw_symbol(fb, v, sym_x, r.y + 12, sym_size);
+        }
         if (shown.trend) {
             gfx_text(fb, &gfx_font_sans_bold_16, sym_x + sym_w + 4, r.y + 12 + sym_size - 4,
                      shown.trend > 0 ? ARROW_UP : ARROW_DOWN, GFX_BLACK);
@@ -314,8 +326,9 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
             return;
         }
         int max_w = r.w - 8;
-        if (!numeric(v) && gfx_text_width(vf, value) > max_w) { /* a name: two lines in the regular face */
-            const gfx_font_t *tf = f->unit;
+        const gfx_font_t *tf = f->unit;
+        bool two_lines = r.h >= 12 + f->icon + 10 + 2 * tf->line_height + 2; /* else one, cut (M6b review) */
+        if (!numeric(v) && gfx_text_width(vf, value) > max_w && two_lines) { /* a name: two lines, regular face */
             char second[sizeof(fit)];
             ui_split_two_lines(tf, value, max_w, fit, second, sizeof(fit));
             int top = r.y + 12 + f->icon + 10;
@@ -336,7 +349,15 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         draw_group(fb, f, vf, &shown, value, r.x + (r.w - w) / 2, baseline);
         return;
     }
-    int sym_w = draw_symbol(fb, v, r.x + 14, r.y + (r.h - f->icon) / 2, f->icon); /* wide: side by side */
+    int sym_w; /* wide: side by side */
+    if (label_symbol(v)) { /* up to two fifths of the cell */
+        gfx_text_ellipsize(&gfx_font_sans_12, v->label, r.w * 2 / 5, fit, sizeof(fit));
+        sym_w = gfx_text_width(&gfx_font_sans_12, fit);
+        gfx_text_in_rect(fb, &gfx_font_sans_12, (gfx_rect_t){ (int16_t)(r.x + 14), r.y, (int16_t)sym_w, r.h },
+                         GFX_ALIGN_LEFT, fit, GFX_BLACK);
+    } else {
+        sym_w = draw_symbol(fb, v, r.x + 14, r.y + (r.h - f->icon) / 2, f->icon);
+    }
     int x = r.x + 14 + sym_w + 10;
     if (!numeric(v)) {
         gfx_text_ellipsize(vf, value, r.x + r.w - 6 - x, fit, sizeof(fit));

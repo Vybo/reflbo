@@ -278,6 +278,19 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
     } else if (strcmp(name, "home_temp_main_cs") == 0) { /* in Czech the decimals give way to the comma's tail */
         fixture_dashboard("home_temp_main", ctx, preset);
         ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "mqtt_grid") == 0) { /* M7: MQTT fields, fresh, a text, stale, missing, unmapped */
+        *preset = fixture_preset("indoor");
+        for (int k = 0; k < 6; k++) {
+            preset->slots[k] = (uint8_t)FIX_MQTT(k);
+        }
+        fixture_mqtt(ctx);
+    } else if (strcmp(name, "mqtt_home_cs") == 0) { /* small slots: each label where an icon would be */
+        *preset = fixture_preset("home");
+        for (int k = 0; k < 4; k++) {
+            preset->slots[2 + k] = (uint8_t)FIX_MQTT(k);
+        }
+        fixture_mqtt(ctx);
+        ctx->lang = lang_get("cs");
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -305,4 +318,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "flights", "flights_100", "flights_cs", "flights_none",
                                                     "flights_failed", "flights_off", "split_weather",
                                                     "split_eight", "home_temp_main", "home_temp_main_cs",
-                                                    "weather_frost_cs", "weather_hot_f" };
+                                                    "weather_frost_cs", "weather_hot_f", "mqtt_grid",
+                                                    "mqtt_home_cs" };

@@ -171,6 +171,30 @@ static void test_fields_carry_their_kind_label_and_current_value(void)
     TEST_ASSERT_EQUAL_STRING("", str(wx, "value"));
 }
 
+/* The mapped MQTT fields follow the built-in ones (spec §10.3): the editor offers them by kind. */
+static void test_fields_list_the_mapped_mqtt_fields(void)
+{
+    ui_context_t ctx = fixture_context();
+    fixture_mqtt(&ctx);
+    TEST_ASSERT_TRUE(ui_catalog_fields_json(&ctx, s_out, sizeof(s_out)) > 0);
+    s_root = cJSON_Parse(s_out);
+    const cJSON *fields = cJSON_GetObjectItemCaseSensitive(s_root, "fields");
+    TEST_ASSERT_EQUAL_INT(UI_FIELD_COUNT - 1 + 5, cJSON_GetArraySize(fields));
+    const cJSON *f = by_id(fields, "mqtt.outdoor");
+    TEST_ASSERT_EQUAL_STRING("number", str(f, "kind"));
+    TEST_ASSERT_EQUAL_STRING("Outside", str(f, "label"));
+    TEST_ASSERT_EQUAL_STRING("21.5 \xC2\xB0" "C", str(f, "value"));
+    TEST_ASSERT_EQUAL_STRING("fresh", str(f, "state"));
+    f = by_id(fields, "mqtt.door");
+    TEST_ASSERT_EQUAL_STRING("text", str(f, "kind"));
+    TEST_ASSERT_EQUAL_STRING("Closed", str(f, "value"));
+    f = by_id(fields, "mqtt.power");
+    TEST_ASSERT_EQUAL_STRING("stale", str(f, "state"));
+    TEST_ASSERT_EQUAL_INT(3 * 3600, num(f, "age_s"));
+    TEST_ASSERT_EQUAL_STRING("missing", str(by_id(fields, "mqtt.washer"), "state"));
+    TEST_ASSERT_NULL(by_id(fields, "mqtt.window")); /* the presets name it, no mapping does */
+}
+
 static void test_a_buffer_too_small_gives_nothing(void)
 {
     TEST_ASSERT_EQUAL_UINT(0, ui_catalog_layouts_json(s_out, 64));
@@ -184,6 +208,7 @@ int main(void)
     RUN_TEST(test_layouts_list_their_slots_with_rectangles_sizes_and_kinds);
     RUN_TEST(test_layouts_publish_the_split_rules);
     RUN_TEST(test_fields_carry_their_kind_label_and_current_value);
+    RUN_TEST(test_fields_list_the_mapped_mqtt_fields);
     RUN_TEST(test_a_buffer_too_small_gives_nothing);
     return UNITY_END();
 }

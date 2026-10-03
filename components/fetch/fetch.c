@@ -8,6 +8,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 static const char *TAG = "fetch";
 
@@ -36,6 +37,7 @@ static esp_err_t get_once(fetch_session_t *s, const char *url, char *buf, size_t
             .crt_bundle_attach = esp_crt_bundle_attach,
             .user_agent = agent,
             .buffer_size = 2048,
+            .buffer_size_tx = 1024, /* the forecast's request line is 451-454 B: 512 left no room (M6 review) */
         };
         client = esp_http_client_init(&cfg);
         ESP_RETURN_ON_FALSE(client != NULL, ESP_ERR_NO_MEM, TAG, "client");
@@ -49,7 +51,9 @@ static esp_err_t get_once(fetch_session_t *s, const char *url, char *buf, size_t
     }
     if (err == ESP_OK) {
         int64_t length = esp_http_client_fetch_headers(client);
-        if (length < 0) {
+        if (length == -ESP_ERR_HTTP_EAGAIN) {
+            err = ESP_ERR_TIMEOUT; /* the reply's headers didn't come in time: "timeout", not ESP_FAIL */
+        } else if (length < 0) {
             err = ESP_FAIL; /* no reply: a connection the server closed meanwhile reads as status -1 */
         } else {
             *status = esp_http_client_get_status_code(client);
@@ -89,9 +93,11 @@ esp_err_t fetch_get(fetch_session_t *s, const char *url, void *buf, size_t size,
                     int *status)
 {
     bool reused = s->client != NULL;
+    int64_t start_ms = esp_timer_get_time() / 1000;
     esp_err_t err = get_once(s, url, buf, size, len, timeout_ms, status);
-    if (err != ESP_OK && reused && *status <= 0) { /* the server closed the kept connection: once more */
-        err = get_once(s, url, buf, size, len, timeout_ms, status);
+    int left_ms = timeout_ms - (int)(esp_timer_get_time() / 1000 - start_ms); /* the retry gets what is left */
+    if (err != ESP_OK && reused && *status <= 0 && left_ms >= 1000) { /* the kept connection was closed: once more */
+        err = get_once(s, url, buf, size, len, left_ms, status);
     }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "GET %.48s...: %s, HTTP %d, %u bytes", url, esp_err_to_name(err), *status, (unsigned)*len);

@@ -1,3 +1,4 @@
+#include <string.h>
 #define _POSIX_C_SOURCE 200809L /* setenv */
 
 #include <stdlib.h>
@@ -439,6 +440,36 @@ static void test_interval_slots_on_the_fall_back_day(void)
     TEST_ASSERT_EQUAL_UINT32(2 * 3600, sync_expected_interval_s(&s, utc(2026, 10, 25, 10, 0, 0)));
 }
 
+/* M7: how long quiet hours keep Wi-Fi off in sync mode `always` (HA's sensors outlast it, spec §12.3). */
+static void test_the_quiet_hours_span(void)
+{
+    sync_schedule_t s = { .mode = SYNC_MODE_ALWAYS, .quiet = true, .quiet_from = 23 * 60, .quiet_to = 6 * 60 };
+    TEST_ASSERT_EQUAL_UINT32(7 * 3600, sync_quiet_span_s(&s));
+    s.quiet_from = 60;
+    TEST_ASSERT_EQUAL_UINT32(5 * 3600, sync_quiet_span_s(&s));
+    s.quiet_from = s.quiet_to;
+    TEST_ASSERT_EQUAL_UINT32(0, sync_quiet_span_s(&s)); /* no minutes: off */
+    s.quiet_from = 23 * 60;
+    s.quiet = false;
+    TEST_ASSERT_EQUAL_UINT32(0, sync_quiet_span_s(&s));
+}
+
+/* D32: a failed MQTT session never fails a sync; any other step that didn't pass does (the first one names it). */
+static void test_mqtt_alone_never_fails_a_sync(void)
+{
+    uint8_t r[SYNC_STEP_COUNT];
+    memset(r, SYNC_STEP_OK, sizeof(r));
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_COUNT, sync_first_failed(r));
+    r[SYNC_STEP_MQTT] = SYNC_STEP_FAILED;
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_COUNT, sync_first_failed(r));
+    r[SYNC_STEP_MQTT] = SYNC_STEP_NOT_RUN; /* MQTT off */
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_COUNT, sync_first_failed(r));
+    r[SYNC_STEP_RADAR] = SYNC_STEP_NOT_RUN;
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_RADAR, sync_first_failed(r));
+    r[SYNC_STEP_WEATHER] = SYNC_STEP_FAILED;
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_WEATHER, sync_first_failed(r));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -477,5 +508,7 @@ int main(void)
     RUN_TEST(test_a_time_in_the_spring_forward_gap_runs_after_it);
     RUN_TEST(test_a_time_in_the_repeated_hour_runs_once);
     RUN_TEST(test_interval_slots_on_the_fall_back_day);
+    RUN_TEST(test_the_quiet_hours_span);
+    RUN_TEST(test_mqtt_alone_never_fails_a_sync);
     return UNITY_END();
 }

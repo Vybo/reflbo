@@ -32,6 +32,24 @@ static int local_minute(time_t t)
     return localtime_r(&t, &local) != NULL ? local.tm_hour * 60 + local.tm_min : -1;
 }
 
+int sync_first_failed(const uint8_t result[SYNC_STEP_COUNT])
+{
+    for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+        if (i != SYNC_STEP_MQTT && result[i] != SYNC_STEP_OK) {
+            return i;
+        }
+    }
+    return SYNC_STEP_COUNT;
+}
+
+uint32_t sync_quiet_span_s(const sync_schedule_t *s)
+{
+    if (!s->quiet || s->quiet_from == s->quiet_to || s->quiet_from >= DAY_MIN || s->quiet_to >= DAY_MIN) {
+        return 0;
+    }
+    return (uint32_t)((s->quiet_to - s->quiet_from + DAY_MIN) % DAY_MIN) * 60;
+}
+
 bool sync_quiet_at(const sync_schedule_t *s, time_t t)
 {
     if (!s->quiet || s->quiet_from == s->quiet_to || s->quiet_from >= DAY_MIN || s->quiet_to >= DAY_MIN) {

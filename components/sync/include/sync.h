@@ -7,6 +7,7 @@
 #include "esp_err.h"
 #include "radar_fetch.h"
 #include "settings.h"
+#include "sync_plan.h"
 
 /*
  * The sync (spec §9.3): Wi-Fi, the time, the weather, the air quality and the weather radar, on a
@@ -16,21 +17,6 @@
  * keeps it.
  */
 
-typedef enum {
-    SYNC_STEP_WIFI,
-    SYNC_STEP_TIME,
-    SYNC_STEP_WEATHER,
-    SYNC_STEP_AIR,
-    SYNC_STEP_RADAR, /* M6 (spec §11.2) */
-    SYNC_STEP_COUNT,
-} sync_step_t;
-
-typedef enum {
-    SYNC_STEP_NOT_RUN, /* skipped: an earlier step failed, or the sync never got there */
-    SYNC_STEP_OK,
-    SYNC_STEP_FAILED,
-} sync_step_result_t;
-
 #define SYNC_DETAIL_LEN 24
 
 typedef struct {
@@ -38,6 +24,9 @@ typedef struct {
     char ntp[SETTINGS_NTP_MAX][SETTINGS_HOST_LEN];
     radar_fetch_req_t radar; /* its deadline is the sync's to set */
     bool radar_only;         /* sync mode `always`'s radar refresh: Wi-Fi up already, the radar alone */
+    /* M7: the MQTT session on the sync's task within budget_ms, ESP_OK or why not in `detail`; NULL while
+     * MQTT is off, which skips the step */
+    esp_err_t (*mqtt)(int budget_ms, char *detail, size_t size);
 } sync_request_t;
 
 typedef struct {
@@ -59,4 +48,4 @@ esp_err_t sync_start(const sync_request_t *req, void (*done)(sync_report_t *repo
 bool sync_running(void);
 /* The step running now, for the progress the web UI shows; SYNC_STEP_COUNT when none runs. */
 sync_step_t sync_step(void);
-const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air", "radar" */
+const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air", "radar", "mqtt" */

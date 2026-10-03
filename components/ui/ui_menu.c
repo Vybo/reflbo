@@ -67,6 +67,7 @@ static const node_t k_nodes[UI_MI_COUNT] = {
     [UI_MI_INFO_SYNC] = { .label = LS_M_LAST_SYNC, .kind = K_INFO, .parent = UI_MI_INFO },
     [UI_MI_INFO_UPTIME] = { .label = LS_M_UPTIME, .kind = K_INFO, .parent = UI_MI_INFO },
     [UI_MI_INFO_MEMORY] = { .label = LS_M_FREE_MEMORY, .kind = K_INFO, .parent = UI_MI_INFO },
+    [UI_MI_INFO_MQTT] = { .label = LS_M_MQTT, .kind = K_INFO, .parent = UI_MI_INFO },
     [UI_MI_SYSTEM] = { .label = LS_M_SYSTEM, .kind = K_SECTION, .parent = UI_MI_ROOT },
     [UI_MI_LANGUAGE] = { .label = LS_M_LANGUAGE, .kind = K_CHOICE, .parent = UI_MI_SYSTEM },
     [UI_MI_REBOOT] = { .label = LS_M_REBOOT, .kind = K_ACTION, .parent = UI_MI_SYSTEM },

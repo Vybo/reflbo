@@ -120,15 +120,12 @@ bool app_sync_running(void)
 bool app_sync_failed(void)
 {
     const app_sync_state_t *s = st();
-    if (s->last_at == 0) {
-        return false;
-    }
-    for (int i = 0; i < SYNC_STEP_COUNT; i++) {
-        if (s->last_result[i] != SYNC_STEP_OK) {
-            return true;
-        }
-    }
-    return false;
+    return s->last_at != 0 && sync_first_failed(s->last_result) < SYNC_STEP_COUNT; /* MQTT's never (D32) */
+}
+
+bool app_sync_mark_failed(void)
+{
+    return st()->sched_failed;
 }
 
 /* Wi-Fi is off: netmgr isn't up yet (a routine wake), or it says so. */
@@ -188,14 +185,12 @@ static void save_summary(const sync_report_t *r, time_t started)
     app_sync_state_t *s = st();
     s->last_at = (uint32_t)started;
     s->last_detail[0] = '\0';
-    s->last_failed_step = SYNC_STEP_COUNT;
-    for (int i = 0; i < SYNC_STEP_COUNT; i++) {
-        s->last_result[i] = r->result[i];
-        if (r->result[i] != SYNC_STEP_OK && s->last_failed_step == SYNC_STEP_COUNT) {
-            s->last_failed_step = (uint8_t)i;
-            snprintf(s->last_detail, sizeof(s->last_detail), "%s", r->detail[i]);
-        }
+    memcpy(s->last_result, r->result, sizeof(s->last_result));
+    s->last_failed_step = (uint8_t)sync_first_failed(r->result); /* MQTT's never fails it (D32) */
+    if (s->last_failed_step < SYNC_STEP_COUNT) {
+        snprintf(s->last_detail, sizeof(s->last_detail), "%s", r->detail[s->last_failed_step]);
     }
+    snprintf(s->mqtt_detail, sizeof(s->mqtt_detail), "%s", r->detail[SYNC_STEP_MQTT]);
 }
 
 static int64_t s_started_mono; /* esp_timer µs at the start, to date it once the clock is right */
@@ -254,8 +249,17 @@ static void apply(void *arg)
     save_summary(r, started);
     bool ok = !app_sync_failed();
     sync_history_record(&st()->history, s_started_by, ok, now);
-    ESP_LOGI(TAG, "sync %s%s%s", ok ? "done" : "failed at ", ok ? "" : sync_step_name(st()->last_failed_step),
-             ok ? "" : st()->last_detail);
+    if (ok) {
+        st()->last_ok_at = (uint32_t)started;
+        st()->sched_failed = false;
+    } else if (s_started_by.at != 0) {
+        st()->sched_failed = true; /* spec §5.2: a scheduled sync's, not one on demand (M5 review) */
+    }
+    ESP_LOGI(TAG, "sync %s%s%s%s", ok ? "done" : "failed at ", ok ? "" : sync_step_name(st()->last_failed_step),
+             ok ? "" : ": ", ok ? "" : st()->last_detail); /* "failed at weather: HTTP 503" (M5 review) */
+    if (r->result[SYNC_STEP_MQTT] == SYNC_STEP_FAILED) {
+        ESP_LOGW(TAG, "MQTT: %s", r->detail[SYNC_STEP_MQTT]);
+    }
     s_active = false; /* the report is applied: the next sync may overwrite it */
     release_wifi();
     app_sync_schedule();
@@ -289,6 +293,10 @@ static esp_err_t start(bool manual, sync_due_t due)
     req = (sync_request_t){ .lat_e4 = set->lat_e4, .lon_e4 = set->lon_e4 };
     memcpy(req.ntp, set->ntp, sizeof(req.ntp));
     app_radar_request(&req.radar);
+    if (app_mqtt_on()) { /* M7 (spec §9.3 step 6) */
+        app_mqtt_prepare();
+        req.mqtt = app_mqtt_sync_step;
+    }
     esp_err_t err = sync_start(&req, done);
     if (err == ESP_OK) {
         s_active = true;
@@ -465,7 +473,7 @@ void app_sync_summary(char *out, size_t size)
     const char *suffix;
     lang_format_time(local.tm_hour, local.tm_min, 0, app_settings()->clock_24h, false, when, sizeof(when), &suffix);
     static const lang_str_t k_steps[SYNC_STEP_COUNT] = { LS_SYNC_STEP_WIFI, LS_SYNC_STEP_TIME, LS_SYNC_STEP_WEATHER,
-                                                         LS_SYNC_STEP_AIR, LS_SYNC_STEP_RADAR };
+                                                         LS_SYNC_STEP_AIR, LS_SYNC_STEP_RADAR, LS_SYNC_STEP_MQTT };
     if (s->last_failed_step >= SYNC_STEP_COUNT) {
         snprintf(out, size, "%s%s%s OK", when, suffix[0] ? " " : "", suffix);
     } else {

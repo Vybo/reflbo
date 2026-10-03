@@ -88,6 +88,8 @@ int ui_schedule_due(const ui_schedule_t *schedule, time_t after, time_t now, int
  * back, and a gap longer than max_gap_s, a sleep no entry could end, only move the mark. */
 int ui_schedule_step(const ui_schedule_t *schedule, time_t *checked, time_t now, time_t max_gap_s,
                      int order[UI_SCHEDULE_MAX]);
+/* The longest night the schedule starts, 0 while it is off (M7: what HA's sensors must outlast). */
+uint32_t ui_schedule_longest_night_s(const ui_schedule_t *schedule);
 /* Where the checks resume after a night that ended at `until`: a night covers [start, until), so
  * the entries inside it don't run, and one at the end minute does. */
 time_t ui_schedule_after_night(time_t until);

@@ -703,6 +703,7 @@ static void app_task(void *arg)
             }
             app_config_tick();
             app_sync_wifi_check();
+            app_mqtt_tick();
             app_ui_toast_expire();
             app_radar_loop_tick();
             bool busy = pending || app_menu_is_open() || app_ui_toast_active();
@@ -744,7 +745,8 @@ static void app_task(void *arg)
             int64_t mono = app_uptime_ms();
             const int64_t deadlines[] = { app_menu_deadline_ms(), app_ui_toast_until_ms(),
                                           app_ui_night() ? s_peek_until_ms : 0, app_config_redraw_ms(),
-                                          s_ota_pending ? OTA_VERIFY_MS : 0, app_radar_loop_deadline_ms() };
+                                          s_ota_pending ? OTA_VERIFY_MS : 0, app_radar_loop_deadline_ms(),
+                                          app_mqtt_deadline_ms() };
             for (size_t i = 0; i < sizeof(deadlines) / sizeof(deadlines[0]); i++) {
                 if (deadlines[i] != 0 && deadlines[i] - mono < wait_ms) {
                     wait_ms = deadlines[i] - mono;

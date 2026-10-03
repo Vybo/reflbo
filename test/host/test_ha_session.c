@@ -65,6 +65,16 @@ static void test_the_interval_sensors_expire_by(void)
     TEST_ASSERT_EQUAL_UINT32(600 + 7 * 3600, ha_expected_s(true, 7 * 3600, 7 * 3600));
 }
 
+/* spec §12.9, sync mode `always`: the state goes out on a change, at most every 30 s, and every 5 min. */
+static void test_the_state_goes_out_on_change_or_every_five_minutes(void)
+{
+    TEST_ASSERT_TRUE(ha_state_due(false, -1));   /* none went out yet */
+    TEST_ASSERT_FALSE(ha_state_due(true, 29));
+    TEST_ASSERT_TRUE(ha_state_due(true, 30));
+    TEST_ASSERT_FALSE(ha_state_due(false, 299));
+    TEST_ASSERT_TRUE(ha_state_due(false, 300));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -72,5 +82,6 @@ int main(void)
     RUN_TEST(test_topics_are_subscribed_once);
     RUN_TEST(test_collecting_ends_with_every_topic_or_a_quiet_second);
     RUN_TEST(test_the_interval_sensors_expire_by);
+    RUN_TEST(test_the_state_goes_out_on_change_or_every_five_minutes);
     return UNITY_END();
 }

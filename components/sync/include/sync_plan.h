@@ -13,6 +13,26 @@
 
 typedef enum { SYNC_MODE_TIMES, SYNC_MODE_INTERVAL, SYNC_MODE_ALWAYS, SYNC_MODE_MANUAL } sync_mode_t;
 
+/* A sync's steps, in their order (spec §9.3), and how each went. */
+typedef enum {
+    SYNC_STEP_WIFI,
+    SYNC_STEP_TIME,
+    SYNC_STEP_WEATHER,
+    SYNC_STEP_AIR,
+    SYNC_STEP_RADAR, /* M6 (spec §11.2) */
+    SYNC_STEP_MQTT,  /* M7 (spec §9.3 step 6, D32): its failure doesn't fail the sync */
+    SYNC_STEP_COUNT,
+} sync_step_t;
+
+typedef enum {
+    SYNC_STEP_NOT_RUN, /* skipped: an earlier step failed, or the sync never got there */
+    SYNC_STEP_OK,
+    SYNC_STEP_FAILED,
+} sync_step_result_t;
+
+/* The first step that didn't pass, which fails the sync, or SYNC_STEP_COUNT: MQTT's never does (D32). */
+int sync_first_failed(const uint8_t result[SYNC_STEP_COUNT]);
+
 #define SYNC_TIMES_MAX 8
 #define SYNC_ALWAYS_REFRESH_MIN 60 /* weather and air quality in `always` mode */
 #define SYNC_RETRY_COUNT 3         /* retries 15, 30 and 60 min after each failure */
@@ -37,6 +57,8 @@ typedef struct {
 } sync_due_t;
 
 bool sync_quiet_at(const sync_schedule_t *s, time_t t);
+/* How long quiet hours last, 0 when they are off or have no minutes (M7: what HA's sensors must outlast). */
+uint32_t sync_quiet_span_s(const sync_schedule_t *s);
 /* The next scheduled sync strictly after `after`: a time, an interval slot, or in `always` mode the
  * hourly refresh (aligned like interval 60); one inside quiet hours moves to their end. 0 in `manual`. */
 time_t sync_next_scheduled(const sync_schedule_t *s, time_t after);

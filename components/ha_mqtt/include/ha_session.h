@@ -23,6 +23,9 @@ int ha_topic_index(const char *const *topics, int count, const char *topic, size
 /* The collect phase is over: every one of `topics` brought a message, or HA_QUIET_MS passed since
  * `quiet_since_ms` (the later of the subscriptions' confirmation and the last message). */
 bool ha_collect_over(int topics, int seen, int64_t now_ms, int64_t quiet_since_ms);
+/* Sync mode `always` (spec §12.9): the state goes out on a change, at most every 30 s, and every 5 min;
+ * `since_s` is the time since it last went out, negative for never. */
+bool ha_state_due(bool changed, int64_t since_s);
 /* What HA's sensors expire by (spec §12.3): the sync's expected interval, or in sync mode `always` 10 min
  * and the longest span Wi-Fi is off (quiet hours, a night); 0, never, in manual mode. */
 uint32_t ha_expected_s(bool always, uint32_t sync_expected_s, uint32_t longest_off_s);

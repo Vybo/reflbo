@@ -37,7 +37,12 @@ typedef enum {
 
 #define SETTINGS_SYNC_TIMES_MAX 8
 #define SETTINGS_NTP_MAX 2
+#define SETTINGS_JSON_MAX 2048 /* settings.json at its largest, which test_settings.c builds */
 #define SETTINGS_HOST_LEN 64
+
+#define SETTINGS_MQTT_USER_LEN 64   /* mqtt.user, up to 63 bytes without control characters */
+#define SETTINGS_MQTT_PREFIX_LEN 32 /* mqtt.discovery_prefix, up to 31 bytes */
+#define SETTINGS_MQTT_PASS_LEN 64   /* the password, in NVS `secrets` (D32): up to 63 bytes */
 
 typedef struct {
     char language[4];                    /* "en" */
@@ -73,6 +78,12 @@ typedef struct {
     uint16_t fl_min_alt_ft; /* 0..60000 */
     bool fl_ground;         /* aircraft on the ground too */
     uint8_t fl_max;         /* aircraft shown at most, 1..100 */
+    bool mqtt_enabled;                          /* MQTT and Home Assistant (spec §12.1, D32) */
+    char mqtt_host[SETTINGS_HOST_LEN];          /* the broker: a host name or an address; "" for none */
+    uint16_t mqtt_port;                         /* 1..65535 */
+    char mqtt_user[SETTINGS_MQTT_USER_LEN];     /* "" logs in without a user */
+    bool mqtt_discovery;                        /* publish Home Assistant's discovery configs */
+    char mqtt_prefix[SETTINGS_MQTT_PREFIX_LEN]; /* their topics' first part: "homeassistant" */
 } settings_t;
 
 /* The sync's and the NTP servers' defaults (spec §14.3): times mode at 05:30, a 60 min interval,
@@ -89,6 +100,22 @@ void settings_replaced(settings_t *s, const settings_t *before);
 /* BOOT double on the dashboard (spec §5.6, D31): sync mode `always` on, remembering the mode
  * before, or off, back to the mode it remembers. */
 void settings_toggle_always(settings_t *s);
+
+/* MQTT's defaults (spec §14.3, D32): off, no broker or user, port 1883, discovery on under
+ * "homeassistant". */
+void settings_mqtt_defaults(settings_t *out);
+
+/* PATCH /api/settings and mqtt.password, which goes to NVS `secrets`, never into the file (spec §12.1):
+ * SETTINGS_SECRET_SET with it in `out`, SETTINGS_SECRET_CLEARED for "" or null, SETTINGS_SECRET_BAD for
+ * anything but a string of up to 63 bytes, SETTINGS_SECRET_NONE when the patch doesn't name it.
+ * settings_patch() and settings_to_json() leave it out of what they write. */
+typedef enum {
+    SETTINGS_SECRET_NONE,
+    SETTINGS_SECRET_SET,
+    SETTINGS_SECRET_CLEARED,
+    SETTINGS_SECRET_BAD,
+} settings_secret_t;
+settings_secret_t settings_patch_secret(const char *patch, char *out, size_t size);
 
 /* The radars' defaults (spec §14.3): zoom 6.5; a range of 50 km, every altitude, none on the ground,
  * 100 aircraft; both centres on out->lat_e4 and lon_e4, so set the location first. */

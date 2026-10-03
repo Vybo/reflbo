@@ -18,6 +18,7 @@ void setUp(void)
                                .sync_interval_min = 60, .quiet = false, .quiet_from = 1380, .quiet_to = 360,
                                .ntp = { "cz.pool.ntp.org", "pool.ntp.org" } };
     settings_radar_defaults(&s_defaults);
+    settings_mqtt_defaults(&s_defaults);
     memset(&s_out, 0xAA, sizeof(s_out));
     s_err[0] = '\0';
 }
@@ -111,7 +112,7 @@ static void test_deep_nesting_is_rejected_before_parsing(void)
 
 static void test_saving_keeps_keys_this_firmware_does_not_know(void)
 {
-    const char *base = "{\"schema\": 1, \"mqtt\": {\"host\": \"ha.local\"}, \"time\": {\"ntp\": [\"a\"], \"clock_24h\": true}}";
+    const char *base = "{\"schema\": 1, \"audio\": {\"host\": \"ha.local\"}, \"time\": {\"ntp\": [\"a\"], \"clock_24h\": true}}";
     settings_t s = s_defaults;
     s.clock_24h = false;
     s.lpm_quarter_hz = 32;
@@ -489,6 +490,182 @@ static void test_settings_that_replace_others_remember_the_mode_left(void)
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_SYNC_MANUAL, next.sync_mode_before_always);
 }
 
+/* mqtt.* (spec §12.1, §14.3, D32): off, no broker, port 1883, discovery on under "homeassistant". */
+static void test_the_mqtt_defaults_are_the_specs(void)
+{
+    settings_t s;
+    memset(&s, 0xAA, sizeof(s));
+    settings_mqtt_defaults(&s);
+    TEST_ASSERT_FALSE(s.mqtt_enabled);
+    TEST_ASSERT_EQUAL_STRING("", s.mqtt_host);
+    TEST_ASSERT_EQUAL_UINT16(1883, s.mqtt_port);
+    TEST_ASSERT_EQUAL_STRING("", s.mqtt_user);
+    TEST_ASSERT_TRUE(s.mqtt_discovery);
+    TEST_ASSERT_EQUAL_STRING("homeassistant", s.mqtt_prefix);
+}
+
+static void test_the_mqtt_settings_parse_clamp_and_round_trip(void)
+{
+    const char *json = "{\"schema\":1,\"mqtt\":{\"enabled\":true,\"host\":\"ha.local\",\"port\":8883,"
+                       "\"user\":\"reflbo\",\"discovery\":false,\"discovery_prefix\":\"ha/discovery\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_TRUE(s_out.mqtt_enabled);
+    TEST_ASSERT_EQUAL_STRING("ha.local", s_out.mqtt_host);
+    TEST_ASSERT_EQUAL_UINT16(8883, s_out.mqtt_port);
+    TEST_ASSERT_EQUAL_STRING("reflbo", s_out.mqtt_user);
+    TEST_ASSERT_FALSE(s_out.mqtt_discovery);
+    TEST_ASSERT_EQUAL_STRING("ha/discovery", s_out.mqtt_prefix);
+    TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
+    settings_t again;
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &again, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_out, &again, sizeof(again));
+    json = "{\"schema\":1,\"mqtt\":{\"port\":70000}}";
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT16(65535, s_out.mqtt_port);
+    json = "{\"schema\":1,\"mqtt\":{\"port\":0}}";
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT16(1, s_out.mqtt_port);
+}
+
+/* A host or prefix that can't work keeps what was there; each value on its own. */
+static void test_bad_mqtt_values_fall_back_one_by_one(void)
+{
+    s_defaults.mqtt_enabled = true;
+    snprintf(s_defaults.mqtt_host, sizeof(s_defaults.mqtt_host), "%s", "ha.local");
+    static const char *const k_bad[] = {
+        "{\"schema\":1,\"mqtt\":{\"host\":\"ha local\",\"discovery_prefix\":\"ha/#\"}}",
+        "{\"schema\":1,\"mqtt\":{\"host\":5,\"discovery_prefix\":\"/ha\"}}",
+        ("{\"schema\":1,\"mqtt\":{\"host\":\"a234567890123456789012345678901234567890123456789012345678901234\","
+         "\"discovery_prefix\":\"ha/\"}}"),
+        "{\"schema\":1,\"mqtt\":{\"enabled\":\"yes\",\"discovery_prefix\":\"a+b\"}}",
+        "{\"schema\":1,\"mqtt\":{\"discovery_prefix\":\"\"}}",
+        "{\"schema\":1,\"mqtt\":{\"discovery_prefix\":\"a2345678901234567890123456789012\"}}",
+    };
+    for (size_t i = 0; i < sizeof(k_bad) / sizeof(k_bad[0]); i++) {
+        TEST_ASSERT_TRUE_MESSAGE(settings_from_json(k_bad[i], &s_defaults, &s_out, s_err, sizeof(s_err)), k_bad[i]);
+        TEST_ASSERT_TRUE_MESSAGE(s_out.mqtt_enabled, k_bad[i]);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("ha.local", s_out.mqtt_host, k_bad[i]);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("homeassistant", s_out.mqtt_prefix, k_bad[i]);
+    }
+}
+
+/* A user name a broker can take: up to 63 bytes without control characters; anything else keeps the old one. */
+static void test_a_bad_mqtt_user_keeps_the_old_one(void)
+{
+    snprintf(s_defaults.mqtt_user, sizeof(s_defaults.mqtt_user), "%s", "reflbo");
+    static const char *const k_bad[] = {
+        "{\"schema\":1,\"mqtt\":{\"user\":\"re\\u0001flbo\"}}",
+        "{\"schema\":1,\"mqtt\":{\"user\":\"tab\\there\"}}",
+        "{\"schema\":1,\"mqtt\":{\"user\":\"a234567890123456789012345678901234567890123456789012345678901234\"}}",
+        "{\"schema\":1,\"mqtt\":{\"user\":7}}",
+    };
+    for (size_t i = 0; i < sizeof(k_bad) / sizeof(k_bad[0]); i++) {
+        TEST_ASSERT_TRUE_MESSAGE(settings_from_json(k_bad[i], &s_defaults, &s_out, s_err, sizeof(s_err)), k_bad[i]);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("reflbo", s_out.mqtt_user, k_bad[i]);
+    }
+    const char *json = "{\"schema\":1,\"mqtt\":{\"user\":\"Čeněk z kuchyně\"}}"; /* UTF-8 is fine */
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_STRING("Čeněk z kuchyně", s_out.mqtt_user);
+}
+
+/* The largest settings.json fits SETTINGS_JSON_MAX, the buffer app_ui.c keeps it in: every text at its
+ * longest, the place's name of control characters (cJSON writes each in 6 bytes), every list full. */
+static void test_the_largest_settings_fit(void)
+{
+    static settings_t s;
+    memset(&s, 0, sizeof(s));
+    settings_sync_defaults(&s);
+    settings_mqtt_defaults(&s);
+    snprintf(s.language, sizeof(s.language), "%s", "cs");
+    memset(s.tz_posix, 'A', sizeof(s.tz_posix) - 1);
+    memset(s.tz_iana, 'B', sizeof(s.tz_iana) - 1);
+    memset(s.place, 0x01, sizeof(s.place) - 1);
+    s.lat_e4 = -899999;
+    s.lon_e4 = -1799999;
+    s.bat_cal = SETTINGS_BAT_LEARNED;
+    for (int i = 0; i < SETTINGS_BAT_CURVE_POINTS; i++) {
+        s.bat_learned_mv[i] = (uint16_t)(3000 + i * 50);
+    }
+    s.bat_learned_at = 4000000000u;
+    s.bat_empty_mv = 3999;
+    s.bat_full_mv = 4399;
+    for (int i = 0; i < SETTINGS_NTP_MAX; i++) {
+        memset(s.ntp[i], 'n', SETTINGS_HOST_LEN - 1);
+    }
+    s.sync_time_count = SETTINGS_SYNC_TIMES_MAX;
+    for (int i = 0; i < SETTINGS_SYNC_TIMES_MAX; i++) {
+        s.sync_times[i] = (uint16_t)(600 + i * 61);
+    }
+    s.quiet = true;
+    s.temp_offset_c100 = -999;
+    s.hum_offset_pct100 = -1999;
+    s.wx_centre_set = s.fl_centre_set = true;
+    s.wx_lat_e4 = s.fl_lat_e4 = -899999;
+    s.wx_lon_e4 = s.fl_lon_e4 = -1799999;
+    s.fl_min_alt_ft = 60000;
+    s.fl_range_km = 100;
+    s.fl_max = 100;
+    s.mqtt_enabled = true;
+    s.mqtt_port = 65535;
+    memset(s.mqtt_host, 'h', sizeof(s.mqtt_host) - 1);
+    memset(s.mqtt_user, 'u', sizeof(s.mqtt_user) - 1);
+    memset(s.mqtt_prefix, 'p', sizeof(s.mqtt_prefix) - 1);
+    static char out[SETTINGS_JSON_MAX];
+    size_t n = settings_to_json(&s, NULL, out, sizeof(out));
+    printf("the largest settings.json: %u bytes of %d\n", (unsigned)n, SETTINGS_JSON_MAX);
+    TEST_ASSERT_TRUE(n > 0);
+}
+
+/* Unlike a place's name, an empty broker or user is a value: no broker, no login. */
+static void test_an_empty_mqtt_host_or_user_clears_it(void)
+{
+    snprintf(s_defaults.mqtt_host, sizeof(s_defaults.mqtt_host), "%s", "192.168.1.10");
+    snprintf(s_defaults.mqtt_user, sizeof(s_defaults.mqtt_user), "%s", "reflbo");
+    const char *json = "{\"schema\":1,\"mqtt\":{\"host\":\"\",\"user\":\"\"}}";
+    TEST_ASSERT_TRUE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_STRING("", s_out.mqtt_host);
+    TEST_ASSERT_EQUAL_STRING("", s_out.mqtt_user);
+    TEST_ASSERT_TRUE(settings_from_json("{\"schema\":1,\"mqtt\":{}}", &s_defaults, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_STRING("192.168.1.10", s_out.mqtt_host); /* not named: kept */
+    TEST_ASSERT_EQUAL_STRING("reflbo", s_out.mqtt_user);
+}
+
+/* mqtt.password is a secret (spec §12.1): PATCH /api/settings hands it to NVS, and no file holds it. */
+static void test_the_mqtt_password_never_reaches_the_file(void)
+{
+    const char *base = "{\"schema\":1,\"mqtt\":{\"host\":\"ha.local\",\"password\":\"old secret\"}}";
+    TEST_ASSERT_TRUE(settings_to_json(&s_defaults, base, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NULL_MESSAGE(strstr(s_json, "secret"), s_json);
+    TEST_ASSERT_NULL(strstr(s_json, "password"));
+    const char *patch = "{\"mqtt\":{\"user\":\"reflbo\",\"password\":\"new secret\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_patch(base, patch, s_json, sizeof(s_json), s_err, sizeof(s_err)) > 0, s_err);
+    TEST_ASSERT_NULL_MESSAGE(strstr(s_json, "secret"), s_json);
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"user\":\"reflbo\""));
+}
+
+static void test_a_patch_hands_over_the_mqtt_password(void)
+{
+    char pass[SETTINGS_MQTT_PASS_LEN];
+    TEST_ASSERT_EQUAL(SETTINGS_SECRET_NONE, settings_patch_secret("{\"mqtt\":{\"user\":\"x\"}}", pass, sizeof(pass)));
+    TEST_ASSERT_EQUAL(SETTINGS_SECRET_NONE, settings_patch_secret("{\"language\":\"cs\"}", pass, sizeof(pass)));
+    TEST_ASSERT_EQUAL(SETTINGS_SECRET_SET, settings_patch_secret("{\"mqtt\":{\"password\":\"p ss\"}}", pass,
+                                                                 sizeof(pass)));
+    TEST_ASSERT_EQUAL_STRING("p ss", pass);
+    TEST_ASSERT_EQUAL(SETTINGS_SECRET_CLEARED, settings_patch_secret("{\"mqtt\":{\"password\":\"\"}}", pass,
+                                                                     sizeof(pass)));
+    TEST_ASSERT_EQUAL_STRING("", pass);
+    TEST_ASSERT_EQUAL(SETTINGS_SECRET_CLEARED, settings_patch_secret("{\"mqtt\":{\"password\":null}}", pass,
+                                                                     sizeof(pass)));
+    TEST_ASSERT_EQUAL(SETTINGS_SECRET_BAD, settings_patch_secret("{\"mqtt\":{\"password\":5}}", pass, sizeof(pass)));
+    char longer[80];
+    memset(longer, 'x', sizeof(longer));
+    snprintf(longer + SETTINGS_MQTT_PASS_LEN, sizeof(longer) - SETTINGS_MQTT_PASS_LEN, "%s", ""); /* 64 bytes */
+    char patch[128];
+    snprintf(patch, sizeof(patch), "{\"mqtt\":{\"password\":\"%s\"}}", longer);
+    TEST_ASSERT_EQUAL(SETTINGS_SECRET_BAD, settings_patch_secret(patch, pass, sizeof(pass)));
+    TEST_ASSERT_EQUAL(SETTINGS_SECRET_NONE, settings_patch_secret("[", pass, sizeof(pass)));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -519,5 +696,13 @@ int main(void)
     RUN_TEST(test_the_radars_default_to_the_location);
     RUN_TEST(test_the_radar_settings_parse_clamp_and_round_trip);
     RUN_TEST(test_a_centre_that_follows_the_location_is_not_saved);
+    RUN_TEST(test_the_mqtt_defaults_are_the_specs);
+    RUN_TEST(test_the_mqtt_settings_parse_clamp_and_round_trip);
+    RUN_TEST(test_bad_mqtt_values_fall_back_one_by_one);
+    RUN_TEST(test_a_bad_mqtt_user_keeps_the_old_one);
+    RUN_TEST(test_the_largest_settings_fit);
+    RUN_TEST(test_an_empty_mqtt_host_or_user_clears_it);
+    RUN_TEST(test_the_mqtt_password_never_reaches_the_file);
+    RUN_TEST(test_a_patch_hands_over_the_mqtt_password);
     return UNITY_END();
 }

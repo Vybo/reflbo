@@ -204,6 +204,60 @@ static void read_sync(const cJSON *sync, settings_t *out)
     out->quiet_to = to >= 0 ? (uint16_t)to : out->quiet_to;
 }
 
+/* Text without control characters (UTF-8 is fine): what a broker takes as a user name. */
+static bool plain(const char *s)
+{
+    for (; *s != '\0'; s++) {
+        if ((unsigned char)*s < ' ' || *s == 0x7F) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* mqtt.discovery_prefix: 1-31 bytes of printable ASCII without wildcards, a leading or trailing "/". */
+static bool topic_prefix(const char *s)
+{
+    size_t n = strlen(s);
+    if (n == 0 || n >= SETTINGS_MQTT_PREFIX_LEN || s[0] == '/' || s[n - 1] == '/') {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] <= ' ' || s[i] > '~' || s[i] == '+' || s[i] == '#') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* mqtt.* (spec §12.1, §14.3): each value on its own; "" empties the host and the user. */
+static void read_mqtt(const cJSON *mqtt, settings_t *out)
+{
+    read_bool(mqtt, "enabled", &out->mqtt_enabled);
+    read_bool(mqtt, "discovery", &out->mqtt_discovery);
+    const cJSON *host = child(mqtt, "host"), *user = child(mqtt, "user"), *prefix = child(mqtt, "discovery_prefix");
+    if (cJSON_IsString(host) && (host->valuestring[0] == '\0' || host_name(host->valuestring))) {
+        snprintf(out->mqtt_host, sizeof(out->mqtt_host), "%s", host->valuestring);
+    }
+    if (cJSON_IsString(user) && strlen(user->valuestring) < sizeof(out->mqtt_user) && plain(user->valuestring)) {
+        snprintf(out->mqtt_user, sizeof(out->mqtt_user), "%s", user->valuestring);
+    }
+    if (cJSON_IsString(prefix) && topic_prefix(prefix->valuestring)) {
+        snprintf(out->mqtt_prefix, sizeof(out->mqtt_prefix), "%s", prefix->valuestring);
+    }
+    out->mqtt_port = (uint16_t)read_scaled(mqtt, "port", out->mqtt_port, 1, 1, 65535);
+}
+
+void settings_mqtt_defaults(settings_t *out)
+{
+    out->mqtt_enabled = false;
+    out->mqtt_host[0] = '\0';
+    out->mqtt_port = 1883;
+    out->mqtt_user[0] = '\0';
+    out->mqtt_discovery = true;
+    snprintf(out->mqtt_prefix, sizeof(out->mqtt_prefix), "%s", "homeassistant");
+}
+
 /* A radar's centre: both coordinates as numbers, or else the location's, which it then follows. */
 static void read_centre(const cJSON *obj, const settings_t *s, bool *set, int32_t *lat, int32_t *lon)
 {
@@ -333,6 +387,7 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
     read_ntp(child(time, "ntp"), out);
     read_sync(child(root, "sync"), out);
     read_radar(child(root, "radar"), out); /* after the location, which its centres may follow */
+    read_mqtt(child(root, "mqtt"), out);
     cJSON_Delete(root);
     return true;
 }
@@ -448,6 +503,14 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     put(fl, "min_alt_ft", cJSON_CreateNumber(s->fl_min_alt_ft));
     put(fl, "ground", cJSON_CreateBool(s->fl_ground));
     put(fl, "max", cJSON_CreateNumber(s->fl_max));
+    cJSON *mqtt = object_at(root, "mqtt");
+    put(mqtt, "enabled", cJSON_CreateBool(s->mqtt_enabled));
+    put(mqtt, "host", cJSON_CreateString(s->mqtt_host));
+    put(mqtt, "port", cJSON_CreateNumber(s->mqtt_port));
+    put(mqtt, "user", cJSON_CreateString(s->mqtt_user));
+    put(mqtt, "discovery", cJSON_CreateBool(s->mqtt_discovery));
+    put(mqtt, "discovery_prefix", cJSON_CreateString(s->mqtt_prefix));
+    cJSON_DeleteItemFromObjectCaseSensitive(mqtt, "password"); /* a secret, in NVS (spec §12.1) */
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;
@@ -487,6 +550,7 @@ size_t settings_patch(const char *base_json, const char *patch, char *out, size_
     }
     merge(root, p);
     cJSON_Delete(p);
+    cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "mqtt"), "password"); /* NVS's */
     const cJSON *schema = child(root, "schema");
     size_t n = 0;
     if (!cJSON_IsNumber(schema) || schema->valuedouble != SCHEMA) {
@@ -498,4 +562,21 @@ size_t settings_patch(const char *base_json, const char *patch, char *out, size_
     }
     cJSON_Delete(root);
     return n;
+}
+
+settings_secret_t settings_patch_secret(const char *patch, char *out, size_t size)
+{
+    cJSON *p = patch != NULL && util_json_depth(patch) <= SETTINGS_JSON_MAX_DEPTH ? cJSON_Parse(patch) : NULL;
+    const cJSON *pass = child(child(p, "mqtt"), "password");
+    settings_secret_t r = pass == NULL                                         ? SETTINGS_SECRET_NONE
+                          : cJSON_IsNull(pass)                                 ? SETTINGS_SECRET_CLEARED
+                          : !cJSON_IsString(pass)                              ? SETTINGS_SECRET_BAD
+                          : strlen(pass->valuestring) >= SETTINGS_MQTT_PASS_LEN ? SETTINGS_SECRET_BAD
+                          : pass->valuestring[0] == '\0'                        ? SETTINGS_SECRET_CLEARED
+                                                                               : SETTINGS_SECRET_SET;
+    if (size > 0) {
+        snprintf(out, size, "%s", r == SETTINGS_SECRET_SET ? pass->valuestring : "");
+    }
+    cJSON_Delete(p);
+    return r;
 }

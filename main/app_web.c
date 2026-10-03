@@ -361,12 +361,13 @@ static void learn(const char *body, uint8_t *out, size_t size, webui_reply_t *re
 
 /* A backup of the largest files restores: settings.json up to the 2 KB app_ui.c keeps, presets.json up to
  * its own limit, and the bundle around them. */
-_Static_assert(2048 + UI_PRESETS_JSON_MAX + 512 <= WEBUI_BODY_MAX, "a backup of the largest files fits a request");
+_Static_assert(SETTINGS_JSON_MAX + UI_PRESETS_JSON_MAX + 512 <= WEBUI_BODY_MAX,
+               "a backup of the largest files fits a request");
 
 /* GET /api/backup (spec §14.4): the /cfg files as the firmware would save them now. */
 static void backup(uint8_t *out, size_t size, webui_reply_t *reply)
 {
-    EXT_RAM_BSS_ATTR static char settings[2048];
+    EXT_RAM_BSS_ATTR static char settings[SETTINGS_JSON_MAX];
     EXT_RAM_BSS_ATTR static char presets[UI_PRESETS_JSON_MAX];
     netmgr_status_t net;
     netmgr_status(&net);

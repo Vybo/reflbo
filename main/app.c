@@ -49,7 +49,8 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      8 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets */
+#define SNAP_VERSION      9 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split
+                                     presets; 9: MQTT's settings */
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */

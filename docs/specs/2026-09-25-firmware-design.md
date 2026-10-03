@@ -68,6 +68,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D29 | Owner, 2026-10-02 (M6 plan review): GeoNames' places join the map's towns inside ČHMÚ's radar area, and GeoNames is credited (§11.1); the RTC trim keeps measuring only across syncs at least 20 h apart (§7); aircraft altitudes stay as flight levels from 10 000 ft and feet below (§11.3); M6 runs inline, one context with a review of the whole branch at the end | GeoNames is CC BY 4.0; its places of 1000 inhabitants or more add about 4 000 towns and 110 KB to the map |
 | D30 | Owner, 2026-10-02 (M6 board checks): BOOT short on the Radar layout starts a sync on demand, for a fresh frame, whenever the loop can't play (outside sync mode `always`, or with fewer than two frames), with the menu's Sync now toasts; in `always` it keeps playing the last hour (§5.6, §11.2) | The press re-read the sensors there, which that screen doesn't show |
 | D31 | Owner, 2026-10-02 (M6b design): a split layout (§5.2) beside the fixed ones, which stay as they are: the area under the status bar split into rows or columns at 1/4, 1/3, 1/2, 2/3 or 3/4, each part split again, at most 8 cells of at least 90×40, each cell holding one field at the size its dimensions allow, each split's separator shown or hidden; edited on the web page with the live preview (§10.3). BOOT double on the dashboard toggles sync mode `always`, remembering the mode before (§5.6, §9.3). Both are M6b, one plan, before M7 | Halves alone can't give a top of three quarters; the fixed layouts' hand-tuned sizes aren't all expressible in the five ratios, so they stay |
+| D32 | Owner, 2026-10-03 (M7 design): one `ha_mqtt` client, a session in every sync and kept connected in sync mode `always` (§12.9); a failed MQTT session is shown (the Sync page, Info, a mark in the status bar) but doesn't fail the sync, so it isn't retried; M7 adds HA buttons (sync now, next preset), key-press device triggers, reported only while connected, and a message entity, shown as a banner until KEY dismisses it and as the `ha.message` field (§12.3–§12.8); TLS and HA's REST API as a source stay deferred; review minors are fixed where M7 touches their code, and `fetch`'s transmit buffer too (M6's review). There is no broker or HA yet, so M7 is built and host-tested and its checks with HA wait for the owner's setup. The M6b build is the stable firmware (tag `stable-m6b`): it goes back on the board after every MQTT/HA test, the board's configuration is backed up before a test and restored after, and nothing is erased from the board without asking (§12.10) | One client serves both kinds of session; a broker that is down costs no extra radio time; the board stays on known-good firmware with its data while M7 is tested |
 
 ### 1.3 Out of scope for v1
 
@@ -113,7 +114,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `locale` | Language packs (API prefix `lang_`, because libc owns `locale_t`): strings, date and number formats, name days and holidays | — | ✓ |
 | `astro` | Sunrise, sunset, day length | — | ✓ |
 | `datastore` | Measured and fetched values, freshness, derived values and trends, change mask (§6) | — | ✓ |
-| `ui` | Field catalogue, layouts, widgets, status bar, presets and their JSON codec, cycle order, screens, menu, input handling | gfx, locale, datastore, util | ✓ |
+| `ui` | Field catalogue, layouts, widgets, status bar, presets and their JSON codec, cycle order, screens, menu, input handling | gfx, locale, datastore, util; from M6 map, radar, adsb; from M7 `ha_mqtt`'s values (§12.5) | ✓ |
 | `scheduler` | Next-wake computation for display, sensors, alarms, sync, timeouts | — | ✓ |
 | `sensors` | SHTC3, battery gauge | board | curve and filter logic |
 | `rtc` | PCF85063 (API prefix `pcf85063_`, because ESP-IDF owns `rtc_*`): time, oscillator-stop flag, alarm → INT, the Offset register; the time set to the millisecond and its error timed (§7) | board | register codec, the offset's |
@@ -127,7 +128,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `map` | Web-Mercator views; the built-in map (`assets/map/map.bin`: borders, coasts, towns, airports) and its drawing, with labels that keep clear (M6) | gfx, util | ✓ |
 | `radar` | ČHMÚ's and RainViewer's frames: decoding into three rain levels, the store, the frame file, which views a frame covers, drawing; their HTTPS fetch on the sync task (M6) | png, map, fetch | all but the fetch |
 | `adsb` | adsb.fi's aircraft on the Flights map, adsb.lol's routes and their cache; the polling task (M6) | map, fetch | all but the task |
-| `ha_mqtt` | MQTT session, discovery, state, commands, field mappings | netmgr, datastore | payload builders |
+| `ha_mqtt` | MQTT session (one esp-mqtt client: a session in every sync, kept connected in sync mode `always`), discovery, state, commands, key-press triggers, field mappings and their values, the message (M7, §12) | netmgr, storage | topics, payload builders and parsers, the mappings' codec, the discovery hash, `expire_after` |
 | `sync` | When syncs run (the modes, quiet hours, retries, the radio's 45 s), SNTP packets, and the sync task, which fetches and reports to `main` (§9.3); from M6 the radar step and sync mode `always`'s radar-only refresh; MQTT joins in M7 | netmgr, weather, scheduler, datastore, storage | the plan and the SNTP packets |
 | `audio` | Codec control, tone/WAV/stream players, alarm ringing | board, storage | — |
 | `storage` | NVS (identity, secrets), LittleFS config files, microSD mount | IDF | settings codec with its defaults, config-file backup logic |
@@ -301,6 +302,7 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 | `wx.rain2h` | series: 8 × 15 min from now (precipitation, its probability) | forecast, Open-Meteo's `minutely_15` (§11.4) | As `wx.now`; missing past the 24 h stored |
 | `rain.map` | rain map: the weather radar's latest frame around its centre | the weather radar (§11.2) | Its frame time always shows; after 30 min the time shows inverted with its age |
 | `mqtt.<key>` | number or text, with unit and label | MQTT mapping (§12.5) | Configured TTL; default twice the expected sync interval (§9.3) |
+| `ha.message` | text: the latest message from Home Assistant (§12.7) | HA's notify entity (M7, D32) | Until replaced or cleared; stale after 24 h |
 
 `env.temp` and `env.hum` carry a trend: the change over the last hour. Widgets show ↑ or ↓ when it exceeds 0.5 °C or 3 %. The extra fields (from `env.dew` to `date.holiday`) are the accepted M3 proposals (D15); the air quality and pollen fields are an accepted M5 proposal (D25); `wx.rain2h` and `rain.map` come with M6 (D23, D27).
 
@@ -317,7 +319,7 @@ As built (M6): `wx.rain2h` is missing unless its 8 quarter hours lie within the 
 
 Every layout has a status bar (top 20 px):
 
-- Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale. After either, a globe while a phone is logged in to the web UI (D20). Then the sync state (M5): a sync mark while a sync runs, or a crossed-out cloud while the last scheduled sync failed, until one succeeds. In sync mode `always`, the Wi-Fi state follows: a Wi-Fi mark while on the network, a crossed-out one while rejoining it (D19).
+- Left: "Set time" while the time is invalid (§5.3); otherwise a stale warning when a shown value is stale. After either, a globe while a phone is logged in to the web UI (D20). Then the sync state (M5): a sync mark while a sync runs, or a crossed-out cloud while the last scheduled sync failed, until one succeeds. In sync mode `always`, the Wi-Fi state follows: a Wi-Fi mark while on the network, a crossed-out one while rejoining it (D19). From M7, a crossed-out MQTT mark while the last MQTT session failed, until one succeeds (D32).
 - Middle: a small clock, if the preset sets `status_clock`. It is meant for data-first presets (owner request, 2026-09-28).
 - Right: the charging bolt and the battery icon, with the parts `status_battery` lists: level %, voltage, days left. The default is the level.
 - Later: the next alarm (M8).
@@ -390,6 +392,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - a bad or duplicate id;
   - an unknown layout, slot or field, or a field the slot can't show;
   - a split tree with more than 8 cells, a part under 90×40 px, an unknown `split` or `ratio`, or a field its cell can't show (M6b);
+  - an `mqtt.<key>` with a bad key, or more than 32 different keys in the file (M7, §12.5); a key no mapping names is not an error;
   - an unknown `stale_policy` or `status_battery` value;
   - nesting deeper than 16 levels, or `slots` that isn't an object;
   - a bad schedule: more than 8 entries, or an entry with a bad time, action or preset, or a night that ends at the minute it starts.
@@ -429,6 +432,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 | Radio | Station, ICY title, volume, a battery warning when on battery |
 | Critical battery | A large empty battery, "Battery empty" and "Please charge me", with the time and date it was drawn. Nothing else updates |
 | Toast | A short overlay near the bottom, in a black box (e.g. "Preset: Weather", "Sync failed"), shown for 3 s. The board stays awake meanwhile |
+| Message | A black banner across the bottom of the dashboard with Home Assistant's message (§12.7), until KEY short dismisses it, a new message replaces it, or 24 h pass (M7, D32) |
 
 `XXXX` is the last two bytes of the Wi-Fi STA MAC in lowercase hex. The same id is used for the hostname, AP SSID, MQTT client id and device id.
 
@@ -455,6 +459,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 
 - **BOOT double on the dashboard** (M6b, D31) toggles sync mode `always`. Turning it on remembers the mode before in `sync.mode_before_always` (§14.3) and toasts "Always on: Wi-Fi stays on"; turning it off returns to that mode and toasts its name. It is refused on a critical battery and with no network saved, with Sync now's toasts. As the dashboard then binds a double press, BOOT short waits the 300 ms double-press window before it acts.
   - As built (M6b): in quiet hours or a night, which keep Wi-Fi off until they end, the toast is "Always on: Wi-Fi from 06:00", the time the span ends; leaving `always` it is "Sync: <mode>" in the menu's words ("Sync: At set times"). A BOOT double within a second of the menu closing does nothing: BOOT pressed fast to back out of the menu would otherwise turn `always` on with the presses after it closed.
+- **From M7** (D32): while a message banner shows, KEY short only dismisses it (§12.7). While MQTT is connected, each dashboard gesture is also published as a key-press trigger (§12.8).
 
 The `diag` console command `btn` injects the same gestures. Holding BOOT at power-on still enters download mode; holding it at runtime is safe.
 
@@ -510,7 +515,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
 ## 6. Datastore
 
-- **Table.** An entry for each measured or fetched field: `env.*` and `bat.*` since M3a, weather from M5, and up to 32 dynamic `mqtt.<key>` entries from M7. Fields that follow from the clock (`time.*`, `date.*`, `moon.phase`) are computed by `ui` at render time and never stored.
+- **Table.** An entry for each measured or fetched field: `env.*` and `bat.*` since M3a, weather from M5. From M7 the `mqtt.<key>` values and the message live in `ha_mqtt`'s own store (§12.5), kept through deep sleep in a second RTC block beside the snapshot. Fields that follow from the clock (`time.*`, `date.*`, `moon.phase`) are computed by `ui` at render time and never stored.
 - **Entry contents.**
   - A fixed-point value: 0.01 °C, 0.01 %, whole %, or 0.1 days. Short text (at most 48 bytes of UTF-8), times and weather structs arrive with the fields that need them.
   - The trend and `updated` (UTC); a `ttl_s` per field. The battery entry also holds the voltage and the charging state.
@@ -678,15 +683,15 @@ Sequence. The steps are independent and each has a timeout. The radio may be on 
 3. **Weather.** 10 s.
 4. **Air quality** (D25). 10 s.
 5. **Radar** (M6, §11.2). 10 s: one ČHMÚ frame, or RainViewer's index and the view's tiles. As built: ČHMÚ's file is named from this sync's NTP time when its time step worked, as the app sets the clock only after the sync; else from the clock if it is valid; with neither, the step fails with "no time". A step that never ran, as Wi-Fi didn't come up, leaves the radar's status as it was.
-6. **MQTT** (M7). 15 s.
-   1. Connect with a persistent session.
-   2. Subscribe to field and command topics.
-   3. Collect retained and queued messages until 1 s passes with none, or until every mapped topic has arrived.
-   4. Publish state, plus discovery if the config or firmware changed.
-   5. Disconnect.
+6. **MQTT** (M7, §12.9). Up to 15 s; skipped while MQTT is off or has no broker host.
+   1. Connect with a persistent session, as `reflbo-XXXX`.
+   2. Subscribe at QoS 1 to `reflbo/<id>/cmd/#` and the mapped topics.
+   3. Collect retained and queued messages until every mapped topic has arrived, or 1 s passes with none.
+   4. Publish state, plus discovery if its hash changed.
+   5. Disconnect, unless sync mode `always` keeps the client connected; a sync then uses the open session.
 7. **Finish.** Wi-Fi off, unless config mode or `always` mode keeps it. Persist the datastore snapshot. Record each step's result (shown in Info and the web UI).
 
-A sync fails when any step fails. On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync. At low battery there are no retries.
+A sync fails when any step fails, except the MQTT step (D32): its failure shows on the Sync page, in Info and as the status bar's MQTT mark, but doesn't fail the sync. On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync. At low battery there are no retries.
 
 As built (M5):
 
@@ -764,6 +769,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Location & time (M5): a place search through `/api/geocode`, which fills in the name, latitude and longitude.
   - Radar (M6): a card for each radar: its centre (the location, the place search or coordinates) and zoom or range, the flight radar's filters, a live preview through `/api/preview.bmp`, and the credits (§11.2, §11.3). The flight radar's card says it runs only in sync mode Always on.
     - As built (M6): the previews draw the saved settings and refresh after each save; the zoom is a list with each step's width in km; the flight radar's card shows the last poll's failure ("Last poll: failed: too big") and adsb.lol's pause; below both cards, the map's credits: Natural Earth, OurAirports and GeoNames (CC BY 4.0, D29).
+  - MQTT (M7, D32): the broker (on or off, host, port, user, a write-only password, discovery and its prefix); the last session and, in sync mode `always`, the connection; Test connection, which needs the board on the owner's network; and the field mappings (up to 32, §12.5), each with its last value, beside a note that publishers must retain their messages or go through HA statestream (§12.6).
   - Presets (M6b, D31): a split preset's tree as nested boxes under the live preview. A cell shows its size and class ("200×69 · S"), a field list with only the fields that fit, and Split into rows and Split into columns (at 1/2, the line on, the cell's field in the first part). A split shows its ratio (those that would make a part too small are disabled), Separator and Join, which keeps the first field found inside it. Switching a preset to Split starts from one cell holding its first field.
     - As built (M6b): the preview numbers the cells as the boxes do; a cell whose field draws smaller than its class says so ("3 · 199×104 · M (Pollen at S)"); a ratio change or a split that leaves a field without room empties its cell, with "No room for …".
 - **API.** JSON. Mutating requests must send `Content-Type: application/json`, those without a body too.
@@ -773,10 +779,11 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 | Method and path | Purpose |
 |---|---|
 | `GET /api/auth` · `POST /api/auth/setup` · `POST /api/auth/login` · `POST /api/auth/logout` · `POST /api/auth/password` | The web password (§10.4): whether one is set and the session is valid; choosing it (over the AP only); logging in and out; changing it. The only routes open without a session |
-| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; from M5 `sync` (mode, running, the last one's time and steps, the next one and whether it is a retry, when the forecast and the air quality came) and `time.rtc` (the trim's steps, and the last drift once measured); from M6 `radar` (as built: `weather` with `source` "chmu" or "rainviewer", `frames`, `frame_at`, `fetched_at` and `error`; `flights` with `on`, `aircraft`, `updated`, `failed`, `error` and `routes_paused_until`) |
+| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; from M5 `sync` (mode, running, the last one's time and steps, the next one and whether it is a retry, when the forecast and the air quality came) and `time.rtc` (the trim's steps, and the last drift once measured); from M6 `radar` (as built: `weather` with `source` "chmu" or "rainviewer", `frames`, `frame_at`, `fetched_at` and `error`; `flights` with `on`, `aircraft`, `updated`, `failed`, `error` and `routes_paused_until`); from M7 `mqtt` (`enabled`, `connected`, and the last session's time, result and detail) |
 | `GET/PATCH /api/settings` | Non-secret settings; secrets are accepted on write and never returned |
 | `GET /api/wifi/scan` · `GET/POST/DELETE /api/wifi/networks` | Wi-Fi setup. A POST starts a test and answers 202 at once; GET reports its result with the saved names, never their passwords. `"test": false` saves without trying |
 | `GET /api/layouts` · `GET /api/fields` | Slot definitions; the field catalogue with current values |
+| `GET/PUT /api/mqtt_fields` · `POST /api/mqtt/test` | The MQTT field mappings (§12.5); a test session with the saved settings, refused while the board has only its own network (M7) |
 | `GET/PUT /api/presets` | The preset document (§5.4) |
 | `GET /api/preview.bmp?preset=<id>` · `POST /api/preview.bmp?preset=<id>` | Render a saved preset, or one from a presets document the editor posts (validated like `presets.json`), with live data, using the real renderer; a 1-bit BMP |
 | `GET /api/screenshot.bmp` | The current frame |
@@ -899,12 +906,14 @@ GET https://air-quality-api.open-meteo.com/v1/air-quality?latitude=<lat>&longitu
 
 ## 12. MQTT and Home Assistant
 
+M7 (D5, D7, D32): the board publishes its state to Home Assistant through MQTT discovery, takes commands and messages from it, and shows values from HA and other local devices as fields. The owner has no broker or HA yet (2026-10-03): M7 is built and host-tested, and its checks with HA wait for the owner's setup (§12.10).
+
 ### 12.1 Settings
 
-- Broker host and port (default 1883), username, password (secret).
-- Client id and device id: `reflbo-XXXX`.
-- Base topic `reflbo/<device id>`, discovery prefix `homeassistant`, discovery on/off.
-- TLS is deferred (§19).
+- `mqtt` in `settings.json` (§14.3): on or off (off by default), the broker's host and port (default 1883), the username, discovery on or off and its prefix (default `homeassistant`).
+- The password is a secret: `PATCH /api/settings` accepts it and writes it to NVS `secrets` (§14.2); no API returns it.
+- Client id and device id: `reflbo-XXXX`. Base topic `reflbo/<device id>`.
+- TLS and HA's REST API as a source stay deferred (§19).
 
 ### 12.2 Topics
 
@@ -912,7 +921,8 @@ GET https://air-quality-api.open-meteo.com/v1/air-quality?latitude=<lat>&longitu
 |---|---|---|---|
 | `reflbo/<id>/state` | out | 1, retained | State JSON |
 | `homeassistant/<component>/<id>/<object>/config` | out | 1, retained | Discovery config |
-| `reflbo/<id>/cmd/<name>` | in | 1, not retained, persistent session | Command value |
+| `reflbo/<id>/cmd/<name>` | in | 1, not retained, persistent session | Command value (§12.4) |
+| `reflbo/<id>/action` | out | 0, not retained | A key press: `key_short` … `boot_long` (§12.8) |
 | Mapped field topics (§12.5) | in | subscribed at QoS 1 | Value or JSON |
 
 State example:
@@ -922,27 +932,32 @@ State example:
  "preset":"home","last_sync":"2026-09-25T03:30:12Z","fw":"0.1.0","uptime_s":86400}
 ```
 
-### 12.3 Discovery entities (v1)
+### 12.3 Discovery entities
 
 | Entity | Details |
 |---|---|
-| Sensors | Temperature (°C), humidity (%), battery (%), battery voltage (V, diagnostic), Wi-Fi RSSI (dBm, diagnostic), last sync (timestamp, diagnostic), charging state (enum) |
+| Sensors | Temperature (°C), humidity (%), battery (%), charging state (enum); as diagnostics: battery voltage (V), Wi-Fi RSSI (dBm), last sync (timestamp) |
 | `select` | Active preset. Options are the preset names; `command_topic` is `.../cmd/preset`; `qos: 1` |
+| `button` | "Sync now" (`.../cmd/sync`) and "Next preset" (`.../cmd/next`), payload `PRESS`, `qos: 1` (D32) |
+| `notify` | "Message" (`.../cmd/message`, §12.7, D32) |
+| Device triggers | Six (§12.8, D32): `button_short_press`, `button_double_press` and `button_long_press`, each for `button_1` (KEY) and `button_2` (BOOT), on `.../action` with the payloads `key_short`, `key_double`, `key_long`, `boot_short`, `boot_double`, `boot_long` |
 
 - All entities share one `device` block: identifiers `reflbo-XXXX`, model "ESP32-S3-RLCD-4.2", manufacturer "Waveshare", software version.
-- **Sleepy-device settings.** Sensors set `expire_after` to twice the expected sync interval (§9.3) plus 10 min, and omit it in `manual` mode. There is no availability topic. Entities therefore keep their last value while the device sleeps.
-- Discovery is published at the first sync, and again whenever preset names, relevant settings or the firmware change. A hash of it is stored in NVS.
+- **Sleepy-device settings.** Sensors set `expire_after` to twice the expected sync interval (§9.3) plus 10 min, and omit it in `manual` mode. There is no availability topic, so entities keep their last value while the device sleeps.
+- Discovery is published at the first session, and again whenever its hash changes: the preset names, the expected sync interval, the discovery prefix or the firmware. The hash is kept in NVS (`sys/mqtt_disc`). Turning discovery off stops publishing it; the entities stay in HA until they are deleted there.
 
-### 12.4 Commands (v1)
+### 12.4 Commands
 
-- `cmd/preset` activates a preset by id or name.
-- Other commands arrive together with their features, if agreed.
-- A command is applied, and the new state is published in the same session.
+- `cmd/preset` activates a preset by id or name, saved like a manual switch.
+- `cmd/next` activates the next preset in cycle order, saved like KEY short's (D32).
+- `cmd/sync` starts a sync at once in sync mode `always`. One that queued while the board slept arrives during a sync, which is already running, so it is ignored (D32).
+- `cmd/message` sets the message (§12.7).
+- Commands are applied on the app task in the order they arrive, and the new state is published in the same session. A command with an unknown preset or payload is logged and ignored.
 - Commands depend on QoS 1 and a persistent session (`disable_clean_session`). The broker then queues them while the device sleeps. Mosquitto keeps sessions by default. Discovery sets `qos: 1` so HA publishes commands at QoS 1.
 
 ### 12.5 MQTT fields (HA entities and other devices, D7)
 
-Mappings live in `/cfg/mqtt_fields.json` (edited in the web UI), up to 32:
+Mappings live in `/cfg/mqtt_fields.json` (edited on the MQTT page, §10.3), up to 32:
 
 ```json
 {
@@ -957,8 +972,11 @@ Mappings live in `/cfg/mqtt_fields.json` (edited in the web UI), up to 32:
 ```
 
 - **Field id.** `mqtt.<key>`. The payload is parsed as a number or text. `json_path` takes dotted keys (`a.b.c`); arrays are not supported in v1.
-- **Delivery.** Values arrive during a sync as retained messages, or live in `always` sync mode.
-- **Publisher requirement.** Publishers must retain their messages, or go through HA statestream, for a sleeping device to see them. Zigbee2MQTT needs `retain: true` per device; document this in the web UI.
+- **Keys.** 1–23 bytes of `a`–`z`, `0`–`9` and `_`, unique in the file. Text values keep up to 47 bytes, cut at a character.
+- **In presets.** Presets name the fields as `mqtt.<key>`, at most 32 different keys between them, and keep those names, in `presets.json` and on the device: 32 field ids are reserved for the keys the presets name, and each slot finds its mapping by key when it draws. A key no mapping names draws as an empty slot, not an error, so editing or deleting a mapping never rewrites the presets (D32). A slot takes an `mqtt.<key>` wherever it takes a number or a text; one whose mapping's kind it can't show draws empty too, and the preset editor offers each mapped field only where its kind fits.
+- **Values.** `ha_mqtt` keeps each value with the time it arrived. Through deep sleep they stay in a second RTC block with its own magic, version and CRC (with the message, under 2 KB), beside the snapshot (§6). After a power-off the boot sync brings the retained values back. A value is stale after its `ttl_s` (default twice the expected sync interval) and shows its age as the preset's stale policy says.
+- **Delivery.** Values arrive during a sync as retained messages, or live in sync mode `always`.
+- **Publisher requirement.** Publishers must retain their messages, or go through HA statestream, for a sleeping device to see them. Zigbee2MQTT needs `retain: true` per device; the MQTT page says so.
 
 ### 12.6 Home Assistant side (example)
 
@@ -972,6 +990,32 @@ mqtt_statestream:
 ```
 
 HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. With `publish_attributes: true`, it also publishes attributes as `.../<attribute>` in JSON.
+
+### 12.7 The message (D32)
+
+- HA's notify entity sends text to `cmd/message` (`notify.send_message`). Up to 96 bytes are kept, cut at a character; an empty message clears it.
+- **The banner.** A black bar across the bottom of the dashboard with the message, until KEY short dismisses it (that press does nothing else), a new message replaces it, or 24 h pass. It isn't drawn over the menu, config mode or the critical-battery screen.
+- **The field.** `ha.message` (§5.1) shows the latest message until a new one replaces it or an empty one clears it; after 24 h it is stale, and the slot's stale policy shows its age.
+- The console's `field set ha.message <text>` raises it as HA's would (§15).
+
+### 12.8 Key-press triggers (D32)
+
+- While MQTT is connected (sync mode `always`, or a sync's own session), each dashboard gesture, KEY or BOOT, short, double or long, is published to `reflbo/<id>/action` (QoS 0, not retained), besides doing its own action (§5.6).
+- Presses at other times aren't reported, so no automation runs hours late.
+
+### 12.9 Sessions and failures
+
+- **In a sync**, step 6 (§9.3): connect, subscribe, collect, publish, disconnect; up to 15 s of the sync's 45 s.
+- **In sync mode `always`** the client stays connected while Wi-Fi is up; a lost connection is retried after 10 s, the wait doubling to at most 5 min. State is published on change (at most every 30 s) and every 5 min. Commands, values and key presses are live. A sync uses the open session.
+- **A failed session** (no broker, a refused login, a timeout) shows on the Sync page, in Info and as the status bar's MQTT mark until a session succeeds. It doesn't fail the sync, so it isn't retried; the next sync tries again (D32).
+- **Power:** a session adds the broker's connect, up to 1 s of quiet and the publishes to each sync; measured once HA exists (§9.4).
+
+### 12.10 Testing on the board (owner, 2026-10-03, D32)
+
+- **The stable firmware** is the M6b build, git tag `stable-m6b`; its binaries are kept in `captures/stable/stable-m6b/` with `flash.sh <port>`, which writes the bootloader, partition table, OTA data and app, never the storage partition or NVS. It is the board's normal firmware: after every MQTT/HA test it is flashed back, and `version` must show its ELF hash (`dcb35a7e3`).
+- **Backup and restore.** Before a board test that changes its data, the configuration is saved with `GET /api/backup`; after the test, and after the stable firmware is back (its parser refuses M7-only content such as `mqtt.<key>` slots), it is restored with `POST /api/restore` and compared.
+- **Nothing is erased without asking:** not NVS (saved networks, the web password, secrets, the trim), the storage partition or flash.
+- Until the owner has a broker and HA, the board checks cover what needs neither: MQTT off, the MQTT page, `mqtt status` and the message banner through `field set`.
 
 ## 13. Audio
 
@@ -1020,7 +1064,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 | Namespace | Contents |
 |---|---|
-| `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`), come back in config mode after a web restart (`resume_cfg`, §10.2), the RTC trim (`rtc_trim`, §7) |
+| `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`), come back in config mode after a web restart (`resume_cfg`, §10.2), the RTC trim (`rtc_trim`, §7), the MQTT discovery hash (`mqtt_disc`, §12.3, M7) |
 | `wifi` | Saved networks with their passwords and fast-connect cache (`nets`, one versioned blob) |
 | `secrets` | MQTT password; the web UI password's salted hash (`web_pass`, D18); future tokens |
 | `ctr` | Counters: boots, sync statistics |
@@ -1070,11 +1114,11 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 Once a discharge is learned, `battery` also holds `learned_mv` (21 voltages, 0 % to 100 %) and `learned_at` (UTC seconds), and `level_from` can be `learned` (D21).
 
-M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). M5 adds `time.ntp` (1–2 host names) and `sync.*`: `times` keeps 1–8 valid `HH:MM` times, sorted and without repeats, falling back to `["05:30"]`; `interval_min` is clamped to 15–1440. M6 adds `radar.*` (§11.1–§11.3): each centre defaults to `location.*`; `weather.zoom` is clamped to 4–9 in steps of 0.25; `flights.range_km` to 10–100 (from the centre to the map's top edge), `max` to 1–100, `min_alt_ft` to 0–60000. M6b adds `sync.mode_before_always` (D31): never `always`, `times` by default; any change into `always` (BOOT double, the menu, a page, a restore) remembers the mode it left, unless the document names its own. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
+M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). M5 adds `time.ntp` (1–2 host names) and `sync.*`: `times` keeps 1–8 valid `HH:MM` times, sorted and without repeats, falling back to `["05:30"]`; `interval_min` is clamped to 15–1440. M6 adds `radar.*` (§11.1–§11.3): each centre defaults to `location.*`; `weather.zoom` is clamped to 4–9 in steps of 0.25; `flights.range_km` to 10–100 (from the centre to the map's top edge), `max` to 1–100, `min_alt_ft` to 0–60000. M6b adds `sync.mode_before_always` (D31): never `always`, `times` by default; any change into `always` (BOOT double, the menu, a page, a restore) remembers the mode it left, unless the document names its own. M7 adds `mqtt.*` (§12.1, D32): `enabled` (default false) and `discovery` (default true); `host` and `user` up to 63 bytes, empty by default; `port` clamped to 1–65535 (1883); `discovery_prefix` up to 31 bytes of topic characters, without `+`, `#` or a leading or trailing `/` (`homeassistant`); `mqtt.password`, accepted on write, goes to NVS `secrets` and never into the file. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
 
 ### 14.4 Backup, restore, factory reset
 
-- **Backup.** A JSON bundle of every `/cfg/*` file, without secrets: `{"reflbo_backup": 1, "device": …, "firmware": …, "files": {"settings.json": {…}, "presets.json": {…}}}`. Restore validates every file it knows before replacing anything, applies them at once, and leaves out files of a later firmware.
+- **Backup.** A JSON bundle of every `/cfg/*` file, without secrets: `{"reflbo_backup": 1, "device": …, "firmware": …, "files": {"settings.json": {…}, "presets.json": {…}}}`. Restore validates every file it knows before replacing anything, applies them at once, and leaves out files of a later firmware. From M7 the bundle holds `mqtt_fields.json` too.
 - **Factory reset.** From the menu (System ▸ Factory reset, confirmed by holding KEY), or from M4 the web UI. The board restarts afterwards. It erases `storage` and the NVS namespaces `wifi`, `secrets` and `ctr`. It keeps `sys`, the device identity.
 
 ### 14.5 microSD (M9)
@@ -1094,12 +1138,13 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 | `btn <key\|boot> <short\|double\|long>` | Inject button gestures |
 | `sensors` · `battery` · `battery learn start\|stop` | Readings; learning the battery curve from the next full discharge (D21) |
 | `rtc get` · `rtc set <ISO 8601>` | RTC |
-| `field list` · `field get <id>` · `field set <id> <value>` · `field clear <id>` | Inspect and inject data, e.g. fixtures on the device |
+| `field list` · `field get <id>` · `field set <id> <value>` · `field clear <id>` | Inspect and inject data, e.g. fixtures on the device; from M7 `field set ha.message <text>` raises the message banner as HA's would (§12.7) |
 | `preset list` · `preset set <id>` | Presets |
 | `schedule list` · `schedule on\|off\|clear` · `schedule add <HH:MM> preset <id> [days]` · `schedule add <HH:MM> night <HH:MM> [days]` | The preset schedule (§5.4); `days` is the Mon–Sun mask, default 127 |
 | `night <minutes>` | Night sleep now (§9.1), for measuring; the console drops until it ends |
 | `wifi status` · `wifi scan` | Wi-Fi: the state, network, address, AP clients and saved names; the networks in sight while Wi-Fi is on (config mode) |
 | `sync now` · `sync status` | Run a sync; the running or last sync's steps and the next one (M5). `rtc get` also prints the trim and the last drift (§7) |
+| `mqtt status` | MQTT (M7): the settings without the password, the connection, the last session, the discovery hash, the mapped fields' values |
 | `radar status` · `radar loop` | The weather radar's source, frame time, frames kept and last error, and the flight radar's state with its last failure and adsb.lol's pause (M6); the loop as BOOT short plays it |
 | `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging: sleeps, wake causes, and per-cycle awake and slept times; `sleep test` forces sleep cycles while tethered |
 | `audio tone <Hz> <ms>` | Audio check (M8) |
@@ -1155,7 +1200,7 @@ pyserial comes from the ESP-IDF Python environment. The generators run through `
   - As built (M6): 60 host targets (53 at M5), with 17 new goldens (8 of the Radar layout and `rain.map`, 6 of the Flights view, 3 of the rain strip); the generator's 14 tests among the 67 tool tests; 25 page tests; the ASan/UBSan build passes them all.
   - Preset and settings JSON: validation and migrations.
   - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
-  - MQTT payload builders: golden JSON.
+  - M7: `ha_mqtt`'s topics, golden JSON for every discovery entity and the state, payload parsing (numbers, text, `json_path`), commands, the mappings' codec and validation, the discovery hash and `expire_after`; the `mqtt.<key>` and `ha.message` fields, goldens of the message banner, presets with an unmapped key; the MQTT step not failing a sync; the MQTT page against the fake device (the write-only password, the mappings editor, Test connection).
   - locale formatting.
   - The web configurator: SHA-256, HMAC and PBKDF2 against published vectors; the password record, sessions and login throttle; the captive DNS reply; the saved-network list and the scan choices; the settings merge patch; the backup bundle; the preset editor's catalogue; the config screen's QR codes; `tools/gen_zones.py`; from M5 the device's name under a router's domain, the idle hour of a session, every status line the server sends, and the settings' sync defaults.
 - **Golden renders.** Each built-in preset, the menu and each special screen are rendered with fixture data at fixed times. Each render is compared with `test/host/golden/*.pbm`. After an intentional change, the renderer rewrites the golden (`build-host/render_dashboard <fixture> <file>`, or `render_screen` for the menu and the special screens), and the owner reviews the PNGs from `tools/render.py`.
@@ -1182,7 +1227,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M5 | One plan (D25): SNTP → RTC with the trim (D25), `weather` with air quality and pollen (D25), `astro`, `sync` with the configurable schedule, quiet hours (D25) and backoff, sync mode `always` with the web UI on the LAN (D24), the weather and air quality widgets, the status bar's sync and Wi-Fi state, the Sync page and the place search, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); the owner reviews the new widgets' goldens (2); the RTC trim brings the drift under 1 s a day (3); sync energy, `always`'s cost and the daily average are measured and `docs/power.md` is updated (4) |
 | M6 | One plan (D27): the radar views (D22, D23, D24, D28; §11.1–§11.4): `png`, the web-Mercator `map` with built-in borders, towns and airports; the weather radar (ČHMÚ, RainViewer outside its coverage) as the Radar layout and the `rain.map` widget, with a frame each sync, every 5 min in sync mode `always`, and the last hour's loop; the flight radar (adsb.fi, sync mode `always` only) as the Flights preset, with the nearest aircraft's route (adsb.lol); rain in the next 2 hours; the Radar page | Goldens of both radars and the new widgets (2); a ČHMÚ frame renders after a sync (3); the loop plays in sync mode `always` (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
 | M6b | One plan (D31): the split layout (§5.2, §5.4) in the renderer, `presets.json` and the web editor; BOOT double for sync mode `always` (§5.6) | Goldens of split presets (2); a split preset built in the web editor shows on the panel (3); BOOT double turns `always` on and back (3) |
-| M7 | `ha_mqtt`: session, discovery, state, preset command, MQTT field mappings | Entities appear in HA; the preset select works at the next sync; a mapped HA value renders (3/4) |
+| M7 | One plan (D32): `ha_mqtt` (a session in every sync, kept connected in sync mode `always`), discovery, state, the preset select, HA buttons, key-press triggers, the message (banner and `ha.message`), the MQTT field mappings, the MQTT page; review minors where M7 touches their code, and `fetch`'s transmit buffer | Host tests and goldens (2); MQTT off and the MQTT page on the board, which runs the stable firmware between tests (3, §12.10); with the owner's broker and HA: entities appear in HA, the select and buttons work at the next sync, a mapped HA value renders, a message shows, key presses trigger in sync mode `always` (3/4) |
 | M8 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
 | M9 | microSD features agreed at the start of M9 | Per the agreed list |
 
@@ -1196,7 +1241,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M4 | Accepted (D18): a web UI password, instead of the admin PIN. Accepted (D19): config mode after a web restart, the clock set from the phone when lost, changing the password and logging out, a Device page. Still deferred: web UI translations |
 | M5 | Accepted (D25): quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration. Still deferred: static IP |
 | M6 | Accepted (D22, D23, D24): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b. Designed in §11.1–§11.4 (D27, D28), with three extras: rain in the next 2 hours, the last hour's loop, the nearest aircraft's route |
-| M7 | MQTT over TLS; HA buttons (sync now, next preset) and device triggers for key presses; HA message entity; HA REST pull as an alternative source |
+| M7 | Accepted (D32): HA buttons (sync now, next preset); device triggers for key presses; an HA message entity. Still deferred: MQTT over TLS; HA REST pull as an alternative source |
 | M8 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
 | M9 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots; from M6 (D28): radar and flight history over days, a detailed map pack, an aircraft registration database |
 | Later | IDS JMK departures; a remote 1-bit image slot; the VBUS-sense hardware mod; external I²C sensors on the header; BLE or ESP-NOW sources |
@@ -1290,6 +1335,8 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | The forecast's request line (451–454 B) sits about 10 B short of esp_http_client's 512 B transmit buffer, past which the request goes out empty and the step times out (M6 review) | Open: `fetch` would set `.buffer_size_tx = 1024` before the URL grows |
 | Open after M6's review: the radar refresh isn't a wake input (a display interval above 5 min slows it, a clock set back stops it until it catches up); a retry on a hung kept connection gets the full timeout again; "png:" details cut at 24 bytes and timeouts reading "ESP_FAIL"; `rain.map` shows "—" before the first frame; an older RainViewer frame from a smaller tile set can survive a second pan into the loop; `radar.bin`'s CRC covers only the levels; about 12 KB of new internal static buffers; no wrap at the antimeridian | Deferred minors, for the owner to choose |
 | Open after M6b's review (minors): the battery's voltage line ignores its comma's tail, which can touch an 82 px M cell's bottom row in Czech; wrapped small text ("Wed 30 Sep", "Svátek práce") loses 1–2 px of its descenders in 81–82 px narrow cells; the sun widget's polar text is cut in wide S cells 51–52 px tall; in a night the toggle names the night's end even when quiet hours end later; `test_ui_catalog` samples the sizes in steps that miss their boundaries; `webui.h` still says presets up to 16 KB | Raise at M7's planning, where M7 touches their code (D25's rule) |
+| No broker or Home Assistant yet (2026-10-03): M7's checks with HA wait for the owner's setup | M7 is built and host-tested; between tests the board runs the stable firmware with its configuration restored (§12.10) |
+| Each sync's MQTT session adds radio time: the broker's connect, up to 1 s of quiet, the publishes | Measured once HA exists (§9.4); a broker that is down costs no retries (D32) |
 | A rollback or downgrade to M6 refuses a `presets.json` with split presets and starts from the built-ins | Only presets made after the update are at stake; forward compatibility isn't promised |
 | GeoNames' towns end at ČHMÚ's area: views beyond it show small towns crowding its edge (Teutschenthal, Boxberg) | Cosmetic, outside the home region |
 | A Rain radar wake is awake 287 ms on light sleep (346 ms on deep, with the file), against about 60 ms for the dashboards | The owner's power measurements (§9.4) decide; the town loop's doubles are the first saving |
@@ -1334,3 +1381,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r31 | 2026-10-02 | D30: BOOT short on the Radar layout syncs for a fresh frame when the loop can't play (§1.2, §5.6, §11.2) |
 | r32 | 2026-10-02 | M6b design (D31): the split layout (§5.2), split presets in `presets.json` (§5.4), BOOT double for sync mode `always` (§5.6, §9.3), the editor (§10.3), `sync.mode_before_always` (§14.3), the tests (§17), the M6b row (§18) |
 | r33 | 2026-10-02 | M6b as built: each kind's least heights in split cells (§5.2), numbers fitted to the height, the weather widgets' smaller digits in frost and heat (§5.3), split presets' JSON as written and `presets.json` up to 20 KB (§5.4), the toggle's toasts and its guard after the menu (§5.6), the snapshot's version 8 (§6), the editor's numbered cells and the API's 24 KB (§10.3), `sync.mode_before_always` (§14.3), the tests (§17), the review's open items (§20) |
+| r34 | 2026-10-03 | M7 design (D32): §12 rewritten (settings, topics with key-press triggers, discovery with buttons, a notify entity and device triggers, commands, field ids and the values' RTC block, the message, sessions and failures, testing on the board with the stable firmware); the `ha.message` field (§5.1); the MQTT mark (§5.2); `mqtt.<key>` in presets (§5.4); the message banner (§5.5); KEY and the banner (§5.6); the values outside the datastore (§6); the MQTT step and its failures (§9.3); the MQTT page and its API (§10.3); `ha_mqtt` (§3.1); `sys/mqtt_disc`, `mqtt.*`, the backup's `mqtt_fields.json` (§14); `mqtt status` (§15); the tests (§17); the M7 row (§18); the M7 proposals (§19); two open items (§20) |

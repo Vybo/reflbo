@@ -665,6 +665,41 @@ static void tiny_sun_stack(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     }
 }
 
+/* The sun in one line: its rise and its set, each beside its icon, in the largest face that takes both, a 12-hour
+ * time's suffix kept before smaller faces are tried without it; where none takes both, the rise alone, as tiny_row()
+ * fits it (M6c review). */
+static void tiny_sun_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, bool big)
+{
+    const gfx_bitmap_t *icons[2] = { big ? &gfx_icon_sunrise_24 : &gfx_icon_sunrise_16,
+                                     big ? &gfx_icon_sunset_24 : &gfx_icon_sunset_16 };
+    char brief[2][16];
+    time_short(v->text, brief[0], sizeof(brief[0]));
+    time_short(v->extra, brief[1], sizeof(brief[1]));
+    static const gfx_font_t *const k_faces[] = { &gfx_font_sans_bold_28, &gfx_font_sans_bold_20,
+                                                 &gfx_font_sans_bold_16, &gfx_font_sans_12 };
+    for (int form = 0; form < 2; form++) {
+        const char *t[2] = { form ? brief[0] : v->text, form ? brief[1] : v->extra };
+        for (size_t i = 0; i < sizeof(k_faces) / sizeof(k_faces[0]); i++) {
+            const gfx_font_t *f = k_faces[i];
+            int above = ui_ink_above(f, t[0]) > ui_ink_above(f, t[1]) ? ui_ink_above(f, t[0]) : ui_ink_above(f, t[1]);
+            int below = ui_ink_below(f, t[0]) > ui_ink_below(f, t[1]) ? ui_ink_below(f, t[0]) : ui_ink_below(f, t[1]);
+            int w = icons[0]->width + 3 + gfx_text_width(f, t[0]) + 5 + icons[1]->width + 3 + gfx_text_width(f, t[1]);
+            if (3 + w + 2 > r.w || above + below + 4 > r.h) { /* digits keep 2 px from the right edge */
+                continue;
+            }
+            int cy = r.y + r.h / 2, x = r.x + 3;
+            int base = r.y + (r.h + ui_ink_above(f, t[0]) - ui_ink_below(f, t[0])) / 2;
+            for (int k = 0; k < 2; k++) {
+                gfx_bitmap(fb, x, cy - icons[k]->height / 2, icons[k], GFX_BLACK);
+                x = gfx_text(fb, f, x + icons[k]->width + 3, base, t[k], GFX_BLACK) + 5;
+            }
+            return;
+        }
+    }
+    bool whole = tiny_line_fits(r, icons[0], v->text);
+    tiny_row(fb, r, icons[0], whole ? v->text : brief[0], NULL, NULL, NULL, true);
+}
+
 /* ---- S in a short cell (M6c, D34): the sky beside the value ---- */
 
 /* The current weather beside its sky (48 px, 24 px in a cell under 120 px wide or 52 px tall): the temperature,
@@ -1003,13 +1038,7 @@ static void draw_sun(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_
         } else if (ui_tiny_stacked(r)) {
             tiny_sun_stack(fb, r, v);
         } else {
-            const gfx_bitmap_t *rise = big ? &gfx_icon_sunrise_24 : &gfx_icon_sunrise_16;
-            char brief[2][16];
-            time_short(v->text, brief[0], sizeof(brief[0]));
-            time_short(v->extra, brief[1], sizeof(brief[1]));
-            bool whole = tiny_line_fits(r, rise, v->text);
-            tiny_row(fb, r, rise, whole ? v->text : brief[0], NULL, big ? &gfx_icon_sunset_24 : &gfx_icon_sunset_16,
-                     whole ? v->extra : brief[1], true);
+            tiny_sun_line(fb, r, v, big);
         }
         return;
     }

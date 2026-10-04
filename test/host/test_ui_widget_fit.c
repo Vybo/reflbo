@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "dashboard_fixtures.h"
 #include "gfx.h"
@@ -425,18 +426,15 @@ static bool icon_ink(const gfx_bitmap_t *icon, int x, int y)
     return (icon->bits[y * ((icon->width + 7) / 8) + x / 8] >> (7 - x % 8)) & 1;
 }
 
-/* Whether `r` shows the stale mark where draw_age() puts it, in the cell's bottom 26 rows: its icon's 16×16 box,
- * ink and blank alike (a solid bar holds every pattern's ink). */
-static bool stale_mark(gfx_rect_t r)
+/* Whether `icon` shows in `area` of cell `r`: its whole box matched, ink and blank alike (a solid bar holds every
+ * pattern's ink), looked for only from inked pixels. */
+static bool icon_in(gfx_rect_t area, gfx_rect_t r, const gfx_bitmap_t *icon)
 {
-    const gfx_bitmap_t *icon = &gfx_icon_stale_16;
     int fx, fy;
     first_ink(icon->bits, icon->width, icon->height, &fx, &fy);
-    gfx_rect_t bottom = { r.x, (int16_t)(r.h > 26 ? r.y + r.h - 26 : r.y), r.w, 0 };
-    bottom.h = (int16_t)(r.y + r.h - bottom.y);
-    for (int x = bottom.x, y = bottom.y; next_ink(bottom, &x, &y); x++) {
+    for (int x = area.x, y = area.y; next_ink(area, &x, &y); x++) {
         int x0 = x - fx, y0 = y - fy;
-        if (x0 < r.x || y0 < bottom.y || x0 + icon->width > r.x + r.w || y0 + icon->height > r.y + r.h) {
+        if (x0 < r.x || y0 < area.y || x0 + icon->width > r.x + r.w || y0 + icon->height > r.y + r.h) {
             continue;
         }
         bool same = true;
@@ -450,6 +448,14 @@ static bool stale_mark(gfx_rect_t r)
         }
     }
     return false;
+}
+
+/* Whether `r` shows the stale mark where draw_age() puts it, in the cell's bottom 26 rows. */
+static bool stale_mark(gfx_rect_t r)
+{
+    gfx_rect_t bottom = { r.x, (int16_t)(r.h > 26 ? r.y + r.h - 26 : r.y), r.w, 0 };
+    bottom.h = (int16_t)(r.y + r.h - bottom.y);
+    return icon_in(bottom, r, &gfx_icon_stale_16);
 }
 
 /* The kinds whose value must never be cut: a number, a time, today's high and low, the sun's times. */
@@ -657,6 +663,52 @@ static void test_short_s_cells_show_a_short_form_before_cutting(void)
     TEST_ASSERT_TRUE(stale_mark(r));
 }
 
+/* A one-line XS sun cell shows its set beside its rise wherever both fit: in a smaller face, then without a 12-hour
+ * suffix, before the set is given up (M6c review). */
+static void test_xs_sun_shows_its_set_where_both_times_fit(void)
+{
+    int checked = 0;
+    for (int variant = 0; variant < VARIANTS; variant++) {
+        ui_context_t ctx = split_context(variant);
+        ui_value_t v;
+        ui_resolve(&ctx, UI_FIELD_SUN_TIMES, &v);
+        if (v.state == UI_VALUE_MISSING || v.polar) {
+            continue;
+        }
+        char brief[2][16];
+        snprintf(brief[0], sizeof(brief[0]), "%s", v.text);
+        snprintf(brief[1], sizeof(brief[1]), "%s", v.extra);
+        for (int k = 0; k < 2; k++) {
+            char *space = strrchr(brief[k], ' '); /* "6:44" for "6:44 AM" */
+            if (space != NULL) {
+                *space = '\0';
+            }
+        }
+        for (int w = 40; w <= 400; w += 3) {
+            for (int h = 20; h <= 43; h++) {
+                if (ui_split_field_size(UI_FK_SUN, w, h) != UI_SIZE_XS) {
+                    continue;
+                }
+                int icon = h >= 34 ? 24 : 16; /* the smallest face, the shortest form: does the pair fit at all? */
+                int need = 3 + icon + 3 + gfx_text_width(&gfx_font_sans_12, brief[0]) + 5 + icon + 3 +
+                           gfx_text_width(&gfx_font_sans_12, brief[1]) + 2;
+                if (need > w) {
+                    continue;
+                }
+                gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), (int16_t)w, (int16_t)h };
+                gfx_fb_init(&s_fb, s_buf, 400, 300);
+                gfx_clear(&s_fb, GFX_WHITE);
+                ui_draw_cell(&s_fb, r, &ctx, UI_FIELD_SUN_TIMES, UI_STALE_STALE);
+                char msg[64];
+                snprintf(msg, sizeof(msg), "sun.times at %d×%d, variant %d", w, h, variant);
+                TEST_ASSERT_TRUE_MESSAGE(icon_in(r, r, icon == 24 ? &gfx_icon_sunset_24 : &gfx_icon_sunset_16), msg);
+                checked++;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(checked > 1000);
+}
+
 /* A field with no room in its cell isn't drawn at all, rather than cut. */
 static void test_a_field_without_room_draws_nothing(void)
 {
@@ -679,6 +731,7 @@ int main(void)
     RUN_TEST(test_a_number_keeps_its_size_as_its_digits_change);
     RUN_TEST(test_every_field_fits_every_cell_a_split_can_make);
     RUN_TEST(test_a_field_without_room_draws_nothing);
+    RUN_TEST(test_xs_sun_shows_its_set_where_both_times_fit);
     RUN_TEST(test_every_small_field_fits_every_xs_cell);
     RUN_TEST(test_xs_draws_one_line_or_the_symbol_over_the_value);
     RUN_TEST(test_xs_keeps_the_marks_s_shows);

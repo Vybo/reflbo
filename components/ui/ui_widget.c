@@ -778,6 +778,9 @@ static void draw_tiny_stacked(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         value_h = digit_height(vf) + (tail > unit_tail ? tail : unit_tail);
     } else {
         const char *text = v->state == UI_VALUE_MISSING ? PLACEHOLDER : v->kind == UI_FK_MOON ? v->short_text : v->text;
+        if (v->kind == UI_FK_MOON && v->state != UI_VALUE_MISSING && tiny_text_face(text, r.w - 8, room + 4) == NULL) {
+            text = v->extra; /* its illumination, where its short name would be cut (M6c review) */
+        }
         vf = fit_tiny_text(text, r.w - 8, room + 4, fit, sizeof(fit));
         value = fit;
         value_h = ink_above(vf, value) + ink_below(vf, value);

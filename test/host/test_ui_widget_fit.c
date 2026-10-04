@@ -784,6 +784,32 @@ static void test_the_age_mark_never_lands_on_the_value(void)
     TEST_ASSERT_TRUE(drawn > 1000); /* where there is room, the mark still shows */
 }
 
+/* A narrow XS cell stacks the Moon's disc over its short name, or its illumination where the name doesn't fit:
+ * never a cut word, in any phase, in English or Czech (M6c review: "Gib…" at 49×92). */
+static void test_xs_moon_gives_its_illumination_before_a_cut(void)
+{
+    static const int16_t k_w[] = { 40, 41, 44, 49, 50, 55, 60, 64, 66, 70, 75, 80, 89 };
+    static const int16_t k_h[] = { 44, 45, 50, 59, 60, 69, 92, 139 };
+    for (int lang = 0; lang < 2; lang++) {
+        for (int d = 0; d < 30; d += 2) { /* a lunar month */
+            ui_context_t ctx = fixture_context();
+            ctx.lang = lang_get(lang ? "cs" : "en");
+            ctx.now = FIX_NOW + d * 86400;
+            for (size_t i = 0; i < sizeof(k_w) / sizeof(k_w[0]); i++) {
+                for (size_t j = 0; j < sizeof(k_h) / sizeof(k_h[0]); j++) {
+                    gfx_rect_t r = { (int16_t)(400 - k_w[i]), (int16_t)(300 - k_h[j]), k_w[i], k_h[j] };
+                    gfx_fb_init(&s_fb, s_buf, 400, 300);
+                    gfx_clear(&s_fb, GFX_WHITE);
+                    ui_draw_cell(&s_fb, r, &ctx, UI_FIELD_MOON_PHASE, UI_STALE_STALE);
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "moon.phase at %d×%d, day %d, %s", r.w, r.h, d, lang ? "cs" : "en");
+                    TEST_ASSERT_FALSE_MESSAGE(has_ellipsis(r), msg);
+                }
+            }
+        }
+    }
+}
+
 /* A field with no room in its cell isn't drawn at all, rather than cut. */
 static void test_a_field_without_room_draws_nothing(void)
 {
@@ -808,6 +834,7 @@ int main(void)
     RUN_TEST(test_a_field_without_room_draws_nothing);
     RUN_TEST(test_xs_sun_shows_its_set_where_both_times_fit);
     RUN_TEST(test_the_age_mark_never_lands_on_the_value);
+    RUN_TEST(test_xs_moon_gives_its_illumination_before_a_cut);
     RUN_TEST(test_every_small_field_fits_every_xs_cell);
     RUN_TEST(test_xs_draws_one_line_or_the_symbol_over_the_value);
     RUN_TEST(test_xs_keeps_the_marks_s_shows);

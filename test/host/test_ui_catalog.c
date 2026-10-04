@@ -136,11 +136,14 @@ static void test_layouts_publish_the_split_rules(void)
     TEST_ASSERT_EQUAL_INT(400, num(xl, "min_w"));
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(xl, "kinds"))); /* time, number */
     const cJSON *s_min = cJSON_GetObjectItemCaseSensitive(s, "min_h");
-    TEST_ASSERT_EQUAL_INT(80, cJSON_GetArrayItem(s_min, 0)->valueint); /* narrow, then wide */
+    TEST_ASSERT_EQUAL_INT(40, cJSON_GetArrayItem(s_min, 0)->valueint); /* narrow, then wide (M6c: the same) */
     TEST_ASSERT_EQUAL_INT(40, cJSON_GetArrayItem(s_min, 1)->valueint);
     const cJSON *wx = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(s, "kinds"), "weather_now");
-    TEST_ASSERT_EQUAL_INT(86, cJSON_GetArrayItem(wx, 0)->valueint);
-    TEST_ASSERT_EQUAL_INT(61, cJSON_GetArrayItem(wx, 1)->valueint);
+    TEST_ASSERT_EQUAL_INT(40, cJSON_GetArrayItem(wx, 0)->valueint); /* M6c: the sky beside the temperature */
+    TEST_ASSERT_EQUAL_INT(40, cJSON_GetArrayItem(wx, 1)->valueint);
+    const cJSON *sun = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(s, "kinds"), "sun");
+    TEST_ASSERT_EQUAL_INT(49, cJSON_GetArrayItem(sun, 0)->valueint);
+    TEST_ASSERT_EQUAL_INT(49, cJSON_GetArrayItem(sun, 1)->valueint);
     TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(s, "kinds"), "series"));
     /* the rules give what the renderer does, everywhere */
     static const char *const k_kinds[UI_FK_COUNT] = { "time", "date", "number", "battery", "moon", "text",

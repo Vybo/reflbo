@@ -257,13 +257,14 @@ static void draw_min_max_mark(gfx_fb_t *fb, const ui_value_t *v, int x, int y)
     }
 }
 
-/* The small visual that stands for the field: an icon, a battery, or the Moon. */
-static int draw_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int size)
+/* The small visual that stands for the field: an icon, a battery (its bolt while it charges, with `bolt`), or the
+ * Moon. Returns its width. */
+static int draw_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int size, bool bolt)
 {
     if (v->kind == UI_FK_BATTERY) {
         int w = size * 3 / 2, h = size * 3 / 4;
         ui_draw_battery(fb, x, y + (size - h) / 2, w, h, v->state == UI_VALUE_MISSING ? -1 : v->percent);
-        if (v->battery == DS_BAT_CHARGING) {
+        if (bolt && v->battery == DS_BAT_CHARGING) {
             gfx_bitmap(fb, x + w + 2, y + (size - 16) / 2, &gfx_icon_bolt_16, GFX_BLACK);
             return w + 18;
         }
@@ -285,6 +286,19 @@ static int draw_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int size
     gfx_bitmap(fb, x, y, icon, GFX_BLACK);
     draw_min_max_mark(fb, v, x + icon->width - 6, y + icon->height);
     return icon->width;
+}
+
+/* The width draw_symbol() takes at `size` px. */
+static int symbol_width(const ui_value_t *v, int size, bool bolt)
+{
+    if (v->kind == UI_FK_BATTERY) {
+        return size * 3 / 2 + (bolt && v->battery == DS_BAT_CHARGING ? 18 : 0);
+    }
+    if (v->kind == UI_FK_MOON) {
+        return size;
+    }
+    const gfx_bitmap_t *icon = field_icon(v->field, size);
+    return icon != NULL ? icon->width : 0;
 }
 
 /* The value as text: the number for most kinds, a word or name otherwise. */
@@ -309,6 +323,83 @@ static bool numeric(const ui_value_t *v)
            (v->kind == UI_FK_NUMBER || v->kind == UI_FK_TIME || v->kind == UI_FK_BATTERY);
 }
 
+/* S beside the value, from 150 px of width or under 80 px of height: the symbol, then the value. Nothing is cut
+ * before the rest gives way: words take their shorter forms (the date's "Fri 25"; the Moon's short name, then its
+ * illumination), then leave their symbol behind (the Moon keeps its disc); a number gives up the battery's bolt,
+ * its trend arrow, its unit (a time its clock first, as AM/PM says more), then its symbol, and stands alone,
+ * centred. */
+static void draw_small_beside(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
+{
+    const ui_fonts_t *f = &k_fonts[UI_SIZE_S];
+    int pad = r.w < 150 ? 6 : 14, gap = r.w < 150 ? 6 : 10;
+    int sym_y = r.y + (r.h - f->icon) / 2;
+    char fit[48];
+    if (!numeric(v)) {
+        const gfx_font_t *vf = v->state == UI_VALUE_MISSING ? f->value : f->text;
+        const char *forms[3] = { display_text(v, UI_SIZE_S), "", "" };
+        if (v->state != UI_VALUE_MISSING && v->kind == UI_FK_DATE) {
+            forms[1] = v->short_text;
+        } else if (v->state != UI_VALUE_MISSING && v->kind == UI_FK_MOON) {
+            forms[1] = v->short_text, forms[2] = v->extra;
+        }
+        ui_value_t shown = *v;
+        shown.unit[0] = '\0';
+        shown.trend = 0;
+        int baseline = r.y + (r.h + digit_height(vf)) / 2;
+        for (int with = 1; with >= 0; with--) {
+            int x = with ? r.x + pad + symbol_width(v, f->icon, true) + gap : r.x + 6;
+            for (int k = 0; k < 3; k++) {
+                int w = gfx_text_width(vf, forms[k]);
+                if (forms[k][0] && w <= r.x + r.w - 6 - x) {
+                    if (with) {
+                        draw_symbol(fb, v, r.x + pad, sym_y, f->icon, true);
+                    }
+                    draw_group(fb, f, vf, &shown, forms[k], with ? x : r.x + (r.w - w) / 2, baseline);
+                    return;
+                }
+            }
+            if (v->kind == UI_FK_MOON && v->state != UI_VALUE_MISSING) {
+                break; /* the disc is the phase */
+            }
+        }
+        int x = r.x + pad + draw_symbol(fb, v, r.x + pad, sym_y, f->icon, true) + gap;
+        gfx_text_ellipsize(vf, forms[0], r.x + r.w - 6 - x, fit, sizeof(fit));
+        draw_group(fb, f, vf, &shown, fit, x, baseline);
+        return;
+    }
+    static const struct {
+        bool sym, bolt, trend, unit;
+    } k_tries[] = {
+        { true, true, true, true },    { true, false, true, true },   { true, false, false, true },
+        { true, false, false, false }, { false, false, false, true }, { false, false, false, false },
+    };
+    size_t count = sizeof(k_tries) / sizeof(k_tries[0]);
+    for (size_t i = 0; i < count; i++) {
+        if (v->kind == UI_FK_TIME && k_tries[i].sym && !k_tries[i].unit) {
+            continue;
+        }
+        ui_value_t shown = *v;
+        shown.trend = k_tries[i].trend ? v->trend : 0;
+        if (!k_tries[i].unit) {
+            shown.unit[0] = '\0';
+        }
+        int x = r.x + pad + (k_tries[i].sym ? symbol_width(v, f->icon, k_tries[i].bolt) : 0) + gap;
+        int max_w = k_tries[i].sym ? r.x + r.w - 6 - x : r.w - 12;
+        const char *value = v->text;
+        const gfx_font_t *vf = fit_number(f, k_fit_s, 3, &shown, &value, max_w, 0, 0, fit, sizeof(fit));
+        if (value == fit && i + 1 < count) {
+            continue; /* cut: give up something else first */
+        }
+        if (k_tries[i].sym) {
+            draw_symbol(fb, v, r.x + pad, sym_y, f->icon, k_tries[i].bolt);
+        } else {
+            x = r.x + (r.w - group_width(f, vf, &shown, value)) / 2;
+        }
+        draw_group(fb, f, vf, &shown, value, x, r.y + (r.h + digit_height(vf)) / 2);
+        return;
+    }
+}
+
 static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
 {
     const ui_fonts_t *f = &k_fonts[UI_SIZE_S];
@@ -320,11 +411,13 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         shown.trend = 0;
     }
     char fit[48];
-    if (r.w < 150) { /* narrow: symbol above, value below, the trend arrow beside the symbol */
+    /* a name on two lines ends 84 px down: it stacks from 86 px, its tails 2 px clear */
+    bool two_lines = !numeric(v) && v->kind != UI_FK_MOON && gfx_text_width(vf, value) > r.w - 8;
+    if (r.w < 150 && r.h >= (two_lines ? 86 : 80)) { /* narrow and tall: symbol above, value below, the arrow beside */
         int sym_size = v->kind == UI_FK_MOON ? 28 : f->icon;
         int sym_w = v->kind == UI_FK_BATTERY ? sym_size * 3 / 2 : sym_size;
         int sym_x = r.x + (r.w - sym_w) / 2;
-        draw_symbol(fb, v, sym_x, r.y + 12, sym_size);
+        draw_symbol(fb, v, sym_x, r.y + 12, sym_size, true);
         if (shown.trend) {
             gfx_text(fb, &gfx_font_sans_bold_16, sym_x + sym_w + 4, r.y + 12 + sym_size - 4,
                      shown.trend > 0 ? ARROW_UP : ARROW_DOWN, GFX_BLACK);
@@ -338,7 +431,7 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
             return;
         }
         int max_w = r.w - 8;
-        if (!numeric(v) && gfx_text_width(vf, value) > max_w) { /* a name: two lines in the regular face */
+        if (two_lines) { /* a name: two lines in the regular face */
             const gfx_font_t *tf = f->unit;
             char second[sizeof(fit)];
             ui_split_two_lines(tf, value, max_w, fit, second, sizeof(fit));
@@ -360,15 +453,7 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         draw_group(fb, f, vf, &shown, value, r.x + (r.w - w) / 2, baseline);
         return;
     }
-    int sym_w = draw_symbol(fb, v, r.x + 14, r.y + (r.h - f->icon) / 2, f->icon); /* wide: side by side */
-    int x = r.x + 14 + sym_w + 10;
-    if (!numeric(v)) {
-        gfx_text_ellipsize(vf, value, r.x + r.w - 6 - x, fit, sizeof(fit));
-        value = fit;
-    } else {
-        vf = fit_number(f, k_fit_s, 3, &shown, &value, r.x + r.w - 6 - x, 0, 0, fit, sizeof(fit));
-    }
-    draw_group(fb, f, vf, &shown, value, x, r.y + (r.h + digit_height(vf)) / 2);
+    draw_small_beside(fb, r, v);
 }
 
 /* ---- XS (M6c, D34): the status bar's look ---- */
@@ -472,13 +557,32 @@ static bool tiny_bolt(const ui_value_t *v)
     return v->kind == UI_FK_BATTERY && v->state != UI_VALUE_MISSING && v->battery == DS_BAT_CHARGING;
 }
 
+/* The bolt's ink: the first of its 16 px icon's columns that hold any, and how many, so it sits 2 px from the
+ * battery, not its icon's box. */
+static void bolt_ink(int *x0, int *w)
+{
+    const gfx_bitmap_t *b = &gfx_icon_bolt_16;
+    int rb = (b->width + 7) / 8, lo = b->width, hi = -1;
+    for (int y = 0; y < b->height; y++) {
+        for (int x = 0; x < b->width; x++) {
+            if ((b->bits[y * rb + x / 8] >> (7 - x % 8)) & 1) {
+                lo = x < lo ? x : lo;
+                hi = x > hi ? x : hi;
+            }
+        }
+    }
+    *x0 = lo, *w = hi - lo + 1;
+}
+
 /* The symbol's size at `sym` px, its marks included: the battery's outline and bolt, the Moon, or the field's icon
  * and its arrow; 0 × 0 for a time and for a field without one. */
 static void tiny_symbol_size(const ui_value_t *v, int sym, int *w, int *h)
 {
     *w = *h = 0;
     if (v->kind == UI_FK_BATTERY) {
-        *w = sym + 6 + (tiny_bolt(v) ? 2 + 16 : 0), *h = sym / 2 + 2;
+        int bolt_x, bolt_w;
+        bolt_ink(&bolt_x, &bolt_w);
+        *w = sym + 6 + (tiny_bolt(v) ? 2 + bolt_w : 0), *h = sym / 2 + 2;
         *h = tiny_bolt(v) && *h < 16 ? 16 : *h;
     } else if (v->kind == UI_FK_MOON) {
         *w = *h = sym;
@@ -499,7 +603,9 @@ static void draw_tiny_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, in
         int bh = sym / 2 + 2;
         ui_draw_battery(fb, x, cy - bh / 2, sym + 6, bh, v->state == UI_VALUE_MISSING ? -1 : v->percent);
         if (tiny_bolt(v)) {
-            gfx_bitmap(fb, x + sym + 6 + 2, cy - 8, &gfx_icon_bolt_16, GFX_BLACK);
+            int bolt_x, bolt_w;
+            bolt_ink(&bolt_x, &bolt_w);
+            gfx_bitmap(fb, x + sym + 6 + 2 - bolt_x, cy - 8, &gfx_icon_bolt_16, GFX_BLACK);
         }
     } else if (v->kind == UI_FK_MOON) {
         if (v->state == UI_VALUE_MISSING) {
@@ -615,6 +721,10 @@ static void draw_tiny_stacked(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     }
     int sym_w, sym_h;
     tiny_symbol_size(v, sym, &sym_w, &sym_h);
+    if (sym == 24 && sym_w > r.w - 4) { /* a charging battery's bolt beside the 24 px outline: the 16 px one */
+        sym = 16;
+        tiny_symbol_size(v, sym, &sym_w, &sym_h);
+    }
     int gap = sym_h ? 4 : 0;
     int room = r.h - 4 - sym_h - gap;
     const gfx_font_t *vf;
@@ -769,7 +879,8 @@ void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t
     } else {
         draw_labelled(fb, r, size, &shown);
     }
-    if (shown.state == UI_VALUE_STALE && size != UI_SIZE_XS) { /* XS has no room; the status bar marks it */
+    /* XS and a short S cell have no room beside the value; the status bar's stale warning covers them */
+    if (shown.state == UI_VALUE_STALE && size != UI_SIZE_XS && !(size == UI_SIZE_S && r.h < 80)) {
         draw_age(fb, r, &shown, lang);
     }
     fb->clip = saved;

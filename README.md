@@ -103,7 +103,9 @@ python3 tools/docs_images.py     # the panel images in docs/images from the gold
 | M5: time sync, weather, air quality, the sync schedule | Built |
 | M6: weather radar and flight radar | Built |
 | M6b: layouts of your own, BOOT double for Always on | Built |
-| M7: MQTT and Home Assistant | Designed |
+| M6c: smaller split cells, down to the status bar's size | Designed |
+| M6d: solar forecast and the house's energy (SolaX Cloud) | Designed |
+| M7: MQTT and Home Assistant | Designed, on hold until M6d |
 | M8: alarms and internet radio | Planned |
 | M9: microSD | Planned |
 

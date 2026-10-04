@@ -284,6 +284,8 @@ tools/idf.sh exec python tools/devlog.py --cmd "field set env.temp -5.5" --cmd "
 
 ## Coming next
 
+- **Smaller split cells (M6c, designed).** Split presets with up to 24 cells as small as 40×20 pixels, which draw a value like the status bar does: one line, or the icon over the value in a narrow cell.
+- **Solar (M6d, designed).** A forecast of your PV system's output for the day, from Open-Meteo (no account), Forecast.Solar or Solcast, as a layout with a chart and as fields; the house's energy now from SolaX Cloud (solar output, grid import and export, consumption, a home battery if you have one) as a second layout and as fields; and a switch for each step of the sync, so services you don't use cost no requests.
 - **MQTT and Home Assistant (M7, designed).** The device's sensors and state in Home Assistant through MQTT discovery; its preset as a select; Sync now and Next preset as buttons; key presses as device triggers; a message from Home Assistant as a banner; and values from Home Assistant or other devices as fields on the dashboard.
 - **Audio (M8, planned).** Alarms that ring from sleep, with snooze; internet radio.
 - **microSD (M9, planned).** Uses to be agreed, such as history and graphs, sounds and station lists, or a detailed map.

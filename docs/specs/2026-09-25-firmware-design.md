@@ -24,6 +24,9 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | R9 | Use the microSD slot (feature set agreed at M9) |
 | R10 | Two-way Home Assistant integration: publish status and sensors, and show chosen HA entities |
 | R11 | Agent-verifiable: logs and screenshots over USB, rendering on the host; the owner confirms physical output |
+| R12 | Split cells small enough for values the size of the status bar's: down to 40×20 px, up to 24 a preset (owner, 2026-10-04, D34) |
+| R13 | Solar: a forecast of the PV system's output for the day, from the location and the roof's orientation and size, as a layout and as fields; the house's energy now (solar output, grid import and export, an optional battery, consumption) as a second layout and as fields, from SolaX Cloud; a built-in preset for each (owner, 2026-10-04, D35, D36) |
+| R14 | Each data step of the sync can be switched off, so a service nobody uses costs no requests (owner, 2026-10-04, D35) |
 
 | ID | Non-functional requirement |
 |---|---|
@@ -69,20 +72,24 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D30 | Owner, 2026-10-02 (M6 board checks): BOOT short on the Radar layout starts a sync on demand, for a fresh frame, whenever the loop can't play (outside sync mode `always`, or with fewer than two frames), with the menu's Sync now toasts; in `always` it keeps playing the last hour (§5.6, §11.2) | The press re-read the sensors there, which that screen doesn't show |
 | D31 | Owner, 2026-10-02 (M6b design): a split layout (§5.2) beside the fixed ones, which stay as they are: the area under the status bar split into rows or columns at 1/4, 1/3, 1/2, 2/3 or 3/4, each part split again, at most 8 cells of at least 90×40, each cell holding one field at the size its dimensions allow, each split's separator shown or hidden; edited on the web page with the live preview (§10.3). BOOT double on the dashboard toggles sync mode `always`, remembering the mode before (§5.6, §9.3). Both are M6b, one plan, before M7 | Halves alone can't give a top of three quarters; the fixed layouts' hand-tuned sizes aren't all expressible in the five ratios, so they stay |
 | D32 | Owner, 2026-10-03 (M7 design): one `ha_mqtt` client, a session in every sync and kept connected in sync mode `always` (§12.9); a failed MQTT session is shown (the Sync page, Info, a mark in the status bar) but doesn't fail the sync, so it isn't retried; M7 adds HA buttons (sync now, next preset), key-press device triggers, reported only while connected, and a message entity, shown as a banner until KEY dismisses it and as the `ha.message` field (§12.3–§12.8); TLS and HA's REST API as a source stay deferred; review minors are fixed where M7 touches their code, and `fetch`'s transmit buffer too (M6's review). There is no broker or HA yet, so M7 is built and host-tested and its checks with HA wait for the owner's setup. The M6b build is the stable firmware (tag `stable-m6b`): it goes back on the board after every MQTT/HA test, the board's configuration is backed up before a test and restored after, and nothing is erased from the board without asking (§12.10) | One client serves both kinds of session; a broker that is down costs no extra radio time; the board stays on known-good firmware with its data while M7 is tested |
+| D33 | Owner, 2026-10-04: M7 waits, and two plans come first: M6c, small split cells (D34), then M6d, solar and the house's energy (D35, D36). Their designs were reviewed as panel renders from a throwaway spike (`spike/m6cd`) and approved the same day. M7 keeps its number; its plan is refreshed against them before it runs | The owner wants these before Home Assistant; M7's plan needs the new fields and sync steps anyway |
+| D34 | Owner, 2026-10-04 (M6c design): split cells down to 40×20 px, up to 24 a preset; a size class XS (from 40×20) takes every kind S takes and draws like the status bar: one line in a short or wide cell, the symbol over the value in a narrow, tall one, the unit under the number where there is height, short forms before an ellipsis; S in cells under 150×80 puts the symbol beside the value; a cell that grows never draws a field at a smaller size; the fixed layouts stay as they are (§5.2, §5.3) | The owner's example was a 132×69 cell. The fixed layouts' goldens stay identical |
+| D35 | Owner, 2026-10-04 (M6d forecast): the PV forecast comes from the source the user picks: Open-Meteo's tilted irradiance through our own PV model (the default, no key), Forecast.Solar (no key: 1 plane, hourly, 2 days), or Solcast (a key and 1–2 rooftop sites, asked at most every 3 h a site within its 10 calls a day); up to 2 roof planes; the `pv.*` fields with a chart, the Solar layout and a built-in Solar preset outside the cycle; a Solar step in the sync, which fails and retries like the weather's, except on a 429. Every data step of the sync can be switched off (the owner's addition); the time step always runs (§9.3, §11.5) | Open-Meteo is a source already and needs no account; the others are for owners with an account there |
+| D36 | Owner, 2026-10-04 (M6d energy): the house's energy now comes from SolaX Cloud's real-time API, with the token and the dongle's registration number in NVS: a reading in each sync, and every 5 min in sync mode `always`; its failures show but don't fail the sync (as D32's MQTT); the home battery shows on auto, on or off; the `energy.*` fields with a flow widget, the Energy layout and a built-in Energy preset outside the cycle; an MQTT source joins with M7 (§11.6). After M6d's acceptance its build replaces `stable-m6b` as the stable firmware (`stable-m6d`, §12.10) | SolaX Cloud as the owner asked; the dongle's local API depends on its firmware; the cloud refreshes about every 5 min, so a failed reading is soon replaced |
 
 ### 1.3 Out of scope for v1
 
 - Everything in §19.
 - BLE and ESP-NOW sources.
 - Voice features.
-- Network services other than Open-Meteo, NTP and the owner's MQTT broker.
+- Network services other than those §11 names (Open-Meteo, ČHMÚ, RainViewer, adsb.fi, adsb.lol, Forecast.Solar, Solcast, SolaX Cloud), NTP and the owner's MQTT broker.
 - Portrait orientation.
 
 ### 1.4 Terms
 
 | Term | Meaning | Frequency | Radio |
 |---|---|---|---|
-| **Sync** | A network session: Wi-Fi on → time (NTP) → weather and air quality → MQTT (M7) → Wi-Fi off | Configurable schedule (§9.3); default once a day at 05:30 | Yes |
+| **Sync** | A network session: Wi-Fi on → time (NTP) → weather, air quality, radar, solar forecast and the house's energy (each can be switched off, M6d) → MQTT (M7) → Wi-Fi off | Configurable schedule (§9.3); default once a day at 05:30 | Yes |
 | **Display update** | Redraw from local data (RTC time, the latest readings, stored weather and MQTT values) and push to the panel | Configurable (§9.2); default every minute | No |
 | **Sensor sample** | A reading from the SHTC3 and the battery gauge | Every 5 min (configurable) | No |
 | **Wake** | The CPU leaving sleep for any of the above, or for a button, an alarm or a timeout | — | — |
@@ -114,7 +121,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `locale` | Language packs (API prefix `lang_`, because libc owns `locale_t`): strings, date and number formats, name days and holidays | — | ✓ |
 | `astro` | Sunrise, sunset, day length | — | ✓ |
 | `datastore` | Measured and fetched values, freshness, derived values and trends, change mask (§6) | — | ✓ |
-| `ui` | Field catalogue, layouts, widgets, status bar, presets and their JSON codec, cycle order, screens, menu, input handling | gfx, locale, datastore, util; from M6 map, radar, adsb; from M7 `ha_mqtt`'s values (§12.5) | ✓ |
+| `ui` | Field catalogue, layouts, widgets, status bar, presets and their JSON codec, cycle order, screens, menu, input handling | gfx, locale, datastore, util; from M6 map, radar, adsb; from M6d the solar state (`ui_solar.h`); from M7 `ha_mqtt`'s values (§12.5) | ✓ |
 | `scheduler` | Next-wake computation for display, sensors, alarms, sync, timeouts | — | ✓ |
 | `sensors` | SHTC3, battery gauge | board | curve and filter logic |
 | `rtc` | PCF85063 (API prefix `pcf85063_`, because ESP-IDF owns `rtc_*`): time, oscillator-stop flag, alarm → INT, the Offset register; the time set to the millisecond and its error timed (§7) | board | register codec, the offset's |
@@ -123,13 +130,15 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | `netmgr` | Wi-Fi STA/AP state machine, a sync's station-only join, captive DNS, mDNS | IDF | captive DNS reply, saved-network list, scan choices |
 | `webui` | HTTP server, the password and sessions, Wi-Fi, OTA and place-search routes, embedded web assets; every other API route goes to `main` | netmgr, util, weather | password record, sessions, HTTP helpers, host names, status lines |
 | `weather` | Open-Meteo's forecast (with `minutely_15` from M6), air quality and place search: URLs, parsers, skies, bands and levels; the HTTPS fetch | datastore, fetch | all but the fetch |
+| `solar` | The PV forecast (M6d, §11.5): Open-Meteo's, Forecast.Solar's and Solcast's URLs and parsers, our PV model, the local quarter hours and the midnight roll-over, Solcast's budget | util | ✓ |
+| `energy` | The house's energy (M6d, §11.6): SolaX Cloud's URL and parser, the signs, the battery's auto rule, today's totals from midnight readings, the quarter-hour actuals | util | ✓ |
 | `fetch` | HTTPS GETs with the certificate bundle and a `reflbo/<version>` User-Agent; a session keeps its connection for the next GET to the same host and closes one the server won't keep (M6) | IDF | — |
 | `png` | PNG reader for the radar images: 8-bit palette and RGBA, row by row; the ROM's `tinfl` on the device, zlib on the host (M6) | util | ✓ |
 | `map` | Web-Mercator views; the built-in map (`assets/map/map.bin`: borders, coasts, towns, airports) and its drawing, with labels that keep clear (M6) | gfx, util | ✓ |
 | `radar` | ČHMÚ's and RainViewer's frames: decoding into three rain levels, the store, the frame file, which views a frame covers, drawing; their HTTPS fetch on the sync task (M6) | png, map, fetch | all but the fetch |
 | `adsb` | adsb.fi's aircraft on the Flights map, adsb.lol's routes and their cache; the polling task (M6) | map, fetch | all but the task |
 | `ha_mqtt` | MQTT session (one esp-mqtt client: a session in every sync, kept connected in sync mode `always`), discovery, state, commands, key-press triggers, field mappings and their values, the message (M7, §12) | netmgr, storage | topics, payload builders and parsers, the mappings' codec, the discovery hash, `expire_after` |
-| `sync` | When syncs run (the modes, quiet hours, retries, the radio's 45 s), SNTP packets, and the sync task, which fetches and reports to `main` (§9.3); from M6 the radar step and sync mode `always`'s radar-only refresh; MQTT joins in M7 | netmgr, weather, scheduler, datastore, storage | the plan and the SNTP packets |
+| `sync` | When syncs run (the modes, quiet hours, retries, the radio's 45 s), SNTP packets, and the sync task, which fetches and reports to `main` (§9.3); from M6 the radar step and sync mode `always`'s radar-only refresh; from M6d the Solar and Energy steps, the energy reading in that refresh, and the steps' switches; MQTT joins in M7 | netmgr, weather, scheduler, datastore, storage | the plan and the SNTP packets |
 | `audio` | Codec control, tone/WAV/stream players, alarm ringing | board, storage | — |
 | `storage` | NVS (identity, secrets), LittleFS config files, microSD mount | IDF | settings codec with its defaults, config-file backup logic |
 | `diag` | Console commands, screenshot export | most | — |
@@ -269,6 +278,7 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 - A 1-bpp icon set generated into C bitmaps by `tools/imggen.py` (`tools/gen_icons.sh`) from Google's Material Icons font (Apache-2.0, pinned to one upstream commit). `assets/icons/icons.txt` lists each icon's name and sizes.
 - M3a: thermometer, drop, dew, bolt (charging), stale, clock, calendar, person, celebration and cloud, at 16, 24 or 48 px as the list says. The battery and the moon are drawn with primitives. Weather codes (day and night), Wi-Fi, sync, the alarm bell, sunrise and sunset join with their milestones.
 - M5 (D26): the weather codes, sunrise and sunset come from Erik Flowers' Weather Icons (SIL OFL 1.1), as Material Icons has no rain or showers. The generator draws a second font with `--font PREFIX=TTF,CODEPOINTS,LICENCE`, its glyphs fitted to the square inside Material's padding. Sync, a crossed-out cloud, Wi-Fi, a crossed-out Wi-Fi, air, particles, UV and a flower come from Material Icons.
+- M6c and M6d (D34–D36): 16 px forms of the field icons for XS cells; a sun for the forecast (`wb_sunny`), solar panels for measured output (`solar_power`), a house, an electricity meter for the grid (`electric_meter`) and a leaf for own use (`energy_savings_leaf`), all from Material Icons.
 - Sources and licences are recorded in `THIRD_PARTY.md`.
 
 ## 5. UI
@@ -303,6 +313,16 @@ Both strategies live in `power` (`power_sleep_deep()`, `power_sleep_light()`) un
 | `rain.map` | rain map: the weather radar's latest frame around its centre | the weather radar (§11.2) | Its frame time always shows; after 30 min the time shows inverted with its age |
 | `mqtt.<key>` | number or text, with unit and label | MQTT mapping (§12.5) | Configured TTL; default twice the expected sync interval (§9.3) |
 | `ha.message` | text: the latest message from Home Assistant (§12.7) | HA's notify entity (M7, D32) | Until replaced or cleared; stale after 24 h |
+| `pv.now` | number, kW: the forecast for the quarter hour now | the PV forecast (§11.5, M6d) | As `wx.now`, with Solcast's wait (3 or 6 h) in place of a shorter sync interval; missing on a day the forecast doesn't cover |
+| `pv.today`, `pv.left`, `pv.tomorrow` | number, kWh: today's total, what is still to come today, tomorrow's total | Same | Same |
+| `pv.peak` | number, kW, with the time of the day's highest quarter hour | Same | Same |
+| `pv.chart` | chart: today's output a quarter hour a bar (an hour in narrow cells), the past filled and the rest outlined, now marked; with the house's readings, the past bars are what was produced and a line over them is the forecast | the PV forecast and the house's readings (§11.6) | Same |
+| `energy.pv`, `energy.load` | number, kW: the panels' output and the house's consumption now | the house's energy (§11.6, M6d) | Fresh while the reading is at most 15 min old; stale after |
+| `energy.grid` | number, kW, with its direction: "Export" or "Import" as the label in M and up, ↑ to the grid or ↓ from it in S and XS | Same | Same |
+| `energy.battery` | battery: charge %, a bolt while charging, ↓ while discharging, the power in M and up | Same | Same; missing when no battery shows (§11.6) |
+| `energy.yield`, `energy.export`, `energy.import` | number, kWh today: produced, to the grid, from the grid | Same | Same; export and import are missing on a day without a reading near midnight (§11.6) |
+| `energy.self` | number, %: the share of today's production the house used | Same | Same |
+| `energy.flow` | flow: the panels, the grid, the house and a battery, with arrows where power flows: a diagram in tall cells, a row in short ones | Same | Same |
 
 `env.temp` and `env.hum` carry a trend: the change over the last hour. Widgets show ↑ or ↓ when it exceeds 0.5 °C or 3 %. The extra fields (from `env.dew` to `date.holiday`) are the accepted M3 proposals (D15); the air quality and pollen fields are an accepted M5 proposal (D25); `wx.rain2h` and `rain.map` come with M6 (D23, D27).
 
@@ -313,6 +333,7 @@ As built (M6): `wx.rain2h` is missing unless its 8 quarter hours lie within the 
 - **Air quality bands** (Open-Meteo's `european_aqi`, the EEA's bands): 0–20 good, 20–40 fair, 40–60 moderate, 60–80 poor, 80–100 very poor, above 100 extremely poor.
 - **UV bands** (WHO, D26), of the index rounded: 0–2 low, 3–5 moderate, 6–7 high, 8–10 very high, 11 and above extreme.
 - **Sun times** show the day length and, in medium and large slots, its change since yesterday in whole minutes (D26).
+- **Solar and energy fields** (M6d, D35, D36): `pv.chart` and `energy.flow` need M or larger; the others fit anywhere from XS. A sun marks the forecast and solar panels the measured output, so `pv.now` and `energy.pv` don't look alike. Where a number doesn't fit, kW from 1 kW up drops to one decimal (3.4) and kWh from 10 kWh up to whole numbers (27); smaller values keep their decimals (0.86 kW, 1.4 kWh).
 - **Pollen levels** from the clinical thresholds CAMS uses (EAACI, checked 2026-10-01): below 1 grain/m³ none; then low; moderate from the season threshold; high from the peak threshold. Alder, birch, olive and mugwort: 10 and 100. Grass and ragweed: 3 and 50. `pollen.top` compares the types by level, then by concentration as a share of the type's peak threshold.
 
 ### 5.2 Layouts (v1)
@@ -332,22 +353,31 @@ Every layout has a status bar (top 20 px):
 | Focus | `main` XL, `s1`–`s2` M |
 | Radar (M6) | the weather radar map, full width under the status bar (400×279 as built), with the frame's time and source and a legend (§11.2) |
 | Flights (M6) | the flight radar map (400×238 as built) over a line and a 40 px panel for the nearest aircraft (§11.3) |
-| Split (M6b, D31) | up to 8 cells, as the preset's tree splits the area under the status bar (below) |
+| Split (M6b, D31) | up to 24 cells (8 before M6c, D34), as the preset's tree splits the area under the status bar (below) |
+| Solar (M6d, D35) | today's PV forecast: the total, now, the peak with its time and what is still to come; the day's chart; the next two days' totals with their weather (§11.5) |
+| Energy (M6d, D36) | the house now: the panels above, the grid left, the house right, the battery below when it shows, flow lines with arrows; today's totals and the reading's time (§11.6) |
 
 - Slot rectangles are fixed per layout and defined in code (`components/ui/ui_layout.c`). The owner approved them from the M3a host renders on 2026-09-28.
 - Each slot declares which field kinds it accepts. The preset editor offers only compatible fields.
 - **The split layout** (M6b, D31): the area under the status bar (400×279) is split into two parts, as rows (a top part `a` over a bottom part `b`) or as columns (`a` left of `b`), and each part can be split again.
   - **A split** gives its first part 1/4, 1/3, 1/2, 2/3 or 3/4 of its rectangle, rounded down to whole pixels; a 1 px gap follows, and the second part takes the rest. Its separator is a 1 px line in that gap, across the split's own rectangle and 8 px short of each end, drawn unless the split turns it off. The gap stays either way, so hiding a line never moves a cell. Lines follow White on black like the rest of the screen.
-  - **A cell** holds one field or none. A preset has at most 8 cells, and a split whose parts would be under 90×40 px is refused.
-  - **A cell's size class** comes from its dimensions: XL 400 wide and at least 120 tall; L at least 200×150; M at least 130×80; S otherwise. S draws wide, the icon beside the value, from 150 px of width, which needs 40 px of height; narrower, the icon above the value, which needs 80 px. A smaller cell holds no field.
-  - **A field** draws at the largest class its cell allows that accepts its kind (§5.1): XL takes only the clock and numbers, so the current weather in a full-width cell draws at L; series and the rain map need M or more; the small kinds fit anywhere. The device publishes these rules in `GET /api/layouts`, so the editor offers each cell only the fields that fit.
+  - **A cell** holds one field or none. A preset has at most 24 cells, and a split whose parts would be under 40×20 px is refused (M6c, D34; 8 cells and 90×40 before).
+  - **A cell's size class** comes from its dimensions: XL 400 wide and at least 120 tall; L at least 200×150; M at least 130×80; S at least 90×40; XS at least 40×20 (M6c, D34). S draws the icon beside the value from 150 px of width or under 80 px of height (M6c; from 150 px of width only before), and the icon above the value in a narrower, taller cell. XS draws one line, like the status bar, in a cell 120 px wide or more or under 44 px tall, and the symbol over the value otherwise (§5.3).
+  - **A field** draws at the largest class its cell allows that accepts its kind (§5.1): XL takes only the clock and numbers, so the current weather in a full-width cell draws at L; series, the rain map, the chart and the flow need M or more; the small kinds fit anywhere from XS. The device publishes these rules in `GET /api/layouts`, so the editor offers each cell only the fields that fit.
   - **Example**, Weather with smaller bottom cells: rows 3/4; the top as columns 1/2, its left part a cell of 200×209 (L) and its right part rows 1/2 (two cells of 199×104, M); the bottom as columns 1/2 (cells of 200×69 and 199×69, S drawn wide).
   - As built (M6b): some kinds' widgets need more than their size's least cell, so a cell draws a field at a size only with the height that kind needs there, narrower than 150 px or not: at S 86 and 61 px for the current weather, 99 and 51 for the day's weather, 80 and 49 for the sun, 83 and 40 for the air quality and UV, 86 and 42 for pollen; at M 98 and 80 for the current weather, 94 and 80 for the day's, 94 for the sun, 93 for the air quality and UV, 105 for pollen. `GET /api/layouts` publishes them (`split.sizes`), and the host tests draw every field in each of the 336 cell sizes a tree can make. A cell without room for its field draws nothing.
+  - **M6c** (D34): a cell that grows never draws a field at a smaller size, so at each size a kind's least height for a wide cell is no more than for a narrow one. At S the current weather and the day's weather need 50 px whatever the width (their compact form: the sky beside the temperature), the sun 56 and 49, the air quality and UV 46 and 40, pollen 46 and 42 (narrow and wide); M keeps M6b's heights. The plan settles them against the renderer; the host tests check that more room never loses a field, and draw every field in every cell size a tree can make.
 
 ### 5.3 Widgets
 
-- There is one renderer per field kind and size class (XL/L/M/S). For example, a number widget in M shows label, value and unit; in S it shows an icon and the value with its unit. A number that doesn't fit its slot first drops its decimals ("101 °F" for 100.8 °F), then steps down to smaller fonts; only if it still doesn't fit is it cut with an ellipsis. Text that doesn't fit ends in an ellipsis, and a widget never draws outside its slot.
+- There is one renderer per field kind and size class (XL/L/M/S, and XS from M6c). For example, a number widget in M shows label, value and unit; in S it shows an icon and the value with its unit. A number that doesn't fit its slot first drops its decimals ("101 °F" for 100.8 °F), then steps down to smaller fonts; only if it still doesn't fit is it cut with an ellipsis. Text that doesn't fit ends in an ellipsis, and a widget never draws outside its slot.
   - As built (M6b): a number fits its slot's height as well as its width, in the same order, with 2 px to each edge; every digit counts as the deepest one, so a number keeps its size as it changes. In Czech the comma's tail is what doesn't fit first: a full-width cell under 163 px shows "23 °C" where English shows "23.4 °C". In Classic's main slot both draw 110 px digits; the 130 px ones sat on its bottom edge before, and a Czech comma lost its tail there. The current weather's digits and the forecast strips' temperatures step down to fit "−13 °C" and "102 °F", and the sun widget's 12-hour times step down in a 100 px cell.
+- **XS** (M6c, D34), the status bar's look:
+  - One line in a cell 120 px wide or more, or under 44 px tall: the 16 px symbol (24 px from 34 px of height), then the value in the largest face the height takes, its unit smaller. A time stands alone, centred.
+  - Otherwise the symbol over the value, both centred: the largest bold face that fits, with the unit and a trend arrow beside it; then without the arrow; then the unit on its own line under the number, where the cell has the height; then without the unit. A date shows its weekday over its day ("Fri" over "25"); pollen too long for its word shows its level bar.
+  - No age mark: the status bar's stale warning covers it.
+- **S in a short cell** (M6c, under 150×80): the symbol beside the value, the current weather's word on two lines where it is long, the air quality's word under the number when it doesn't fit beside it (Czech "Přijatelná").
+- **The chart and the flow** (M6d, M and up): `pv.chart` has a heading with the sun, today's total and, where it fits, its label; L draws kW on the left and every third hour below. `energy.flow` has its heading with "kW" at the right: a diagram from 76 px under the heading (the panels above a junction, the grid left, the house right, the battery below from 100 px), a row of icons with arrows below that (a battery at the end from 180 px of width, with a bolt while it charges).
 - Each slot sets a policy for missing or stale data (a preset option):
   - `hide`: leave the slot empty.
   - `placeholder`: show `—`.
@@ -384,14 +414,16 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 
 - **Split presets** (M6b, D31) have `"layout": "split"` and a `"split"` tree instead of `"slots"`. A split is `{ "split": "rows", "ratio": "3/4", "line": true, "a": {…}, "b": {…} }` (`rows` or `columns`; a missing `line` is `true`); a cell is `{ "field": "wx.now" }`, or `{}` when empty.
   - As built (M6b): a split preset is written with its tree, every split with its `line`, and no `slots`; one without a tree is one empty cell. A refused cell is named by its place in preorder and its size ("cell 4 (400×69) can't show rain.map"). The largest `presets.json` (16 split presets of 8 cells, the longest names and ids, 8 schedule entries) is 16 253 bytes; the file may be 20 KB.
+  - M6c (D34): with 24 cells the largest file is about 36 KB; the file may be 48 KB, and the buffers that read, write and validate it are in PSRAM.
 - **Built-in defaults.** Home (Classic), Indoor (Grid, with the status clock), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. The built-in Weather preset joins the cycle from M5, which brings its data; a `presets.json` saved earlier keeps its own choice. M6 adds Rain radar (the Radar layout, in the cycle) and Flights (the Flights layout, D28): the cycle visits Flights only in sync mode `always`, and outside it a preset on that layout says "Flights need sync mode Always on". A `presets.json` saved before M6 gains both once, at the first boot that knows them, if there is room; the file then carries a marker, so a preset deleted later stays deleted. There can be at most 16 presets.
+  - M6d (D35, D36) adds Solar (the Solar layout) and Energy (the Energy layout), both outside the cycle, offered once to an older `presets.json` as M6's were, and named in the same marker.
 - **Options.** `clock_24h` overrides the time setting when present. `status_clock` and `status_battery` shape the status bar (§5.2).
 - **Validation.** A file with a structural error is rejected as a whole, and the error names it. Structural errors:
   - not JSON, or another schema;
   - no presets, or more than 16;
   - a bad or duplicate id;
   - an unknown layout, slot or field, or a field the slot can't show;
-  - a split tree with more than 8 cells, a part under 90×40 px, an unknown `split` or `ratio`, or a field its cell can't show (M6b);
+  - a split tree with more than 24 cells (8 before M6c), a part under 40×20 px (90×40 before M6c), an unknown `split` or `ratio`, or a field its cell can't show (M6b);
   - an `mqtt.<key>` with a bad key, or more than 32 different keys in the file (M7, §12.5); a key no mapping names is not an error;
   - an unknown `stale_policy` or `status_battery` value;
   - nesting deeper than 16 levels, or `slots` that isn't an object;
@@ -470,7 +502,7 @@ Presets    ▸ Active preset · Auto-cycle on/off · Interval (10 s … 1 h) · 
 Alarms     ▸ Alarm 1–8: on/off · Time · Days · Sound · Volume        (M8)
 Radio      ▸ Play/stop · Station · Volume                            (M8)
 Wi-Fi      ▸ Config mode · Forget networks · Reset web password
-Sync       ▸ Sync now · Schedule (times / interval / always / manual) · Interval · Quiet hours on/off
+Sync       ▸ Sync now · Schedule (times / interval / always / manual) · Interval · Quiet hours on/off · Steps (M6d)
 Time       ▸ Set date and time · 24-hour clock · Time zone (short list)
 Display    ▸ Contrast · Update interval (1–15 min) · Refresh rate (0.25–8 Hz)
 Sensors    ▸ Temperature offset · Humidity offset · Units (°C/°F)
@@ -498,6 +530,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 - As built (M5):
   - Sync ▸ Sync now starts a sync at once, without asking, and ends with a toast; on the device's own network alone it is refused, as nothing can be reached. Schedule is a choice of the four modes, Interval shows in `interval` mode, Quiet hours toggles.
   - Info ▸ Last sync reads "HH:MM OK", or the time, the first step that failed and why. The IP row shows whenever Wi-Fi runs, in config mode or not.
+- M6d (D35): Sync ▸ Steps switches each data step on and off (§9.3): Weather, Air quality, Radar, Solar forecast, House energy.
 - The full time zone picker is in the web UI.
 
 ### 5.8 Language packs
@@ -515,7 +548,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
 
 ## 6. Datastore
 
-- **Table.** An entry for each measured or fetched field: `env.*` and `bat.*` since M3a, weather from M5. From M7 the `mqtt.<key>` values and the message live in `ha_mqtt`'s own store (§12.5), kept through deep sleep in a second RTC block beside the snapshot. Fields that follow from the clock (`time.*`, `date.*`, `moon.phase`) are computed by `ui` at render time and never stored.
+- **Table.** An entry for each measured or fetched field: `env.*` and `bat.*` since M3a, weather from M5. From M7 the `mqtt.<key>` values and the message live in `ha_mqtt`'s own store (§12.5), kept through deep sleep in a second RTC block beside the snapshot. From M6d the PV forecast and the house's readings live in the app's solar state, outside the datastore like the radar's frames: in the snapshot and in `/fs/state/solar.bin` (§11.5, §11.6). Fields that follow from the clock (`time.*`, `date.*`, `moon.phase`) are computed by `ui` at render time and never stored.
 - **Entry contents.**
   - A fixed-point value: 0.01 °C, 0.01 %, whole %, or 0.1 days. Short text (at most 48 bytes of UTF-8), times and weather structs arrive with the fields that need them.
   - The trend and `updated` (UTC); a `ttl_s` per field. The battery entry also holds the voltage and the charging state.
@@ -532,6 +565,7 @@ System     ▸ Language (English, Čeština) · Reboot · Factory reset (with co
   - As built (M5): the snapshot is 3392 bytes (version 6), with the syncs' state (§9.3) beside the datastore.
   - As built (M6): 3616 bytes (version 7) with the rain; `/fs/state/datastore.bin` is version 2. An older one is left out at the first M6 boot, and the missing forecast makes the board sync at once (outside sync mode `manual`).
   - As built (M6b): 3896 bytes (version 8) with the split trees (15 bytes and two more slots a preset) and the mode before `always`.
+  - M6c and M6d: the 24-cell trees (32 more nodes and 18 more slots a preset, about 800 bytes for 16 presets) and the solar state (about 700 bytes) bring it to about 5.4 KB, so the cap rises to 6 KB. RTC slow memory has 8 KB, shared with `power`'s state and, from M7, `ha_mqtt`'s values. The plan reads the link map first; if M7's block wouldn't fit, the quarter-hour readings leave RTC and come back from `solar.bin` on a deep wake.
 
 ## 7. Timekeeping
 
@@ -649,7 +683,7 @@ The sync schedule (`settings.sync`) is fully configurable from the menu and the 
 |---|---|---|
 | `times` (default) | Sync at fixed local times | 1–8 times of day; default `05:30` |
 | `interval` | Sync every N minutes, aligned to the clock | N = 15–1440 |
-| `always` | Wi-Fi stays up (from M5, D24), and MQTT with it (from M7). Weather and air quality refresh every 60 min, the weather radar every 5 min (M6). State is published on change (at most every 30 s) and every 5 min. Commands and MQTT fields apply at once. Meant for USB power; not auto-detected | — |
+| `always` | Wi-Fi stays up (from M5, D24), and MQTT with it (from M7). Weather and air quality refresh every 60 min, the weather radar every 5 min (M6), the house's energy every 5 min (M6d). State is published on change (at most every 30 s) and every 5 min. Commands and MQTT fields apply at once. Meant for USB power; not auto-detected | — |
 | `manual` | Sync only on demand | — |
 
 - The UI offers shortcuts: *Battery saver* = `times ["05:30"]`, *Balanced* = `interval 60`, *Always connected* = `always`.
@@ -672,6 +706,8 @@ The sync schedule (`settings.sync`) is fully configurable from the menu and the 
 - **The `always` shortcut** (M6b, D31): BOOT double on the dashboard turns `always` on and off (§5.6); off returns to the mode kept in `sync.mode_before_always`.
 - **Radar refresh and flights** (M6): in `always` mode a radar-only refresh comes every 5 min (RainViewer: 10), without SNTP or the forecast and outside the sync's history and retries; the flight radar polls adsb.fi from its own task while its view is on screen (§11.3).
   - As built (M6): the refresh comes a minute after each 5-minute step (`SYNC_RADAR_DELAY_S`), at once when `always` takes Wi-Fi, so the past hour arrives in one go (12 frames in 9.2 s on the board); one new frame took 0.6–0.8 s. It shows neither the status bar's sync mark nor the Sync page's "running". A sync asked for during a refresh starts when the refresh ends, 30 s at most, and shows as running from the moment it is asked.
+- **Steps on and off** (M6d, D35): `sync.steps` lists the data steps that run: `weather`, `air`, `radar`, `solar`, `energy`. Time always runs, as the clock and the RTC trim need it, for one UDP exchange; Wi-Fi carries the sync; MQTT (M7) has its own switch, `mqtt.enabled`. A step that is off makes no requests, the radar's and the energy's 5-minute refresh in `always` included, and its data age out as usual. Solar and Energy run only with their source set too (§11.5, §11.6). Default: all on.
+- **The house's energy in `always`** (M6d, D36): a reading every 5 min, in the radar's refresh when one runs then (RainViewer's comes every 10 min) and alone otherwise; it is no sync, so it isn't in the history or the retries.
 - **In `always` mode** the board stays awake, as neither sleep keeps Wi-Fi (D14), and netmgr keeps rejoining a network it lost. The web UI is reachable on the LAN (§10.4). A critical battery turns Wi-Fi off, as it ends config mode (§8).
 - **Results.** Each step's result and the sync's time are kept until the next sync, also through deep sleep. Info ▸ Last sync result shows the time and the first step that failed; the web UI's Sync page shows every step.
 - **Power** (measured at M5, §9.4): a sync wakes the radio for some seconds at about 100 mA; `always` keeps the chip awake with Wi-Fi in modem sleep, tens of mA.
@@ -683,15 +719,17 @@ Sequence. The steps are independent and each has a timeout. The radio may be on 
 3. **Weather.** 10 s.
 4. **Air quality** (D25). 10 s.
 5. **Radar** (M6, §11.2). 10 s: one ČHMÚ frame, or RainViewer's index and the view's tiles. As built: ČHMÚ's file is named from this sync's NTP time when its time step worked, as the app sets the clock only after the sync; else from the clock if it is valid; with neither, the step fails with "no time". A step that never ran, as Wi-Fi didn't come up, leaves the radar's status as it was.
-6. **MQTT** (M7, §12.9). Up to 15 s; skipped while MQTT is off or has no broker host.
+6. **Solar** (M6d, §11.5). 10 s a request: one a roof plane at Open-Meteo or Forecast.Solar, one a site at Solcast unless its budget says keep. Skipped while it is off or has no source.
+7. **Energy** (M6d, §11.6). 10 s: one SolaX Cloud reading. Skipped while it is off or has no source.
+8. **MQTT** (M7, §12.9). Up to 15 s; skipped while MQTT is off or has no broker host.
    1. Connect with a persistent session, as `reflbo-XXXX`.
    2. Subscribe at QoS 1 to `reflbo/<id>/cmd/#` and the mapped topics.
    3. Collect retained and queued messages until every mapped topic has arrived, or 1 s passes with none.
    4. Publish state, plus discovery if its hash changed.
    5. Disconnect, unless sync mode `always` keeps the client connected; a sync then uses the open session.
-7. **Finish.** Wi-Fi off, unless config mode or `always` mode keeps it. Persist the datastore snapshot. Record each step's result (shown in Info and the web UI).
+9. **Finish.** Wi-Fi off, unless config mode or `always` mode keeps it. Persist the datastore snapshot. Record each step's result (shown in Info and the web UI).
 
-A sync fails when any step fails, except the MQTT step (D32): its failure shows on the Sync page, in Info and as the status bar's MQTT mark, but doesn't fail the sync. On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync. At low battery there are no retries.
+A sync fails when any step fails, except the Energy step (D36) and the MQTT step (D32): their failures show on the Sync page and in Info, MQTT's also as the status bar's mark, but don't fail the sync. A Solar step that a provider answers with 429 keeps the forecast it has and doesn't fail the sync either; the next scheduled sync asks again (D35). On failure, retry after 15, 30 and 60 min, then wait for the next scheduled sync. At low battery there are no retries.
 
 As built (M5):
 
@@ -714,6 +752,7 @@ As built (M5):
   - M5: energy per sync, and sync mode `always`.
   - Config mode.
   - M6: a radar frame per sync, and the flight radar in sync mode `always`.
+  - M6d: a sync with the Solar and Energy steps, on battery; sync mode `always` with the energy readings.
   - M8: radio.
 - Record results in `docs/power.md` with the date, commit, settings and meter model. Many USB meters are inaccurate below 1 mA, so long accumulation windows matter.
 
@@ -761,11 +800,13 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 ### 10.3 Web UI and REST API
 
 - **Tech.** Plain HTML/CSS/JS, mobile-first. The files are gzipped and **embedded in the app image**, so OTA updates them and flashing never touches user data.
-- **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), Radar (M6), MQTT/HA (M7), Alarms and Radio (M8) join later.
+- **Pages.** Status, Wi-Fi, Location & time, Device, Presets (editor with live preview), Firmware and Backup in M4; Sync (M5), Radar (M6), Solar (M6d), MQTT/HA (M7), Alarms and Radio (M8) join later.
   - Status sets the device's clock from the phone at once when the device has lost the time (D9, D19).
   - Device holds the menu's language, units, sensor offsets, sensor interval, update interval and refresh rate (D19), and the battery calibration (§8).
   - Presets: the preview names each slot at its corner as the slot fields call it; a new preset joins the cycle; "Undo changes" asks first, as the save bar can float over other buttons (D20).
-  - Sync (M5): the mode with its shortcuts, the times or the interval, the quiet hours (D25), "Sync now" with its progress, the last sync's steps, the next sync, and the RTC's trim and drift (§7).
+  - Sync (M5): the mode with its shortcuts, the times or the interval, the quiet hours (D25), "Sync now" with its progress, the last sync's steps, the next sync, and the RTC's trim and drift (§7). M6d adds a switch for each data step (D35) and the Solar and Energy steps' results.
+  - Solar (M6d, D35, D36): the forecast's source, with only the fields that source needs (up to 2 planes of kWp, tilt and azimuth, the losses and the inverter's limit; Forecast.Solar's optional key; Solcast's key and 1–2 site ids); the house's energy (off or SolaX Cloud, its token and registration number, the home battery: auto, on or off); Check now, which runs the two steps and shows their results; the last forecast and reading with their times and errors; the credits. Keys, tokens and site ids are write-only: the page shows whether each is set.
+  - Presets (M6c, M6d): the editor allows 24 cells down to 40×20 and shows XS; the field list groups the Solar and Energy fields and marks fields whose sync step is off.
   - Location & time (M5): a place search through `/api/geocode`, which fills in the name, latitude and longitude.
   - Radar (M6): a card for each radar: its centre (the location, the place search or coordinates) and zoom or range, the flight radar's filters, a live preview through `/api/preview.bmp`, and the credits (§11.2, §11.3). The flight radar's card says it runs only in sync mode Always on.
     - As built (M6): the previews draw the saved settings and refresh after each save; the zoom is a list with each step's width in km; the flight radar's card shows the last poll's failure ("Last poll: failed: too big") and adsb.lol's pause; below both cards, the map's credits: Natural Earth, OurAirports and GeoNames (CC BY 4.0, D29).
@@ -773,14 +814,14 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Presets (M6b, D31): a split preset's tree as nested boxes under the live preview. A cell shows its size and class ("200×69 · S"), a field list with only the fields that fit, and Split into rows and Split into columns (at 1/2, the line on, the cell's field in the first part). A split shows its ratio (those that would make a part too small are disabled), Separator and Join, which keeps the first field found inside it. Switching a preset to Split starts from one cell holding its first field.
     - As built (M6b): the preview numbers the cells as the boxes do; a cell whose field draws smaller than its class says so ("3 · 199×104 · M (Pollen at S)"); a ratio change or a split that leaves a field without room empties its cell, with "No room for …".
 - **API.** JSON. Mutating requests must send `Content-Type: application/json`, those without a body too.
-  - The server reads each body once, before any route and any login: at most 24 KB (413; 16 KB before M6b, which made room for the largest `presets.json` in a backup), nested at most 18 levels, a backup bundle's depth (400). Replies are up to 24 KB too.
+  - The server reads each body once, before any route and any login: at most 64 KB from M6c, in PSRAM (413; 24 KB before, 16 KB before M6b; each made room for the largest `presets.json` in a backup), nested at most 18 levels, a backup bundle's depth (400). Replies are up to 64 KB too.
   - A client that sends nothing for 15 s gets 408, and the connection closes, so one phone that vanishes mid-request can't stop the server.
 
 | Method and path | Purpose |
 |---|---|
 | `GET /api/auth` · `POST /api/auth/setup` · `POST /api/auth/login` · `POST /api/auth/logout` · `POST /api/auth/password` | The web password (§10.4): whether one is set and the session is valid; choosing it (over the AP only); logging in and out; changing it. The only routes open without a session |
-| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; from M5 `sync` (mode, running, the last one's time and steps, the next one and whether it is a retry, when the forecast and the air quality came) and `time.rtc` (the trim's steps, and the last drift once measured); from M6 `radar` (as built: `weather` with `source` "chmu" or "rainviewer", `frames`, `frame_at`, `fetched_at` and `error`; `flights` with `on`, `aircraft`, `updated`, `failed`, `error` and `routes_paused_until`); from M7 `mqtt` (`enabled`, `connected`, and the last session's time, result and detail) |
-| `GET/PATCH /api/settings` | Non-secret settings; secrets are accepted on write and never returned |
+| `GET /api/status` | Device, battery, sensors, time, Wi-Fi, firmware; from M5 `sync` (mode, running, the last one's time and steps, the next one and whether it is a retry, when the forecast and the air quality came) and `time.rtc` (the trim's steps, and the last drift once measured); from M6 `radar` (as built: `weather` with `source` "chmu" or "rainviewer", `frames`, `frame_at`, `fetched_at` and `error`; `flights` with `on`, `aircraft`, `updated`, `failed`, `error` and `routes_paused_until`); from M6d `solar` (`source`, `fetched_at`, `day`, `error`) and `energy` (`source`, `reading_at`, `error`); from M7 `mqtt` (`enabled`, `connected`, and the last session's time, result and detail) |
+| `GET/PATCH /api/settings` | Non-secret settings; secrets are accepted on write and never returned (from M6d `solar.fs_key`, `solar.solcast_key`, `solar.solcast_sites`, `energy.solax_token`, `energy.solax_sn`; GET says which are set, as `solar.keys` and `energy.keys`) |
 | `GET /api/wifi/scan` · `GET/POST/DELETE /api/wifi/networks` | Wi-Fi setup. A POST starts a test and answers 202 at once; GET reports its result with the saved names, never their passwords. `"test": false` saves without trying |
 | `GET /api/layouts` · `GET /api/fields` | Slot definitions; the field catalogue with current values |
 | `GET/PUT /api/mqtt_fields` · `POST /api/mqtt/test` | The MQTT field mappings (§12.5); a test session with the saved settings, refused while the board has only its own network (M7) |
@@ -791,6 +832,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
 | `POST /api/battery/learn` | `{"start": true}` learns the battery curve from the next full discharge, `{"stop": true}` ends it (D21); `GET /api/status` reports its state and hours |
 | `GET /api/geocode?q=&lang=` | Proxy for the Open-Meteo geocoding search (M5): up to 5 places with name, region, country, latitude, longitude and time zone. Needs a session and the device on a network (503 otherwise); 400 for a name that is empty or doesn't decode, 502 when the search fails; manual latitude and longitude always work |
 | `POST /api/sync` | Sync now (M5): 202 once it starts; 409 while one runs, or with no saved network |
+| `POST /api/solar/check` | Run the Solar and Energy steps now (M6d): 202 once they start; 409 while a sync runs, or with no saved network; the results come in `GET /api/status` |
 | `GET/PUT /api/alarms` · `GET/PUT /api/stations` · `POST /api/radio/play` · `POST /api/radio/stop` | Audio (M8) |
 | `POST /api/ota` · `GET /api/ota/status` | Firmware upload, as `application/octet-stream`; the running version, its slot, whether it is still pending, and the slot of an update that was rolled back |
 | `GET /api/backup` · `POST /api/restore` | Settings bundle without secrets |
@@ -802,7 +844,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - On the LAN (M5) it answers only requests that name the device: its address, `reflbo-XXXX`, `reflbo-XXXX.local`, or `reflbo-XXXX` under a router's domain (`reflbo-XXXX.fritz.box`). Any other name gets 421, so a page from elsewhere can't reach the API by pointing its own domain at the device (DNS rebinding).
   - A client counts as on the AP when it reached the AP's own address, 192.168.4.1, not when its own address merely looks like the AP's subnet, which a LAN may share.
 - The AP uses WPA2.
-- Secrets are write-only and never logged.
+- Secrets are write-only and never logged. SolaX Cloud takes its token in the query (M6d), so `fetch` never logs a URL that has one.
 - The JSON content-type check blocks cross-site form posts.
 - OTA images are checked for project name, chip and version before the device switches to them.
 - **Web UI password** (D18).
@@ -822,7 +864,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Measured at M4: 1.3 MB in 11–15 s over the AP. A test build that crashed after 25 s rolled back to the previous image, which returned in config mode (§10.2) and reported it. After the M4 review, a test build that failed to start was back on the previous image within 6 s, in config mode.
 - Sources: upload through the web UI (M4). A file on microSD is an M9 candidate.
 
-## 11. Weather, air quality and astro
+## 11. Weather, air quality, astro and solar
 
 **Weather request** (once per sync, about 2.6 KB of JSON for 3 days; checked against the live API on 2026-09-25 and 2026-10-01):
 
@@ -903,6 +945,36 @@ GET https://air-quality-api.open-meteo.com/v1/air-quality?latitude=<lat>&longitu
 - The forecast request also asks for `&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=96`: 24 h of 15-minute values (checked 2026-10-01), as a daily sync's next 2 h are long past by evening.
 - `wx.rain2h` (§5.1) shows the 2 h from now as 8 bars, and a line: "Dry for 2 h", "Rain from 21:45" or "Rain now · 1.2 mm/h". It is missing past the 24 h stored.
 - As built (M6): each `minutely_15` amount is the sum of the 15 minutes before its time (Open-Meteo's docs), so the quarter hour now is the entry that ends at the next quarter-hour mark, and "Rain from 21:45" names where the first wet quarter hour starts.
+
+### 11.5 PV forecast (M6d, D35)
+
+- **Settings** (`solar` in `settings.json`, §14.3): `source` is `off` (the default), `open-meteo`, `forecast-solar` or `solcast`; `planes` holds 1–2 roof planes of `kwp` (0.1–100), `tilt` (0–90°) and `azimuth` (−180 to 180°: 0 south, −90 east, 90 west, the convention of Open-Meteo and Forecast.Solar); `losses_pct` (0–50, default 14, as PVGIS) and `inverter_kw` (0 for none) apply to our model. The location is the device's (`location.*`). Keys go to NVS `secrets` (§14.2): Forecast.Solar's optional key, Solcast's key and its 1–2 site ids.
+- **Open-Meteo**, the default (documentation checked 2026-10-04; the plan records a live reply as a fixture), a request a plane:
+
+  ```
+  GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>
+    &minutely_15=global_tilted_irradiance,temperature_2m&tilt=<tilt>&azimuth=<azimuth>
+    &timezone=auto&timeformat=unixtime&forecast_days=3
+  ```
+
+  `global_tilted_irradiance` is the mean of the 15 minutes before its time in W/m² (native 15-minute data in Central Europe and North America, interpolated from hourly elsewhere). Our model, a quarter hour and a plane: P = kWp × GTI ÷ 1000 × (1 − 0.004 × (T_cell − 25 °C)) × (1 − losses), with T_cell = T_air + 0.031 × GTI; the planes add up, capped at `inverter_kw`. Open-Meteo's terms and credit are the weather's (§20).
+- **Forecast.Solar**: `GET https://api.forecast.solar/estimate/<lat>/<lon>/<tilt>/<azimuth>/<kwp>?time=utc`, with a key `https://api.forecast.solar/<key>/estimate/…` (checked 2026-10-04). Without a key: 1 plane, hourly values, today and tomorrow, 12 calls an hour per IP; with one, depending on the account, 2 planes, 15- or 30-minute values and more days. `watts` is the mean power of the period that ends at its time; an hourly value fills its four quarter hours. A second plane without a key is refused when saved. CC BY-SA 4.0: credited on the Solar page and in the guide.
+- **Solcast** (hobbyist accounts; checked 2026-10-04): `GET https://api.solcast.com.au/rooftop_sites/<site>/forecasts?format=json&hours=72` with `Authorization: Bearer <key>`: `pv_estimate` in kW for 30-minute periods ending at `period_end` (UTC), each filling its two quarter hours; up to 2 sites, added up. Tilt, azimuth and kWp are set on solcast.com, not here. 10 calls a UTC day: the step asks at most every 3 h with one site and every 6 h with two, failed calls included; a sync in between keeps the forecast it has and the step counts as done (the Sync page says "kept"), so waiting for the budget never fails a sync. Personal use only, as Solcast's terms say; the guide notes it.
+- **What is kept**: today and tomorrow by local quarter hour (W, 2 × 96 values), each day's total for three days (the third missing where the source has no third day), the fetch time and the local day of the first. Times map to local quarter hours by the device's time zone; a DST change falls in the night, when there is no output. At local midnight tomorrow becomes today, so a morning sync's forecast lasts the day and the night after. Kept in the snapshot (§6) and in `/fs/state/solar.bin`, written after each Solar step.
+- **Failures** show as the step's detail ("HTTP 401", "no data"). A 429 keeps the forecast and doesn't fail the sync (§9.3).
+- **The Solar layout** (§5.2): the forecast icon and "Forecast today" with the day's total; now, the peak with its time and what is still to come; the day's chart from the first hour with output to the last, with kW and every third hour; the next two days' totals with their weather icons, which come from the weather forecast (§11). "No solar forecast yet" before the first. The spike's renders, approved on 2026-10-04 (D33), become its goldens.
+
+### 11.6 The house's energy (M6d, D36)
+
+- **Settings** (`energy`, §14.3): `source` is `off` (the default) or `solax`; `battery` is `auto` (the default), `on` or `off`. The SolaX token and the dongle's registration number go to NVS `secrets` (§14.2).
+- **SolaX Cloud** (the user monitoring API V4.0 and the endpoint evcc uses; checked 2026-10-04): `GET https://www.solaxcloud.com/proxyApp/proxy/api/getRealtimeInfo.do?tokenId=<token>&sn=<registration no.>`, at most 10 a minute and 10 000 a day; the inverter uploads about every 5 min. A reply is `{"success": …, "exception": …, "result": {…}}`; `success: false` makes `exception` the step's detail.
+- **Mapping** (W unless named): solar output = `powerdc1` to `powerdc4` added up where given, else `acpower`; grid = −`feedinpower` (SolaX's feed-in is positive while exporting, ours positive while importing); home = `acpower` − `feedinpower`, plus `peps1`–`peps3` where given; battery = `batPower` (positive while charging) and `soc` (%); produced today = `yieldtoday` (kWh); `feedinenergy` and `consumeenergy` are the totals to and from the grid since installation (kWh); the reading's time is `uploadTime`, in local time.
+- **Today's totals**: to and from the grid are the totals less their values at local midnight, taken from the reading closest to it within an hour either side; without one they are missing for the day. In sync mode `always` that reading is always there. Own use is (produced − to the grid) ÷ produced.
+- **The battery** shows with `on`; with `auto` when the inverter is one of SolaX's hybrid types (X-Hybrid, X1-Hybrid, X3-Hybrid, A1-Hybrid, J1-ESS) or a reading has a charge above 0 %.
+- **When readings come**: the Energy step in each sync; in sync mode `always`, every 5 min (§9.3). A reading is fresh for 15 min. The readings' solar output averaged by local quarter hour (96 values) draws the chart's past bars; a quarter hour without a reading shows the forecast. The readings and the midnight totals go to `/fs/state/solar.bin` at most every 30 min, so a reboot keeps the day.
+- **Failures** (a bad token, an unknown registration number, an HTTP error) show on the Sync page, in Info and on the Solar page; they don't fail the sync or start a retry (D36).
+- **The Energy layout** (§5.2): "SolaX" and the reading's time at the top left; the panels at the top with their output; flow lines to a junction, the grid on the left ("Export" or "Import"), the house on the right, the battery below when it shows, its charge, state and power beside it; arrows where at least 20 W flow, dotted lines where less does; today's totals at the bottom (produced, to the grid, from the grid, own use), two by two, or in a row with a battery. "No data from the inverter yet" before the first reading.
+- **Local data**: from M7 an MQTT source fills the same values from mapped topics (§12.5), for instance from Home Assistant's local SolaX integration; it is designed when M7's plan is refreshed (D33). The dongle's own local API is not used, as it depends on the dongle's firmware.
 
 ## 12. MQTT and Home Assistant
 
@@ -1005,14 +1077,14 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 ### 12.9 Sessions and failures
 
-- **In a sync**, step 6 (§9.3): connect, subscribe, collect, publish, disconnect; up to 15 s of the sync's 45 s.
+- **In a sync**, step 8 (§9.3): connect, subscribe, collect, publish, disconnect; up to 15 s of the sync's 45 s.
 - **In sync mode `always`** the client stays connected while Wi-Fi is up; a lost connection is retried after 10 s, the wait doubling to at most 5 min. State is published on change (at most every 30 s) and every 5 min. Commands, values and key presses are live. A sync uses the open session.
 - **A failed session** (no broker, a refused login, a timeout) shows on the Sync page, in Info and as the status bar's MQTT mark until a session succeeds. It doesn't fail the sync, so it isn't retried; the next sync tries again (D32).
 - **Power:** a session adds the broker's connect, up to 1 s of quiet and the publishes to each sync; measured once HA exists (§9.4).
 
 ### 12.10 Testing on the board (owner, 2026-10-03, D32)
 
-- **The stable firmware** is the M6b build, git tag `stable-m6b`; its binaries are kept in `captures/stable/stable-m6b/` with `flash.sh <port>`, which writes the bootloader, partition table, OTA data and app, never the storage partition or NVS. It is the board's normal firmware: after every MQTT/HA test it is flashed back, and `version` must show its ELF hash (`dcb35a7e3`).
+- **The stable firmware** is the M6b build, git tag `stable-m6b`; its binaries are kept in `captures/stable/stable-m6b/` with `flash.sh <port>`, which writes the bootloader, partition table, OTA data and app, never the storage partition or NVS. It is the board's normal firmware: after every MQTT/HA test it is flashed back, and `version` must show its ELF hash (`dcb35a7e3`). After M6d's acceptance the M6d build takes its place as `stable-m6d` (D36).
 - **Backup and restore.** Before a board test that changes its data, the configuration is saved with `GET /api/backup`; after the test, and after the stable firmware is back (its parser refuses M7-only content such as `mqtt.<key>` slots), it is restored with `POST /api/restore` and compared.
 - **Nothing is erased without asking:** not NVS (saved networks, the web password, secrets, the trim), the storage partition or flash.
 - Until the owner has a broker and HA, the board checks cover what needs neither: MQTT off, the MQTT page, `mqtt status` and the message banner through `field set`.
@@ -1066,7 +1138,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 |---|---|
 | `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`), come back in config mode after a web restart (`resume_cfg`, §10.2), the RTC trim (`rtc_trim`, §7), the MQTT discovery hash (`mqtt_disc`, §12.3, M7) |
 | `wifi` | Saved networks with their passwords and fast-connect cache (`nets`, one versioned blob) |
-| `secrets` | MQTT password; the web UI password's salted hash (`web_pass`, D18); future tokens |
+| `secrets` | MQTT password; the web UI password's salted hash (`web_pass`, D18); from M6d Forecast.Solar's key (`fs_key`), Solcast's key and site ids (`solcast_key`, `solcast_site1`, `solcast_site2`), and SolaX's token and registration number (`solax_token`, `solax_sn`) |
 | `ctr` | Counters: boots, sync statistics |
 
 ### 14.3 LittleFS layout
@@ -1079,6 +1151,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 /cfg/stations.json      §13.3 (M8)
 /state/datastore.bin    last datastore snapshot (written after each sync)
 /state/radar.bin        the newest weather radar frame: its levels, a header and CRC-32 (M6, as built)
+/state/solar.bin        the PV forecast and today's readings and midnight totals (M6d, §11.5, §11.6)
 /sounds/                user sound files (M8)
 ```
 
@@ -1100,7 +1173,8 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
             "clock_24h": true, "ntp": ["cz.pool.ntp.org", "pool.ntp.org"] },
   "units": { "temp": "C" },
   "sync": { "mode": "times", "times": ["05:30"], "interval_min": 60, "mode_before_always": "times",
-            "quiet": { "enabled": false, "from": "23:00", "to": "06:00" } },
+            "quiet": { "enabled": false, "from": "23:00", "to": "06:00" },
+            "steps": ["weather", "air", "radar", "solar", "energy"] },
   "sensors": { "interval_min": 5, "temp_offset_c": 0.0, "hum_offset_pct": 0.0 },
   "display": { "contrast": "default", "update_min": 1, "lpm_hz": 1 },
   "battery": { "level_from": "curve", "empty_v": 3.27, "full_v": 4.2 },
@@ -1108,17 +1182,20 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
              "flights": { "lat": 49.1951, "lon": 16.6068, "range_km": 50, "min_alt_ft": 0,
                           "ground": false, "max": 100 } },
   "mqtt": { "enabled": false, "host": "", "port": 1883, "user": "",
-            "discovery_prefix": "homeassistant", "discovery": true }
+            "discovery_prefix": "homeassistant", "discovery": true },
+  "solar": { "source": "off", "planes": [ { "kwp": 5.0, "tilt": 35, "azimuth": 0 } ],
+             "losses_pct": 14, "inverter_kw": 0 },
+  "energy": { "source": "off", "battery": "auto" }
 }
 ```
 
 Once a discharge is learned, `battery` also holds `learned_mv` (21 voltages, 0 % to 100 %) and `learned_at` (UTC seconds), and `level_from` can be `learned` (D21).
 
-M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). M5 adds `time.ntp` (1–2 host names) and `sync.*`: `times` keeps 1–8 valid `HH:MM` times, sorted and without repeats, falling back to `["05:30"]`; `interval_min` is clamped to 15–1440. M6 adds `radar.*` (§11.1–§11.3): each centre defaults to `location.*`; `weather.zoom` is clamped to 4–9 in steps of 0.25; `flights.range_km` to 10–100 (from the centre to the map's top edge), `max` to 1–100, `min_alt_ft` to 0–60000. M6b adds `sync.mode_before_always` (D31): never `always`, `times` by default; any change into `always` (BOOT double, the menu, a page, a restore) remembers the mode it left, unless the document names its own. M7 adds `mqtt.*` (§12.1, D32): `enabled` (default false) and `discovery` (default true); `host` and `user` up to 63 bytes, empty by default; `port` clamped to 1–65535 (1883); `discovery_prefix` up to 31 bytes of topic characters, without `+`, `#` or a leading or trailing `/` (`homeassistant`); `mqtt.password`, accepted on write, goes to NVS `secrets` and never into the file. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
+M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.temp`, `sensors.*`, `display.update_min` and `display.lpm_hz`; M4 adds `location.*`, with latitude and longitude clamped to the globe, and its acceptance `battery.*` (§8; a manual pair without 0.3 V between them, or a learned curve that doesn't rise, falls back to the built-in curve). M5 adds `time.ntp` (1–2 host names) and `sync.*`: `times` keeps 1–8 valid `HH:MM` times, sorted and without repeats, falling back to `["05:30"]`; `interval_min` is clamped to 15–1440. M6 adds `radar.*` (§11.1–§11.3): each centre defaults to `location.*`; `weather.zoom` is clamped to 4–9 in steps of 0.25; `flights.range_km` to 10–100 (from the centre to the map's top edge), `max` to 1–100, `min_alt_ft` to 0–60000. M6b adds `sync.mode_before_always` (D31): never `always`, `times` by default; any change into `always` (BOOT double, the menu, a page, a restore) remembers the mode it left, unless the document names its own. M7 adds `mqtt.*` (§12.1, D32): `enabled` (default false) and `discovery` (default true); `host` and `user` up to 63 bytes, empty by default; `port` clamped to 1–65535 (1883); `discovery_prefix` up to 31 bytes of topic characters, without `+`, `#` or a leading or trailing `/` (`homeassistant`); `mqtt.password`, accepted on write, goes to NVS `secrets` and never into the file. M6d adds `sync.steps` (D35): the data steps that run, any of `weather`, `air`, `radar`, `solar` and `energy`; a missing list is all of them, an unknown name is left out. It adds `solar.*` (§11.5): `source` one of `off`, `open-meteo`, `forecast-solar`, `solcast` (`off`); 1–2 planes, each `kwp` clamped to 0.1–100, `tilt` to 0–90, `azimuth` to −180–180 (5 kWp, 35°, south); `losses_pct` to 0–50 (14) and `inverter_kw` to 0–100 (0); and `energy.*` (§11.6): `source` `off` or `solax` (`off`), `battery` `auto`, `on` or `off` (`auto`). The keys, the site ids, the token and the registration number, accepted on write, go to NVS `secrets` and never into the file. `PATCH /api/settings` merges into the file as an RFC 7396 merge patch, which must keep `"schema": 1`. The file must be a JSON object with `"schema": 1`; beyond that, a missing or mistyped key takes its default and an out-of-range number is clamped, so one bad value never resets the rest. Saving keeps the keys the firmware doesn't know.
 
 ### 14.4 Backup, restore, factory reset
 
-- **Backup.** A JSON bundle of every `/cfg/*` file, without secrets: `{"reflbo_backup": 1, "device": …, "firmware": …, "files": {"settings.json": {…}, "presets.json": {…}}}`. Restore validates every file it knows before replacing anything, applies them at once, and leaves out files of a later firmware. From M7 the bundle holds `mqtt_fields.json` too.
+- **Backup.** A JSON bundle of every `/cfg/*` file, without secrets: `{"reflbo_backup": 1, "device": …, "firmware": …, "files": {"settings.json": {…}, "presets.json": {…}}}`. Restore validates every file it knows before replacing anything, applies them at once, and leaves out files of a later firmware. From M7 the bundle holds `mqtt_fields.json` too. The solar keys and SolaX's token stay out of it (M6d), like every secret.
 - **Factory reset.** From the menu (System ▸ Factory reset, confirmed by holding KEY), or from M4 the web UI. The board restarts afterwards. It erases `storage` and the NVS namespaces `wifi`, `secrets` and `ctr`. It keeps `sys`, the device identity.
 
 ### 14.5 microSD (M9)
@@ -1145,6 +1222,7 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 | `wifi status` · `wifi scan` | Wi-Fi: the state, network, address, AP clients and saved names; the networks in sight while Wi-Fi is on (config mode) |
 | `sync now` · `sync status` | Run a sync; the running or last sync's steps and the next one (M5). `rtc get` also prints the trim and the last drift (§7) |
 | `mqtt status` | MQTT (M7): the settings without the password, the connection, the last session, the discovery hash, the mapped fields' values |
+| `solar status` · `solar demo on\|off` | The PV forecast (source, fetch time, today's and tomorrow's totals, the last error) and the house's energy (source, the reading and its time, the midnight totals, the last error), without keys (M6d); `demo` loads the sample day of the goldens, so the layouts can be screenshotted without a provider |
 | `radar status` · `radar loop` | The weather radar's source, frame time, frames kept and last error, and the flight radar's state with its last failure and adsb.lol's pause (M6); the loop as BOOT short plays it |
 | `sleep stats [reset]` · `sleep test <deep\|light> <n>` · `power idle [deep\|light]` | Power debugging: sleeps, wake causes, and per-cycle awake and slept times; `sleep test` forces sleep cycles while tethered |
 | `audio tone <Hz> <ms>` | Audio check (M8) |
@@ -1198,6 +1276,8 @@ pyserial comes from the ESP-IDF Python environment. The generators run through `
   - M6b: the split tree's JSON (a round trip, the limits, the refusals), its geometry (the ratios, the gaps, 8 cells, 90×40), each cell's size class and each field's size in it, separators on and off, goldens of the Weather example (its lines on, the bottom one off) and of an 8-cell tree; the editor's tree operations against the fake device; BOOT double's toggle and the remembered mode.
     - As built (M6b): `test_ui_split` (13 tests); `test_ui_preset`'s split cases, the largest file among them; `test_ui_widget_fit` (every field in each of the 336 cell sizes a tree can make, in eight sets of data; a number in Classic's main slot; a number's size as its digits change); the goldens `dash_split_weather`, `dash_split_eight`, `dash_home_temp_main`, `dash_home_temp_main_cs`, `dash_weather_frost_cs` and `dash_weather_hot_f`; `test_ui_catalog`'s split rules against the renderer's; 9 page tests of the editor (34 in all); `test_settings`' remembered mode. On the board (2026-10-02): BOOT double on and off with its toasts, its guard after the menu, its quiet-hours toast (Wi-Fi came back and synced as the span ended); a split preset over the API, drawn on the panel as the preview draws it, and in the editor; the refusals; the mode a page leaves; the app task kept 3536 bytes of its stack free. A BOOT double that wakes the board stays the owner's check: a tethered board never sleeps.
   - As built (M6): 60 host targets (53 at M5), with 17 new goldens (8 of the Radar layout and `rain.map`, 6 of the Flights view, 3 of the rain strip); the generator's 14 tests among the 67 tool tests; 25 page tests; the ASan/UBSan build passes them all.
+  - M6c (D34): split trees of 24 cells and their 40×20 limit; each cell's size class with XS; the property that more room never loses a field; every field drawn in every cell size a tree can make (the enumeration grows to fit); goldens of the spike's split presets (12 cells of 133×69 in English and Czech, 24 cells of 200×22, 66×69 and 50×93); the largest `presets.json` against its 48 KB; the catalogue's XS; the editor's 24 cells against the fake device.
+  - M6d (D35, D36): the PV model against known irradiance and temperatures; each forecast parser on recorded replies (Open-Meteo, Forecast.Solar with and without a key, Solcast) and their refusals; the local quarter hours across DST, the midnight roll-over, Solcast's budget; the SolaX parser on recorded replies (a string inverter, a hybrid, `success: false`), the signs, the battery's auto rule, the midnight totals and the quarter-hour actuals; `sync.steps`, `solar.*` and `energy.*` in the settings and the steps that are off in the sync plan; the `pv.*` and `energy.*` fields and widgets; goldens of the spike's renders (the Solar and Energy layouts with their variants, the fields in Classic, Grid, Weather and Focus); the Solar page and the step switches against the fake device, the keys write-only.
   - Preset and settings JSON: validation and migrations.
   - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
   - M7: `ha_mqtt`'s topics, golden JSON for every discovery entity and the state, payload parsing (numbers, text, `json_path`), commands, the mappings' codec and validation, the discovery hash and `expire_after`; the `mqtt.<key>` and `ha.message` fields, goldens of the message banner, presets with an unmapped key; the MQTT step not failing a sync; the MQTT page against the fake device (the write-only password, the mappings editor, Test connection).
@@ -1227,7 +1307,9 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M5 | One plan (D25): SNTP → RTC with the trim (D25), `weather` with air quality and pollen (D25), `astro`, `sync` with the configurable schedule, quiet hours (D25) and backoff, sync mode `always` with the web UI on the LAN (D24), the weather and air quality widgets, the status bar's sync and Wi-Fi state, the Sync page and the place search, power tuning | A sync on battery reports its results in Info (3); astro tests pass (2); the owner reviews the new widgets' goldens (2); the RTC trim brings the drift under 1 s a day (3); sync energy, `always`'s cost and the daily average are measured and `docs/power.md` is updated (4) |
 | M6 | One plan (D27): the radar views (D22, D23, D24, D28; §11.1–§11.4): `png`, the web-Mercator `map` with built-in borders, towns and airports; the weather radar (ČHMÚ, RainViewer outside its coverage) as the Radar layout and the `rain.map` widget, with a frame each sync, every 5 min in sync mode `always`, and the last hour's loop; the flight radar (adsb.fi, sync mode `always` only) as the Flights preset, with the nearest aircraft's route (adsb.lol); rain in the next 2 hours; the Radar page | Goldens of both radars and the new widgets (2); a ČHMÚ frame renders after a sync (3); the loop plays in sync mode `always` (3); aircraft from adsb.fi show in sync mode `always` (3); the owner checks both on the panel (4) |
 | M6b | One plan (D31): the split layout (§5.2, §5.4) in the renderer, `presets.json` and the web editor; BOOT double for sync mode `always` (§5.6) | Goldens of split presets (2); a split preset built in the web editor shows on the panel (3); BOOT double turns `always` on and back (3) |
-| M7 | One plan (D32): `ha_mqtt` (a session in every sync, kept connected in sync mode `always`), discovery, state, the preset select, HA buttons, key-press triggers, the message (banner and `ha.message`), the MQTT field mappings, the MQTT page; review minors where M7 touches their code, and `fetch`'s transmit buffer | Host tests and goldens (2); MQTT off and the MQTT page on the board, which runs the stable firmware between tests (3, §12.10); with the owner's broker and HA: entities appear in HA, the select and buttons work at the next sync, a mapped HA value renders, a message shows, key presses trigger in sync mode `always` (3/4) |
+| M6c | One plan (D33, D34): split cells down to 40×20 and up to 24 (§5.2, §5.4), the XS size and S in short cells (§5.3), sizes that never shrink as a cell grows, the snapshot's cap, the editor | Goldens of small-cell presets (2); a 24-cell preset built in the editor shows on the panel (3); the owner checks XS cells' legibility on the panel (4) |
+| M6d | One plan (D33, D35, D36): `solar` (Open-Meteo with our model, Forecast.Solar, Solcast) and `energy` (SolaX Cloud), the Solar and Energy steps and the steps' switches (§9.3), the `pv.*` and `energy.*` fields, the chart and the flow, the Solar and Energy layouts and presets (§11.5, §11.6), the Solar page, `solar status` and `solar demo` | Goldens of the approved renders (2); a forecast from Open-Meteo and from Forecast.Solar renders after a sync (3); with the owner's keys, Solcast's forecast and a SolaX reading render, and the owner compares the reading with the SolaX app (3/4); a switched-off step makes no request (3); a sync's energy with both steps is measured on battery and `docs/power.md` updated (4) |
+| M7 | On hold until M6d (D33); its plan is refreshed first. One plan (D32): `ha_mqtt` (a session in every sync, kept connected in sync mode `always`), discovery, state, the preset select, HA buttons, key-press triggers, the message (banner and `ha.message`), the MQTT field mappings, the MQTT page; review minors where M7 touches their code, and `fetch`'s transmit buffer | Host tests and goldens (2); MQTT off and the MQTT page on the board, which runs the stable firmware between tests (3, §12.10); with the owner's broker and HA: entities appear in HA, the select and buttons work at the next sync, a mapped HA value renders, a message shows, key presses trigger in sync mode `always` (3/4) |
 | M8 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
 | M9 | microSD features agreed at the start of M9 | Per the agreed list |
 
@@ -1242,6 +1324,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M5 | Accepted (D25): quiet hours; air quality and pollen (Open-Meteo); RTC offset calibration. Still deferred: static IP |
 | M6 | Accepted (D22, D23, D24): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b. Designed in §11.1–§11.4 (D27, D28), with three extras: rain in the next 2 hours, the last hour's loop, the nearest aircraft's route |
 | M7 | Accepted (D32): HA buttons (sync now, next preset); device triggers for key presses; an HA message entity. Still deferred: MQTT over TLS; HA REST pull as an alternative source |
+| M6c, M6d | The owner's requests of 2026-10-04 (D33–D36), designed in §5.2, §5.3, §11.5 and §11.6. Still deferred: the SolaX dongle's local API; an MQTT source for the house's energy (with M7) |
 | M8 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
 | M9 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots; from M6 (D28): radar and flight history over days, a detailed map pack, an aircraft registration database |
 | Later | IDS JMK departures; a remote 1-bit image slot; the VBUS-sense hardware mod; external I²C sensors on the header; BLE or ESP-NOW sources |
@@ -1341,6 +1424,12 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | GeoNames' towns end at ČHMÚ's area: views beyond it show small towns crowding its edge (Teutschenthal, Boxberg) | Cosmetic, outside the home region |
 | A Rain radar wake is awake 287 ms on light sleep (346 ms on deep, with the file), against about 60 ms for the dashboards | The owner's power measurements (§9.4) decide; the town loop's doubles are the first saving |
 | Rain dithered on 1 bit over borders and labels | Label halos; the owner checks the panel |
+| SolaX Cloud's API (V4.0, 2021) has changed hosts before (`:9443/proxy`, `/proxyApp/proxy`, a V2 at `global.solaxcloud.com`) and puts its token in the query | The endpoint evcc uses today; the parser takes the same fields from either reply; the token never reaches a log (§10.4) |
+| Solcast's hobbyist accounts get 10 calls a day, down from 50, and could get fewer | The budget (§11.5) keeps the device under it; Open-Meteo needs no account |
+| Forecast.Solar's free tier counts 12 calls an hour per IP, which other devices behind the same router share | One call a sync; a 429 keeps the forecast (§9.3) |
+| Our PV model is simple: no shading, no horizon, a fixed temperature coefficient and losses | The owner compares it with Forecast.Solar or Solcast on the same days; `losses_pct` tunes it |
+| M6c and M6d bring the snapshot to about 5.4 KB of RTC slow memory's 8 KB, beside M7's values | The plan reads the link map first; the quarter-hour readings can leave RTC (§6) |
+| `presets.json` with 24-cell trees reaches about 36 KB, past the web server's 24 KB bodies | Bodies and replies up to 64 KB in PSRAM (§10.3); a rollback to M6b refuses such a file and starts from the built-ins |
 | The web UI moving focus to a text box on a phone (owner, 2026-09-30) | Not reproduced in iOS 26 Safari; waiting for the phone and browser |
 | Homebrew Python 3.14 on this Mac (3.14.6 and 3.14.7 checked) can't load `pyexpat` (it expects a newer libexpat than macOS 26.2 has), which breaks pip and the ESP-IDF installer | ESP-IDF uses uv's Python 3.13 through `~/esp/python-shim` (`AGENTS.md` §6) |
 
@@ -1382,3 +1471,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r32 | 2026-10-02 | M6b design (D31): the split layout (§5.2), split presets in `presets.json` (§5.4), BOOT double for sync mode `always` (§5.6, §9.3), the editor (§10.3), `sync.mode_before_always` (§14.3), the tests (§17), the M6b row (§18) |
 | r33 | 2026-10-02 | M6b as built: each kind's least heights in split cells (§5.2), numbers fitted to the height, the weather widgets' smaller digits in frost and heat (§5.3), split presets' JSON as written and `presets.json` up to 20 KB (§5.4), the toggle's toasts and its guard after the menu (§5.6), the snapshot's version 8 (§6), the editor's numbered cells and the API's 24 KB (§10.3), `sync.mode_before_always` (§14.3), the tests (§17), the review's open items (§20) |
 | r34 | 2026-10-03 | M7 design (D32): §12 rewritten (settings, topics with key-press triggers, discovery with buttons, a notify entity and device triggers, commands, field ids and the values' RTC block, the message, sessions and failures, testing on the board with the stable firmware); the `ha.message` field (§5.1); the MQTT mark (§5.2); `mqtt.<key>` in presets (§5.4); the message banner (§5.5); KEY and the banner (§5.6); the values outside the datastore (§6); the MQTT step and its failures (§9.3); the MQTT page and its API (§10.3); `ha_mqtt` (§3.1); `sys/mqtt_disc`, `mqtt.*`, the backup's `mqtt_fields.json` (§14); `mqtt status` (§15); the tests (§17); the M7 row (§18); the M7 proposals (§19); two open items (§20) |
+| r35 | 2026-10-04 | M6c and M6d design (D33–D36), M7 on hold: requirements R12–R14 (§1.1); services and the sync's steps (§1.3, §1.4); `solar` and `energy` (§3.1); the new icons (§4.5); the `pv.*` and `energy.*` fields (§5.1); the Solar and Energy layouts, cells down to 40×20 and up to 24, XS, sizes that never shrink (§5.2); XS, S in short cells, the chart and the flow (§5.3); the larger `presets.json`, the Solar and Energy presets (§5.4); Sync ▸ Steps (§5.7); the solar state and the snapshot's cap (§6); the steps' switches, the Solar and Energy steps, the energy in `always` (§9.3, §9.4); the Solar page, the editor, 64 KB bodies, `/api/solar/check` and the status (§10.3, §10.4); the PV forecast and the house's energy (§11.5, §11.6); `stable-m6d` (§12.10); NVS keys, `solar.bin`, `sync.steps`, `solar.*`, `energy.*` (§14); `solar` commands (§15); the tests (§17); the M6c and M6d rows (§18); §19; six risks (§20) |

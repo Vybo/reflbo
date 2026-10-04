@@ -272,11 +272,11 @@ static ui_context_t split_context(int variant)
 }
 
 /* Every cell size a legal split tree can make (spec §5.2): the area, then both parts of each split,
- * at most 7 splits deep, while both parts stay at least 90×40. */
+ * at most 23 splits deep, while both parts stay at least 40×20 (M6c). */
 static struct {
     int16_t w, h;
     uint8_t depth;
-} s_cells[512];
+} s_cells[4096];
 static int s_cell_count;
 
 static void reach(int w, int h, int depth)
@@ -315,7 +315,7 @@ static void test_every_field_fits_every_cell_a_split_can_make(void)
 {
     s_cell_count = 0;
     reach(400, 279, 0);
-    TEST_ASSERT_EQUAL_INT(336, s_cell_count);
+    TEST_ASSERT_EQUAL_INT(2451, s_cell_count);
     for (int variant = 0; variant < VARIANTS; variant++) {
         ui_context_t ctx = split_context(variant);
         for (int i = 0; i < s_cell_count; i++) {

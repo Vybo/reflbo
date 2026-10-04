@@ -111,9 +111,9 @@ static void test_layouts_publish_the_split_rules(void)
     TEST_ASSERT_EQUAL_INT(21, num(split, "y"));
     TEST_ASSERT_EQUAL_INT(400, num(split, "w"));
     TEST_ASSERT_EQUAL_INT(279, num(split, "h"));
-    TEST_ASSERT_EQUAL_INT(8, num(split, "cells"));
-    TEST_ASSERT_EQUAL_INT(90, num(split, "min_w"));
-    TEST_ASSERT_EQUAL_INT(40, num(split, "min_h"));
+    TEST_ASSERT_EQUAL_INT(24, num(split, "cells")); /* M6c, D34 */
+    TEST_ASSERT_EQUAL_INT(40, num(split, "min_w"));
+    TEST_ASSERT_EQUAL_INT(20, num(split, "min_h"));
     TEST_ASSERT_EQUAL_INT(150, num(split, "narrow_w"));
     TEST_ASSERT_EQUAL_INT(8, num(split, "inset"));
     const cJSON *ratios = cJSON_GetObjectItemCaseSensitive(split, "ratios");
@@ -151,8 +151,8 @@ static void test_layouts_publish_the_split_rules(void)
                                                       "pollen", "rain_map" };
     static const char *const k_names[] = { "XS", "S", "M", "L", "XL" };
     for (int k = 0; k < UI_FK_COUNT; k++) {
-        for (int w = 40; w <= 400; w += 7) {
-            for (int h = 20; h <= 279; h += 3) {
+        for (int w = UI_SPLIT_MIN_W; w <= 400; w++) { /* every size, so no boundary falls between two */
+            for (int h = UI_SPLIT_MIN_H; h <= 279; h++) {
                 int size = ui_split_field_size((ui_field_kind_t)k, w, h);
                 const char *published = rule_size(split, k_kinds[k], w, h);
                 TEST_ASSERT_EQUAL_STRING(size < 0 ? NULL : k_names[size], published);

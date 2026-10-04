@@ -90,26 +90,29 @@ static void test_the_spec_example_lays_out_as_the_spec_says(void)
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_cell_size(s_g.cell[3].w, s_g.cell[3].h));
 }
 
-/* Eight cells, each at least 90×40: two rows of four columns. */
-static void test_eight_cells_fill_the_tree(void)
+/* Eight columns of halves: a row of 8 cells, 50 or 49 px wide (M6c). */
+#define EIGHT_COLUMNS                                                                                              \
+    COLS(UI_RATIO_1_2), COLS(UI_RATIO_1_2), COLS(UI_RATIO_1_2), CELL, CELL, COLS(UI_RATIO_1_2), CELL, CELL,         \
+        COLS(UI_RATIO_1_2), COLS(UI_RATIO_1_2), CELL, CELL, COLS(UI_RATIO_1_2), CELL, CELL
+
+/* 24 cells, each at least 40×20 (D34): three rows of eight columns. */
+static void test_24_cells_fill_the_tree(void)
 {
-    static const uint8_t k_tree[UI_SPLIT_NODES] = {
-        ROWS(UI_RATIO_1_2),
-        COLS(UI_RATIO_1_4), CELL, COLS(UI_RATIO_1_3), CELL, COLS(UI_RATIO_1_2), CELL, CELL,
-        COLS(UI_RATIO_1_4), CELL, COLS(UI_RATIO_1_3), CELL, COLS(UI_RATIO_1_2), CELL, CELL,
-    };
+    static const uint8_t k_tree[UI_SPLIT_NODES] = { ROWS(UI_RATIO_1_3), EIGHT_COLUMNS, ROWS(UI_RATIO_1_2),
+                                                    EIGHT_COLUMNS, EIGHT_COLUMNS };
     TEST_ASSERT_TRUE(ui_split_layout(k_tree, ui_split_area(), &s_g));
     TEST_ASSERT_EQUAL_INT(UI_SPLIT_NODES, ui_split_nodes(k_tree));
-    TEST_ASSERT_EQUAL_INT(8, s_g.cells);
-    TEST_ASSERT_EQUAL_INT(7, s_g.lines);
-    check_rect(0, 21, 100, 139, s_g.cell[0]);
-    check_rect(101, 21, 99, 139, s_g.cell[1]);
-    check_rect(201, 21, 99, 139, s_g.cell[2]);
-    check_rect(301, 21, 99, 139, s_g.cell[3]);
-    check_rect(301, 161, 99, 139, s_g.cell[7]);
+    TEST_ASSERT_EQUAL_INT(24, s_g.cells);
+    TEST_ASSERT_EQUAL_INT(23, s_g.lines);
+    check_rect(0, 21, 50, 93, s_g.cell[0]);
+    check_rect(51, 21, 49, 93, s_g.cell[1]);
+    check_rect(351, 21, 49, 93, s_g.cell[7]);
+    check_rect(0, 115, 50, 92, s_g.cell[8]);
+    check_rect(351, 208, 49, 92, s_g.cell[23]);
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(s_g.cell[23].w, s_g.cell[23].h));
 }
 
-/* A tree whose splits run past the 15 nodes has no end: there is no room for its cells. */
+/* A tree whose splits run past the 47 nodes has no end: there is no room for its cells. */
 static void test_a_tree_cut_short_is_refused(void)
 {
     uint8_t tree[UI_SPLIT_NODES];
@@ -118,16 +121,19 @@ static void test_a_tree_cut_short_is_refused(void)
     TEST_ASSERT_EQUAL_INT(0, ui_split_nodes(tree));
 }
 
-static void test_a_part_under_90_by_40_is_refused(void)
+static void test_a_part_under_40_by_20_is_refused(void)
 {
-    static const uint8_t k_narrow[] = { COLS(UI_RATIO_1_4), COLS(UI_RATIO_1_2), CELL, CELL, CELL }; /* 50 px */
-    static const uint8_t k_short[] = { ROWS(UI_RATIO_1_4), ROWS(UI_RATIO_1_2), CELL, CELL, CELL };  /* 34 px */
-    static const uint8_t k_just[] = { ROWS(UI_RATIO_1_3), ROWS(UI_RATIO_1_2), CELL, CELL, CELL };   /* 46 px */
+    static const uint8_t k_narrow[] = { COLS(UI_RATIO_1_4), COLS(UI_RATIO_1_4), CELL, CELL, CELL }; /* 25 px */
+    static const uint8_t k_short[] = { ROWS(UI_RATIO_1_4), ROWS(UI_RATIO_1_4), CELL, CELL, CELL };  /* 17 px */
+    static const uint8_t k_just[] = { ROWS(UI_RATIO_1_4), ROWS(UI_RATIO_1_3), CELL, CELL, CELL };   /* 23 px */
     TEST_ASSERT_FALSE(lay(k_narrow, sizeof(k_narrow)));
     TEST_ASSERT_FALSE(lay(k_short, sizeof(k_short)));
     TEST_ASSERT_TRUE(lay(k_just, sizeof(k_just)));
-    check_rect(0, 21, 400, 46, s_g.cell[0]);
-    check_rect(0, 68, 400, 46, s_g.cell[1]);
+    check_rect(0, 21, 400, 23, s_g.cell[0]);
+    check_rect(0, 45, 400, 45, s_g.cell[1]);
+    static const uint8_t k_just_narrow[] = { COLS(UI_RATIO_1_4), COLS(UI_RATIO_1_2), CELL, CELL, CELL }; /* 50 px */
+    TEST_ASSERT_TRUE(lay(k_just_narrow, sizeof(k_just_narrow)));
+    check_rect(0, 21, 50, 279, s_g.cell[0]);
 }
 
 static void test_a_bad_node_is_refused(void)
@@ -276,9 +282,9 @@ int main(void)
     RUN_TEST(test_each_ratio_rounds_its_first_part_down);
     RUN_TEST(test_a_single_cell_fills_the_area);
     RUN_TEST(test_the_spec_example_lays_out_as_the_spec_says);
-    RUN_TEST(test_eight_cells_fill_the_tree);
+    RUN_TEST(test_24_cells_fill_the_tree);
     RUN_TEST(test_a_tree_cut_short_is_refused);
-    RUN_TEST(test_a_part_under_90_by_40_is_refused);
+    RUN_TEST(test_a_part_under_40_by_20_is_refused);
     RUN_TEST(test_a_bad_node_is_refused);
     RUN_TEST(test_a_cells_size_follows_its_dimensions);
     RUN_TEST(test_xs_takes_the_small_kinds_from_40_by_20);

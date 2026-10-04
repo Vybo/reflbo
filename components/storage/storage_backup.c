@@ -8,8 +8,6 @@
 #include "cJSON.h"
 #include "util_json.h"
 
-#define BACKUP_MAX_DEPTH 18 /* a file's own 16 levels, inside the bundle's two */
-
 static int fail(char *err, size_t size, const char *fmt, ...)
 {
     if (size > 0) {

@@ -81,6 +81,26 @@ static void test_deep_nesting_is_refused_before_parsing(void)
     TEST_ASSERT_NOT_NULL(strstr(s_err, "nested"));
 }
 
+/* A file nested as deep as presets.json may be (UI_JSON_MAX_DEPTH, two levels inside the bundle) restores; a level
+ * more is refused before anything parses it. */
+static void test_the_deepest_file_a_bundle_holds(void)
+{
+    static char deep[256];
+    for (int more = 0; more < 2; more++) {
+        int arrays = BACKUP_MAX_DEPTH - 2 - 1 + more; /* inside the file's own object */
+        size_t n = (size_t)snprintf(deep, sizeof(deep), "{\"reflbo_backup\": 1, \"files\": {\"a.json\": {\"x\": ");
+        for (int i = 0; i < arrays; i++) {
+            deep[n++] = '[';
+        }
+        for (int i = 0; i < arrays; i++) {
+            deep[n++] = ']';
+        }
+        snprintf(deep + n, sizeof(deep) - n, "}}}");
+        int got = backup_split(deep, s_files, 4, s_buf, sizeof(s_buf), s_err, sizeof(s_err));
+        TEST_ASSERT_EQUAL_INT_MESSAGE(more ? -1 : 1, got, s_err);
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -88,5 +108,6 @@ int main(void)
     RUN_TEST(test_a_broken_file_is_left_out);
     RUN_TEST(test_restore_refuses_anything_but_a_backup);
     RUN_TEST(test_deep_nesting_is_refused_before_parsing);
+    RUN_TEST(test_the_deepest_file_a_bundle_holds);
     return UNITY_END();
 }

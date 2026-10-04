@@ -769,7 +769,7 @@ static void draw_weather_now(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const u
         int vw = value_unit_width(&gfx_font_sans_bold_28, &gfx_font_sans_16, v->text, v->unit);
         int base = top + 48 + 6 + ink_height(&gfx_font_sans_bold_28);
         value_unit(fb, &gfx_font_sans_bold_28, &gfx_font_sans_16, r.x + (r.w - vw) / 2, base, v->text, v->unit);
-        if (base + 20 <= r.y + r.h) {
+        if (base + 20 + ui_ink_below(&gfx_font_sans_16, v->extra) <= r.y + r.h - 2) { /* its tails 2 px clear */
             centred(fb, &gfx_font_sans_16, r, base + 20, v->extra);
         }
         return;

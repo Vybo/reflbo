@@ -236,7 +236,37 @@ void ui_format_age(const lang_t *lang, uint32_t age_s, char *out, size_t size)
     }
 }
 
-/* "⟲ 2 h" in the rect's bottom-right corner (spec §5.3). */
+/* The box of a bitmap's ink, offset from its top left. */
+static void bitmap_ink_box(const gfx_bitmap_t *b, int *x0, int *y0, int *x1, int *y1)
+{
+    int rb = (b->width + 7) / 8;
+    *x0 = b->width, *y0 = b->height, *x1 = -1, *y1 = -1;
+    for (int y = 0; y < b->height; y++) {
+        for (int x = 0; x < b->width; x++) {
+            if ((b->bits[y * rb + x / 8] >> (7 - x % 8)) & 1) {
+                *x0 = x < *x0 ? x : *x0, *x1 = x > *x1 ? x : *x1;
+                *y0 = y < *y0 ? y : *y0, *y1 = y > *y1 ? y : *y1;
+            }
+        }
+    }
+}
+
+/* Whether anything is drawn in x0..x1, y0..y1 or within 1 px of it. */
+static bool ink_near(const gfx_fb_t *fb, int x0, int y0, int x1, int y1)
+{
+    for (int y = y0 - 1; y <= y1 + 1; y++) {
+        for (int x = x0 - 1; x <= x1 + 1; x++) {
+            if (gfx_get_pixel(fb, x, y)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* "⟲ 2 h" in the rect's bottom-right corner (spec §5.3), only where nothing is drawn within 1 px of its icon's ink or
+ * its age's: a value that reaches that corner keeps it, and the status bar's stale warning stands for the mark
+ * (M6c). */
 static void draw_age(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, const lang_t *lang)
 {
     char age[16];
@@ -245,6 +275,12 @@ static void draw_age(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, const lang
     int w = gfx_text_width(f, age);
     int x = r.x + r.w - 6 - w;
     int baseline = r.y + r.h - 6 - (f->line_height - f->ascent);
+    int ix0, iy0, ix1, iy1;
+    bitmap_ink_box(&gfx_icon_stale_16, &ix0, &iy0, &ix1, &iy1);
+    if (ink_near(fb, x - 18 + ix0, baseline - 13 + iy0, x - 18 + ix1, baseline - 13 + iy1) ||
+        ink_near(fb, x, baseline - ink_above(f, age), x + w - 1, baseline + ink_below(f, age))) {
+        return;
+    }
     gfx_text(fb, f, x, baseline, age, GFX_BLACK);
     gfx_bitmap(fb, x - 18, baseline - 13, &gfx_icon_stale_16, GFX_BLACK);
 }

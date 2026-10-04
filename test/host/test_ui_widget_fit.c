@@ -8,6 +8,7 @@
 #include "gfx.h"
 #include "gfx_fonts.h"
 #include "gfx_icons.h"
+#include "ui_internal.h"
 #include "ui_layout.h"
 #include "ui_split.h"
 #include "unity.h"
@@ -709,6 +710,80 @@ static void test_xs_sun_shows_its_set_where_both_times_fit(void)
     TEST_ASSERT_TRUE(checked > 1000);
 }
 
+/* The age mark goes only where nothing is drawn under it: in every cell a tree makes, a stale value's mark, where it
+ * is drawn, has nothing else within 1 px of its icon's ink or its age's (M6c review: narrow S cells 81-104 px tall,
+ * and some M cells, had it on the value). The mark alone, drawn as draw_age() places it, tells its pixels from the
+ * value's. */
+static void test_the_age_mark_never_lands_on_the_value(void)
+{
+    static uint8_t mark_buf[sizeof(s_buf)];
+    gfx_fb_t mark;
+    gfx_fb_init(&mark, mark_buf, 400, 300);
+    const gfx_font_t *af = &gfx_font_sans_12;
+    s_cell_count = 0;
+    reach(400, 279, 0);
+    int drawn = 0;
+    for (int lang = 0; lang < 2; lang++) {
+        ui_context_t ctx = split_context(2); /* readings three hours old, a forecast two days old */
+        ctx.lang = lang_get(lang ? "cs" : "en");
+        for (int i = 0; i < s_cell_count; i++) {
+            int w = s_cells[i].w, h = s_cells[i].h;
+            gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), (int16_t)w, (int16_t)h };
+            for (int f = UI_FIELD_NONE + 1; f < UI_FIELD_COUNT; f++) {
+                const ui_field_info_t *info = ui_field_info((ui_field_id_t)f);
+                ui_value_t v;
+                ui_resolve(&ctx, (ui_field_id_t)f, &v);
+                if (ui_split_field_size(info->kind, w, h) <= UI_SIZE_XS || info->kind == UI_FK_RAIN_MAP ||
+                    v.state != UI_VALUE_STALE) {
+                    continue;
+                }
+                char age[16];
+                ui_format_age(ctx.lang, v.age_s, age, sizeof(age));
+                int ax = r.x + w - 6 - gfx_text_width(af, age), base = r.y + h - 6 - (af->line_height - af->ascent);
+                gfx_clear(&mark, GFX_WHITE);
+                gfx_text(&mark, af, ax, base, age, GFX_BLACK);
+                gfx_bitmap(&mark, ax - 18, base - 13, &gfx_icon_stale_16, GFX_BLACK);
+                gfx_fb_init(&s_fb, s_buf, 400, 300);
+                gfx_clear(&s_fb, GFX_WHITE);
+                ui_draw_cell(&s_fb, r, &ctx, (ui_field_id_t)f, UI_STALE_STALE);
+                bool shown = true; /* every pixel of the mark set: it was drawn */
+                for (int y = base - 13; shown && y <= base + 3; y++) {
+                    for (int x = ax - 18; shown && x < r.x + w - 6; x++) {
+                        shown = !gfx_get_pixel(&mark, x, y) || gfx_get_pixel(&s_fb, x, y);
+                    }
+                }
+                if (!shown) {
+                    continue;
+                }
+                drawn++;
+                char msg[80];
+                snprintf(msg, sizeof(msg), "%s at %d×%d, %s", info->id, w, h, lang ? "cs" : "en");
+                int ix0 = 16, iy0 = 16, ix1 = -1, iy1 = -1; /* the icon's ink, then the age's */
+                for (int y = 0; y < 16; y++) {
+                    for (int x = 0; x < 16; x++) {
+                        if (icon_ink(&gfx_icon_stale_16, x, y)) {
+                            ix0 = x < ix0 ? x : ix0, ix1 = x > ix1 ? x : ix1;
+                            iy0 = y < iy0 ? y : iy0, iy1 = y > iy1 ? y : iy1;
+                        }
+                    }
+                }
+                const int boxes[2][4] = {
+                    { ax - 18 + ix0, base - 13 + iy0, ax - 18 + ix1, base - 13 + iy1 },
+                    { ax, base - ui_ink_above(af, age), r.x + w - 7, base + ui_ink_below(af, age) },
+                };
+                for (int b = 0; b < 2; b++) {
+                    for (int y = boxes[b][1] - 1; y <= boxes[b][3] + 1; y++) {
+                        for (int x = boxes[b][0] - 1; x <= boxes[b][2] + 1; x++) {
+                            TEST_ASSERT_EQUAL_MESSAGE(gfx_get_pixel(&mark, x, y), gfx_get_pixel(&s_fb, x, y), msg);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(drawn > 1000); /* where there is room, the mark still shows */
+}
+
 /* A field with no room in its cell isn't drawn at all, rather than cut. */
 static void test_a_field_without_room_draws_nothing(void)
 {
@@ -732,6 +807,7 @@ int main(void)
     RUN_TEST(test_every_field_fits_every_cell_a_split_can_make);
     RUN_TEST(test_a_field_without_room_draws_nothing);
     RUN_TEST(test_xs_sun_shows_its_set_where_both_times_fit);
+    RUN_TEST(test_the_age_mark_never_lands_on_the_value);
     RUN_TEST(test_every_small_field_fits_every_xs_cell);
     RUN_TEST(test_xs_draws_one_line_or_the_symbol_over_the_value);
     RUN_TEST(test_xs_keeps_the_marks_s_shows);

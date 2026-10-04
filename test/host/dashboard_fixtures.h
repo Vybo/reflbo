@@ -36,6 +36,49 @@ static inline void fixture_split(ui_preset_t *p, const uint8_t *tree, size_t nod
     memcpy(p->slots, fields, cells);
 }
 
+/* A row of `n` cells (M6c): halves where n is even, a third and the rest where it is odd; `line` is 0 or
+ * UI_SPLIT_NO_LINE. Returns the next node. */
+static inline int fixture_cols(uint8_t *t, int at, int n, uint8_t line)
+{
+    if (n == 1) {
+        t[at++] = 0;
+        return at;
+    }
+    t[at++] = (uint8_t)((n % 2 == 0 ? UI_RATIO_1_2 : UI_RATIO_1_3) | UI_SPLIT_COLUMNS | line);
+    at = fixture_cols(t, at, n % 2 == 0 ? n / 2 : 1, line);
+    return fixture_cols(t, at, n % 2 == 0 ? n / 2 : n - 1, line);
+}
+
+/* `rows` rows of `cols` cells, split the same way. */
+static inline int fixture_rows(uint8_t *t, int at, int rows, int cols, uint8_t line)
+{
+    if (rows == 1) {
+        return fixture_cols(t, at, cols, line);
+    }
+    t[at++] = (uint8_t)((rows % 2 == 0 ? UI_RATIO_1_2 : UI_RATIO_1_3) | line);
+    at = fixture_rows(t, at, rows % 2 == 0 ? rows / 2 : 1, cols, line);
+    return fixture_rows(t, at, rows % 2 == 0 ? rows / 2 : rows - 1, cols, line);
+}
+
+/* A split preset of rows × cols cells (M6c), the fields in reading order. */
+static inline void fixture_grid_split(ui_preset_t *p, int rows, int cols, uint8_t line, const uint8_t *fields,
+                                      size_t cells)
+{
+    uint8_t tree[UI_SPLIT_NODES];
+    memset(tree, 0, sizeof(tree));
+    int n = fixture_rows(tree, 0, rows, cols, line);
+    fixture_split(p, tree, (size_t)n, fields, cells);
+}
+
+/* The 24 small fields of M6c's goldens, in the order the cells take them. */
+static const uint8_t k_fixture_small24[24] = {
+    UI_FIELD_TIME_CLOCK,    UI_FIELD_DATE_DAY,     UI_FIELD_ENV_TEMP,      UI_FIELD_ENV_HUM,    UI_FIELD_WX_NOW,
+    UI_FIELD_WX_TODAY,      UI_FIELD_SUN_TIMES,    UI_FIELD_AQ_INDEX,      UI_FIELD_AQ_UV,      UI_FIELD_POLLEN_TOP,
+    UI_FIELD_MOON_PHASE,    UI_FIELD_BAT_LEVEL,    UI_FIELD_DATE_WEEK,     UI_FIELD_BAT_DAYS,   UI_FIELD_ENV_DEW,
+    UI_FIELD_AQ_PM25,       UI_FIELD_AQ_PM10,      UI_FIELD_ENV_TEMP_MIN,  UI_FIELD_ENV_TEMP_MAX, UI_FIELD_POLLEN_GRASS,
+    UI_FIELD_POLLEN_BIRCH,  UI_FIELD_POLLEN_ALDER, UI_FIELD_POLLEN_MUGWORT, UI_FIELD_POLLEN_RAGWEED,
+};
+
 /* Each fixture: a context and a preset. */
 static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_preset_t *preset)
 {
@@ -278,6 +321,29 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
     } else if (strcmp(name, "home_temp_main_cs") == 0) { /* in Czech the decimals give way to the comma's tail */
         fixture_dashboard("home_temp_main", ctx, preset);
         ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "split_compact") == 0) { /* M6c (D34): 4 × 3 cells of 133 × 69, S beside */
+        *preset = fixture_preset("weather");
+        static const uint8_t k_fields[12] = { UI_FIELD_TIME_CLOCK, UI_FIELD_DATE_DAY,   UI_FIELD_WX_NOW,
+                                              UI_FIELD_ENV_TEMP,   UI_FIELD_ENV_HUM,    UI_FIELD_WX_TODAY,
+                                              UI_FIELD_SUN_TIMES,  UI_FIELD_AQ_INDEX,   UI_FIELD_POLLEN_TOP,
+                                              UI_FIELD_AQ_UV,      UI_FIELD_BAT_LEVEL,  UI_FIELD_MOON_PHASE };
+        fixture_grid_split(preset, 4, 3, 0, k_fields, sizeof(k_fields));
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "split_compact_cs") == 0) { /* the same in Czech: a word under its number */
+        fixture_dashboard("split_compact", ctx, preset);
+        ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "split_xs_rows") == 0) { /* 12 × 2 rows of 200 × 22: the status bar's size */
+        *preset = fixture_preset("weather");
+        fixture_grid_split(preset, 12, 2, UI_SPLIT_NO_LINE, k_fixture_small24, sizeof(k_fixture_small24));
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "split_xs_grid") == 0) { /* 4 × 6 cells of 66 × 69: XS, the symbol over the value */
+        *preset = fixture_preset("weather");
+        fixture_grid_split(preset, 4, 6, 0, k_fixture_small24, sizeof(k_fixture_small24));
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "split_xs_narrow") == 0) { /* 3 × 8 cells of 49 × 92: units under the numbers */
+        *preset = fixture_preset("weather");
+        fixture_grid_split(preset, 3, 8, 0, k_fixture_small24, sizeof(k_fixture_small24));
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -305,4 +371,6 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "flights", "flights_100", "flights_cs", "flights_none",
                                                     "flights_failed", "flights_off", "split_weather",
                                                     "split_eight", "home_temp_main", "home_temp_main_cs",
-                                                    "weather_frost_cs", "weather_hot_f" };
+                                                    "weather_frost_cs", "weather_hot_f", "split_compact",
+                                                    "split_compact_cs", "split_xs_rows", "split_xs_grid",
+                                                    "split_xs_narrow" };

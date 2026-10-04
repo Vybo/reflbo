@@ -121,10 +121,18 @@ static void test_layouts_publish_the_split_rules(void)
     TEST_ASSERT_EQUAL_STRING("1/4", cJSON_GetArrayItem(ratios, 0)->valuestring);
     TEST_ASSERT_EQUAL_STRING("3/4", cJSON_GetArrayItem(ratios, 4)->valuestring);
     const cJSON *sizes = cJSON_GetObjectItemCaseSensitive(split, "sizes");
-    TEST_ASSERT_EQUAL_INT(4, cJSON_GetArraySize(sizes)); /* the largest first, as a cell takes the first that fits */
-    const cJSON *xl = cJSON_GetArrayItem(sizes, 0), *s = cJSON_GetArrayItem(sizes, 3);
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetArraySize(sizes)); /* the largest first, as a cell takes the first that fits */
+    const cJSON *xl = cJSON_GetArrayItem(sizes, 0);
+    const cJSON *s = cJSON_GetArrayItem(sizes, 3);
+    const cJSON *xs = cJSON_GetArrayItem(sizes, 4);
     TEST_ASSERT_EQUAL_STRING("XL", str(xl, "size"));
     TEST_ASSERT_EQUAL_STRING("S", str(s, "size"));
+    TEST_ASSERT_EQUAL_STRING("XS", str(xs, "size")); /* M6c, D34 */
+    TEST_ASSERT_EQUAL_INT(40, num(xs, "min_w"));
+    const cJSON *xs_min = cJSON_GetObjectItemCaseSensitive(xs, "min_h");
+    TEST_ASSERT_EQUAL_INT(20, cJSON_GetArrayItem(xs_min, 0)->valueint);
+    TEST_ASSERT_EQUAL_INT(20, cJSON_GetArrayItem(xs_min, 1)->valueint);
+    TEST_ASSERT_EQUAL_INT(11, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(xs, "kinds"))); /* S's kinds */
     TEST_ASSERT_EQUAL_INT(400, num(xl, "min_w"));
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(xl, "kinds"))); /* time, number */
     const cJSON *s_min = cJSON_GetObjectItemCaseSensitive(s, "min_h");
@@ -138,10 +146,10 @@ static void test_layouts_publish_the_split_rules(void)
     static const char *const k_kinds[UI_FK_COUNT] = { "time", "date", "number", "battery", "moon", "text",
                                                       "weather_now", "weather_day", "series", "sun", "level",
                                                       "pollen", "rain_map" };
-    static const char *const k_names[] = { "S", "M", "L", "XL" };
+    static const char *const k_names[] = { "XS", "S", "M", "L", "XL" };
     for (int k = 0; k < UI_FK_COUNT; k++) {
-        for (int w = 90; w <= 400; w += 7) {
-            for (int h = 40; h <= 279; h += 3) {
+        for (int w = 40; w <= 400; w += 7) {
+            for (int h = 20; h <= 279; h += 3) {
                 int size = ui_split_field_size((ui_field_kind_t)k, w, h);
                 const char *published = rule_size(split, k_kinds[k], w, h);
                 TEST_ASSERT_EQUAL_STRING(size < 0 ? NULL : k_names[size], published);

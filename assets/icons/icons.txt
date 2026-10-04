@@ -2,41 +2,41 @@
 # C name       Material Icons name, or wi:<name> from Weather Icons   sizes (px)
 thermometer    device_thermostat     16 24 48
 drop           water_drop            16 24 48
-dew            dew_point             24 48
+dew            dew_point             16 24 48
 bolt           bolt                  16 24
 stale          sync_problem          16 24
-clock          schedule              24 48
-calendar       calendar_today        24 48
-person         person                24 48
-celebration    celebration           24 48
-cloud          cloud                 24 48
+clock          schedule              16 24 48
+calendar       calendar_today        16 24 48
+person         person                16 24 48
+celebration    celebration           16 24 48
+cloud          cloud                 16 24 48
 web            language              16
 sync           sync                  16
 sync_failed    cloud_off             16
 wifi           wifi                  16
 wifi_off       wifi_off              16
-air            air                   24 48
-particles      blur_on               24 48
-uv             light_mode            24 48
-pollen         local_florist         24 48
-# Weather codes (spec §11), day and night where they differ, and the sun's times (M5).
-wx_clear_day        wi:day-sunny                24 48
-wx_clear_night      wi:night-clear              24 48
-wx_mainly_day       wi:day-sunny-overcast       24 48
-wx_mainly_night     wi:night-alt-partly-cloudy  24 48
-wx_partly_day       wi:day-cloudy               24 48
-wx_partly_night     wi:night-alt-cloudy         24 48
-wx_overcast         wi:cloudy                   24 48
-wx_fog              wi:fog                      24 48
-wx_drizzle          wi:sprinkle                 24 48
-wx_rain             wi:rain                     24 48
-wx_freezing         wi:sleet                    24 48
-wx_snow             wi:snow                     24 48
-wx_showers_day      wi:day-showers              24 48
-wx_showers_night    wi:night-alt-showers        24 48
-wx_snow_showers_day   wi:day-snow               24 48
-wx_snow_showers_night wi:night-alt-snow         24 48
-wx_thunder          wi:thunderstorm             24 48
-wx_unknown          wi:na                       24 48
-sunrise             wi:sunrise                  24 48
-sunset              wi:sunset                   24 48
+air            air                   16 24 48
+particles      blur_on               16 24 48
+uv             light_mode            16 24 48
+pollen         local_florist         16 24 48
+# Weather codes (spec §11), day and night where they differ, and the sun's times (M5); 16 px for XS cells (M6c).
+wx_clear_day        wi:day-sunny                16 24 48
+wx_clear_night      wi:night-clear              16 24 48
+wx_mainly_day       wi:day-sunny-overcast       16 24 48
+wx_mainly_night     wi:night-alt-partly-cloudy  16 24 48
+wx_partly_day       wi:day-cloudy               16 24 48
+wx_partly_night     wi:night-alt-cloudy         16 24 48
+wx_overcast         wi:cloudy                   16 24 48
+wx_fog              wi:fog                      16 24 48
+wx_drizzle          wi:sprinkle                 16 24 48
+wx_rain             wi:rain                     16 24 48
+wx_freezing         wi:sleet                    16 24 48
+wx_snow             wi:snow                     16 24 48
+wx_showers_day      wi:day-showers              16 24 48
+wx_showers_night    wi:night-alt-showers        16 24 48
+wx_snow_showers_day   wi:day-snow               16 24 48
+wx_snow_showers_night wi:night-alt-snow         16 24 48
+wx_thunder          wi:thunderstorm             16 24 48
+wx_unknown          wi:na                       16 24 48
+sunrise             wi:sunrise                  16 24 48
+sunset              wi:sunset                   16 24 48

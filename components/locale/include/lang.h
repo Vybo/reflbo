@@ -206,6 +206,7 @@ typedef enum {
     LANG_DATE_LONG,   /* Friday 25 September */
     LANG_DATE_MEDIUM, /* Fri 25 Sep */
     LANG_DATE_SHORT,  /* 25 Sep */
+    LANG_DATE_DAY,    /* Fri 25: the weekday and the day (M6c, XS cells) */
 } lang_date_style_t;
 
 typedef struct lang {

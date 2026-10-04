@@ -5,6 +5,7 @@
 
 #include "dashboard_fixtures.h"
 #include "gfx.h"
+#include "gfx_fonts.h"
 #include "ui_layout.h"
 #include "ui_split.h"
 #include "unity.h"
@@ -27,11 +28,29 @@ static void render(const char *name)
     ui_draw_dashboard(&s_fb, &ctx, &preset);
 }
 
+/* Whether any pixel in x0..x1, y0..y1 is set; a byte at a time, as the fit tests draw a million cells. */
 static bool inked(int x0, int x1, int y0, int y1)
 {
+    x0 = x0 < 0 ? 0 : x0, y0 = y0 < 0 ? 0 : y0;
+    x1 = x1 >= s_fb.width ? s_fb.width - 1 : x1, y1 = y1 >= s_fb.height ? s_fb.height - 1 : y1;
+    if (x0 > x1) {
+        return false;
+    }
+    uint8_t first = (uint8_t)(0xFFu >> (x0 & 7)), last = (uint8_t)(0xFFu << (7 - (x1 & 7)));
     for (int y = y0; y <= y1; y++) {
-        for (int x = x0; x <= x1; x++) {
-            if (gfx_get_pixel(&s_fb, x, y)) {
+        const uint8_t *row = s_fb.buf + y * s_fb.stride;
+        int b0 = x0 >> 3, b1 = x1 >> 3;
+        if (b0 == b1) {
+            if (row[b0] & first & last) {
+                return true;
+            }
+            continue;
+        }
+        if ((row[b0] & first) || (row[b1] & last)) {
+            return true;
+        }
+        for (int b = b0 + 1; b < b1; b++) {
+            if (row[b]) {
                 return true;
             }
         }
@@ -274,6 +293,213 @@ static void test_every_field_fits_every_cell_a_split_can_make(void)
     }
 }
 
+/* XS cells (D34): narrower than 90 or lower than 40, down to 40×20, every threshold of the XS drawing on both sides
+ * (one line from 120 px of width or under 44 px of height, a 24 px symbol from 34 px, a 24 px stacked symbol from
+ * 60). */
+static const int16_t k_xs_w[] = { 40, 41, 44, 48, 50, 55, 60, 66, 70, 75, 80, 85, 89 };
+static const int16_t k_xs_h[] = { 20, 21, 22, 24, 26, 28, 30, 33, 34, 36, 39, 40, 43, 44, 45, 50, 55, 59, 60, 69,
+                                  80, 93, 100, 139, 279 };
+static const int16_t k_xs_wide_w[] = { 90, 100, 119, 120, 133, 149, 150, 199, 200, 266, 399, 400 };
+static const int16_t k_xs_low_h[] = { 20, 21, 22, 24, 26, 28, 30, 33, 34, 36, 39 };
+
+/* Whether glyph `g` of `f` is drawn with its top left at (x0, y0), a blank pixel all round it. */
+static bool glyph_at(const gfx_font_t *f, const gfx_glyph_t *g, int x0, int y0)
+{
+    int rb = (g->width + 7) / 8;
+    for (int y = -1; y <= g->height; y++) {
+        for (int x = -1; x <= g->width; x++) {
+            bool want = x >= 0 && y >= 0 && x < g->width && y < g->height &&
+                        ((f->bitmap[g->offset + y * rb + x / 8] >> (7 - x % 8)) & 1);
+            if (gfx_get_pixel(&s_fb, x0 + x, y0 + y) != want) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* The first inked pixel of a glyph's or an icon's bits, in reading order: where a match of it starts. */
+static void first_ink(const uint8_t *bits, int width, int height, int *fx, int *fy)
+{
+    int rb = (width + 7) / 8;
+    for (int i = 0; i < width * height; i++) {
+        if ((bits[(i / width) * rb + (i % width) / 8] >> (7 - (i % width) % 8)) & 1) {
+            *fx = i % width, *fy = i / width;
+            return;
+        }
+    }
+    *fx = *fy = 0;
+}
+
+/* The next inked pixel of `r` from (*x, *y) on, in reading order, a blank byte at a time; false after the last. */
+static bool next_ink(gfx_rect_t r, int *x, int *y)
+{
+    for (; *y < r.y + r.h; (*y)++, *x = r.x) {
+        const uint8_t *row = s_fb.buf + *y * s_fb.stride;
+        for (; *x < r.x + r.w; (*x)++) {
+            if (row[*x >> 3] == 0) {
+                *x |= 7; /* the rest of a blank byte */
+            } else if ((row[*x >> 3] >> (7 - (*x & 7))) & 1) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* Whether `r` shows an ellipsis ("…") in a face a small value takes: something was cut to fit. */
+static bool has_ellipsis(gfx_rect_t r)
+{
+    static const gfx_font_t *const k_faces[] = { &gfx_font_sans_12, &gfx_font_sans_16, &gfx_font_sans_bold_16,
+                                                 &gfx_font_sans_bold_20, &gfx_font_sans_bold_28 };
+    enum { FACES = sizeof(k_faces) / sizeof(k_faces[0]) };
+    const gfx_glyph_t *g[FACES];
+    int fx[FACES], fy[FACES];
+    for (int i = 0; i < FACES; i++) {
+        g[i] = gfx_font_glyph(k_faces[i], 0x2026);
+        first_ink(k_faces[i]->bitmap + g[i]->offset, g[i]->width, g[i]->height, &fx[i], &fy[i]);
+    }
+    for (int x = r.x, y = r.y; next_ink(r, &x, &y); x++) {
+        for (int i = 0; i < FACES; i++) {
+            int x0 = x - fx[i], y0 = y - fy[i];
+            if (x0 >= r.x && y0 >= r.y && x0 + g[i]->width <= r.x + r.w && y0 + g[i]->height <= r.y + r.h &&
+                glyph_at(k_faces[i], g[i], x0, y0)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* The kinds whose value must never be cut: a number, a time, today's high and low, the sun's times. */
+static bool never_cut(ui_field_kind_t kind)
+{
+    return kind == UI_FK_NUMBER || kind == UI_FK_TIME || kind == UI_FK_BATTERY || kind == UI_FK_WEATHER_DAY ||
+           kind == UI_FK_SUN;
+}
+
+static void check_xs_cell(const ui_context_t *ctx, int w, int h, int variant)
+{
+    for (int f = UI_FIELD_NONE + 1; f < UI_FIELD_COUNT; f++) {
+        const ui_field_info_t *info = ui_field_info((ui_field_id_t)f);
+        if (ui_split_field_size(info->kind, w, h) != UI_SIZE_XS) {
+            continue;
+        }
+        gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), (int16_t)w, (int16_t)h };
+        gfx_fb_init(&s_fb, s_buf, 400, 300);
+        gfx_clear(&s_fb, GFX_WHITE);
+        ui_draw_cell(&s_fb, r, ctx, (ui_field_id_t)f, UI_STALE_STALE);
+        char msg[80];
+        snprintf(msg, sizeof(msg), "%s at %d×%d (XS), variant %d", info->id, w, h, variant);
+        TEST_ASSERT_TRUE_MESSAGE(inked(r.x + 2, r.x + w - 3, r.y + 2, r.y + h - 3), msg);
+        TEST_ASSERT_FALSE_MESSAGE(never_cut(info->kind) && has_ellipsis(r), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y, r.y + 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y + h - 2, r.y + h - 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + 1, r.y, r.y + h - 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x + w - 2, r.x + w - 1, r.y, r.y + h - 1), msg);
+    }
+}
+
+/* Every small field shows in every XS cell and stays clear of its edges, in every set of data. */
+static void test_every_small_field_fits_every_xs_cell(void)
+{
+    for (int variant = 0; variant < 8; variant++) {
+        ui_context_t ctx = split_context(variant);
+        for (size_t i = 0; i < sizeof(k_xs_w) / sizeof(k_xs_w[0]); i++) {
+            for (size_t j = 0; j < sizeof(k_xs_h) / sizeof(k_xs_h[0]); j++) {
+                check_xs_cell(&ctx, k_xs_w[i], k_xs_h[j], variant);
+            }
+        }
+        for (size_t i = 0; i < sizeof(k_xs_wide_w) / sizeof(k_xs_wide_w[0]); i++) {
+            for (size_t j = 0; j < sizeof(k_xs_low_h) / sizeof(k_xs_low_h[0]); j++) {
+                check_xs_cell(&ctx, k_xs_wide_w[i], k_xs_low_h[j], variant);
+            }
+        }
+    }
+}
+
+/* Runs of inked rows in `r`: the lines a widget drew, one above the other. */
+static int ink_bands(gfx_rect_t r)
+{
+    int bands = 0;
+    bool in = false;
+    for (int y = r.y; y < r.y + r.h; y++) {
+        bool row = inked(r.x, r.x + r.w - 1, y, y);
+        bands += row && !in;
+        in = row;
+    }
+    return bands;
+}
+
+static int draw_xs(const ui_context_t *ctx, ui_field_id_t field, int w, int h)
+{
+    gfx_rect_t r = { 0, 21, (int16_t)w, (int16_t)h };
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    gfx_clear(&s_fb, GFX_WHITE);
+    ui_draw_cell(&s_fb, r, ctx, field, UI_STALE_STALE);
+    return ink_bands(r);
+}
+
+/* XS draws one line, like the status bar, where the cell is 120 px wide or more or under 44 px tall; otherwise
+ * the symbol over the value, the date as its weekday over its day (spec §5.3, D34). */
+static void test_xs_draws_one_line_or_the_symbol_over_the_value(void)
+{
+    ui_context_t ctx = split_context(0);
+    TEST_ASSERT_EQUAL_INT(1, draw_xs(&ctx, UI_FIELD_ENV_TEMP, 200, 22));
+    TEST_ASSERT_EQUAL_INT(1, draw_xs(&ctx, UI_FIELD_ENV_TEMP, 89, 43));
+    TEST_ASSERT_EQUAL_INT(1, draw_xs(&ctx, UI_FIELD_WX_NOW, 120, 60));
+    TEST_ASSERT_TRUE(draw_xs(&ctx, UI_FIELD_ENV_TEMP, 66, 69) >= 2);
+    TEST_ASSERT_TRUE(draw_xs(&ctx, UI_FIELD_WX_NOW, 66, 69) >= 2);
+    TEST_ASSERT_EQUAL_INT(2, draw_xs(&ctx, UI_FIELD_DATE_DAY, 50, 69)); /* "Fri" over "25" */
+}
+
+/* One field in a cell w × h at the bottom right of the panel, its pixels copied out: what tells two apart. */
+static void cell_bits(const ui_context_t *ctx, ui_field_id_t field, int w, int h, uint8_t *out)
+{
+    gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), (int16_t)w, (int16_t)h };
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    gfx_clear(&s_fb, GFX_WHITE);
+    ui_draw_cell(&s_fb, r, ctx, field, UI_STALE_STALE);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            out[y * w + x] = (uint8_t)gfx_get_pixel(&s_fb, r.x + x, r.y + y);
+        }
+    }
+}
+
+/* XS keeps what S shows: today's low and high apart from the temperature (↓ and ↑ beside the thermometer) and
+ * a charging battery's bolt; and the Moon keeps its disc in a narrow line (D34). */
+static void test_xs_keeps_the_marks_s_shows(void)
+{
+    static uint8_t a[200 * 93], b[200 * 93], c[200 * 93];
+    static const int16_t k_cells[][2] = { { 200, 22 }, { 66, 69 }, { 50, 93 }, { 89, 30 } };
+    ui_context_t ctx = fixture_context();
+    for (size_t i = 0; i < sizeof(k_cells) / sizeof(k_cells[0]); i++) {
+        int w = k_cells[i][0], h = k_cells[i][1];
+        size_t n = (size_t)(w * h);
+        fixture_single(&s_fix_ds, 2340, 4500); /* one reading: the low and the high equal it */
+        cell_bits(&ctx, UI_FIELD_ENV_TEMP, w, h, a);
+        cell_bits(&ctx, UI_FIELD_ENV_TEMP_MIN, w, h, b);
+        cell_bits(&ctx, UI_FIELD_ENV_TEMP_MAX, w, h, c);
+        TEST_ASSERT_FALSE(memcmp(a, b, n) == 0);
+        TEST_ASSERT_FALSE(memcmp(a, c, n) == 0);
+        TEST_ASSERT_FALSE(memcmp(b, c, n) == 0);
+        ds_set_battery(&s_fix_ds, 100, 4180, DS_BAT_CHARGING, FIX_NOW);
+        cell_bits(&ctx, UI_FIELD_BAT_LEVEL, w, h, a);
+        ds_set_battery(&s_fix_ds, 100, 4180, DS_BAT_DISCHARGING, FIX_NOW);
+        cell_bits(&ctx, UI_FIELD_BAT_LEVEL, w, h, b);
+        TEST_ASSERT_FALSE(memcmp(a, b, n) == 0);
+    }
+    for (int w = 40; w <= 119; w++) { /* the disc stays, at the start of the line */
+        gfx_rect_t r = { (int16_t)(400 - w), 278, (int16_t)w, 22 };
+        gfx_fb_init(&s_fb, s_buf, 400, 300);
+        gfx_clear(&s_fb, GFX_WHITE);
+        ui_draw_cell(&s_fb, r, &ctx, UI_FIELD_MOON_PHASE, UI_STALE_STALE);
+        TEST_ASSERT_TRUE(inked(r.x + 3, r.x + 18, r.y + 3, r.y + 18));
+        TEST_ASSERT_FALSE(has_ellipsis(r));
+    }
+}
+
 /* A field with no room in its cell isn't drawn at all, rather than cut. */
 static void test_a_field_without_room_draws_nothing(void)
 {
@@ -296,5 +522,8 @@ int main(void)
     RUN_TEST(test_a_number_keeps_its_size_as_its_digits_change);
     RUN_TEST(test_every_field_fits_every_cell_a_split_can_make);
     RUN_TEST(test_a_field_without_room_draws_nothing);
+    RUN_TEST(test_every_small_field_fits_every_xs_cell);
+    RUN_TEST(test_xs_draws_one_line_or_the_symbol_over_the_value);
+    RUN_TEST(test_xs_keeps_the_marks_s_shows);
     return UNITY_END();
 }

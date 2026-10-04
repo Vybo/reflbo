@@ -19,6 +19,9 @@ static void format_date(const lang_t *lang, const struct tm *tm, lang_date_style
     case LANG_DATE_SHORT:
         snprintf(out, size, "%d. %d.", tm->tm_mday, tm->tm_mon + 1);
         break;
+    case LANG_DATE_DAY:
+        snprintf(out, size, "%s %d.", lang->weekdays_short[tm->tm_wday], tm->tm_mday);
+        break;
     }
 }
 

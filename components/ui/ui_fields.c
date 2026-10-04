@@ -169,6 +169,7 @@ static void resolve_clock(const ui_context_t *ctx, ui_field_id_t field, ui_value
     case UI_FIELD_DATE_DAY:
         lang_format_date(ctx->lang, tm, LANG_DATE_LONG, out->text, sizeof(out->text));
         lang_format_date(ctx->lang, tm, LANG_DATE_MEDIUM, out->extra, sizeof(out->extra));
+        lang_format_date(ctx->lang, tm, LANG_DATE_DAY, out->short_text, sizeof(out->short_text)); /* XS (D34) */
         out->state = out->text[0] ? UI_VALUE_FRESH : UI_VALUE_MISSING;
         break;
     case UI_FIELD_DATE_WEEK:

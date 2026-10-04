@@ -19,6 +19,7 @@ static const struct {
     int16_t min_w, narrow_h, wide_h;
     uint32_t kinds;
 } k_sizes[] = {
+    [UI_SIZE_XS] = { 40, 20, 20, UI_KINDS_XS },
     [UI_SIZE_S] = { 90, 80, 40, UI_KINDS_S },
     [UI_SIZE_M] = { 130, 80, 80, UI_KINDS_M },
     [UI_SIZE_L] = { 200, 150, 150, UI_KINDS_L },
@@ -157,7 +158,7 @@ int ui_split_need(ui_size_t size, ui_field_kind_t kind, bool narrow)
 
 int ui_split_cell_size(int w, int h)
 {
-    for (int size = UI_SIZE_XL; size >= UI_SIZE_S; size--) {
+    for (int size = UI_SIZE_XL; size >= UI_SIZE_XS; size--) {
         if (w >= k_sizes[size].min_w && h >= ui_split_min_h((ui_size_t)size, w < UI_SPLIT_NARROW_W)) {
             return size;
         }
@@ -167,7 +168,7 @@ int ui_split_cell_size(int w, int h)
 
 int ui_split_field_size(ui_field_kind_t kind, int w, int h)
 {
-    for (int size = UI_SIZE_XL; size >= UI_SIZE_S; size--) {
+    for (int size = UI_SIZE_XL; size >= UI_SIZE_XS; size--) {
         int need = ui_split_need((ui_size_t)size, kind, w < UI_SPLIT_NARROW_W);
         if (w >= k_sizes[size].min_w && need >= 0 && h >= need) {
             return size;

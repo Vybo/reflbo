@@ -26,7 +26,8 @@ static const char *const k_kinds[UI_FK_COUNT] = {
     [UI_FK_RAIN_MAP] = "rain_map",
 };
 _Static_assert(UI_FK_COUNT == 13, "every kind has a name in the catalogue");
-static const char *const k_sizes[] = { "S", "M", "L", "XL" };
+static const char *const k_sizes[] = { [UI_SIZE_XS] = "XS", [UI_SIZE_S] = "S", [UI_SIZE_M] = "M",
+                                       [UI_SIZE_L] = "L", [UI_SIZE_XL] = "XL" };
 
 static size_t print(cJSON *root, char *out, size_t size)
 {
@@ -55,7 +56,7 @@ static void add_split(cJSON *root)
         cJSON_AddItemToArray(ratios, cJSON_CreateString(ui_split_ratio_name(r)));
     }
     cJSON *sizes = cJSON_AddArrayToObject(split, "sizes");
-    for (int s = UI_SIZE_XL; s >= UI_SIZE_S; s--) {
+    for (int s = UI_SIZE_XL; s >= UI_SIZE_XS; s--) {
         cJSON *so = cJSON_CreateObject();
         cJSON_AddStringToObject(so, "size", k_sizes[s]);
         cJSON_AddNumberToObject(so, "min_w", ui_split_min_w((ui_size_t)s));

@@ -110,7 +110,7 @@ void app_ui_load(void)
 {
     settings_t settings_defaults;
     default_settings(&settings_defaults);
-    ui_presets_t presets_defaults;
+    EXT_RAM_BSS_ATTR static ui_presets_t presets_defaults; /* 2 KB with 24 cells (M6c): not on the app task's stack */
     ui_presets_defaults(&presets_defaults);
     s.settings = settings_defaults;
     s.presets = presets_defaults;

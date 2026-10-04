@@ -5,6 +5,7 @@
 #include "ui_preset.h"
 #include "ui_split.h"
 #include "unity.h"
+#include "util_json.h"
 
 static ui_presets_t s_p;
 static char s_err[128];
@@ -442,28 +443,34 @@ static void check_tree_rejected(const char *tree, const char *reason_part)
     check_rejected(split_file(tree), reason_part);
 }
 
+/* Eight columns of halves, a row of cells 50 or 49 px wide; `first` is the leftmost cell. */
+static void eight_columns(char *out, size_t size, const char *first)
+{
+    static char two[512], two_first[512], four[1024], four_first[1024];
+    put_split(two, sizeof(two), "columns", "1/2", "{}", "{}");
+    put_split(two_first, sizeof(two_first), "columns", "1/2", first, "{}");
+    put_split(four, sizeof(four), "columns", "1/2", two, two);
+    put_split(four_first, sizeof(four_first), "columns", "1/2", two_first, two);
+    put_split(out, size, "columns", "1/2", four_first, four);
+}
+
 static void test_bad_split_trees_are_rejected_with_a_reason(void)
 {
-    static char tree[2048], part[1024];
-    /* nine cells, each at least 90×40: two rows of four, one of them split again */
-    put_split(part, sizeof(part), "columns", "1/2", "{}", "{}");
-    char row[512];
-    snprintf(row, sizeof(row), "{\"split\": \"columns\", \"ratio\": \"1/4\", \"a\": {}, \"b\": {\"split\": \"columns\","
-             " \"ratio\": \"1/3\", \"a\": {}, \"b\": %s}}", part);
-    char split_cell[256];
-    put_split(split_cell, sizeof(split_cell), "rows", "1/2", "{}", "{}");
-    char row9[512];
-    snprintf(row9, sizeof(row9), "{\"split\": \"columns\", \"ratio\": \"1/4\", \"a\": %s,"
-             " \"b\": {\"split\": \"columns\", \"ratio\": \"1/3\", \"a\": {}, \"b\": %s}}", split_cell, part);
-    put_split(tree, sizeof(tree), "rows", "1/2", row, row9);
-    check_tree_rejected(tree, "at most 8 cells");
-    put_split(tree, sizeof(tree), "rows", "1/2", row, row); /* eight are fine */
-    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(split_file(tree), &s_p, s_err, sizeof(s_err)), s_err);
-    TEST_ASSERT_EQUAL_INT(8, ui_preset_slots(&s_p.presets[0]));
-
+    static char tree[8192], part[1024], row[2048], row25[2048], rows[4096];
+    /* 25 cells, each at least 40×20: three rows of eight, one of them split again (M6c) */
     put_split(part, sizeof(part), "rows", "1/2", "{}", "{}");
-    put_split(tree, sizeof(tree), "rows", "1/4", part, "{}"); /* 69 px split in two: 34 */
-    check_tree_rejected(tree, "90×40");
+    eight_columns(row, sizeof(row), "{}");
+    eight_columns(row25, sizeof(row25), part);
+    put_split(rows, sizeof(rows), "rows", "1/2", row, row);
+    put_split(tree, sizeof(tree), "rows", "1/3", row25, rows);
+    check_tree_rejected(tree, "at most 24 cells");
+    put_split(tree, sizeof(tree), "rows", "1/3", row, rows); /* 24 are fine */
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(split_file(tree), &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_INT(24, ui_preset_slots(&s_p.presets[0]));
+
+    put_split(part, sizeof(part), "rows", "1/4", "{}", "{}");
+    put_split(tree, sizeof(tree), "rows", "1/4", part, "{}"); /* 69 px, a quarter of it: 17 */
+    check_tree_rejected(tree, "40×20");
     check_tree_rejected("{\"split\": \"diagonal\", \"ratio\": \"1/2\", \"a\": {}, \"b\": {}}", "rows or columns");
     check_tree_rejected("{\"split\": \"rows\", \"ratio\": \"2/5\", \"a\": {}, \"b\": {}}", "1/4, 1/3, 1/2, 2/3 or 3/4");
     check_tree_rejected("{\"split\": \"rows\", \"ratio\": \"1/2\", \"a\": {}}", "both parts");
@@ -479,19 +486,17 @@ static void test_bad_split_trees_are_rejected_with_a_reason(void)
                    "no slot \"main\"");
 }
 
-/* The largest presets.json there can be: 16 split presets of 8 cells, in columns wherever a tree can
- * have them, with every line hidden; the longest field ids a cell takes; names of control characters,
- * which cJSON writes as six bytes each ("\u0001"); every option at its longest; 8 schedule entries
+#define C (UI_RATIO_1_2 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE) /* a hidden column split: the longest node written */
+#define EIGHT_COLUMNS C, C, C, 0, 0, C, 0, 0, C, C, 0, 0, C, 0, 0
+
+/* The largest presets.json there can be (M6c): 16 split presets of 24 cells, three rows of eight columns, the
+ * most columns a tree can have, with every line hidden; the longest field ids a cell takes; names of control
+ * characters, which cJSON writes as six bytes each ("\u0001"); every option at its longest; 8 schedule entries
  * that switch to a preset. */
 static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
 {
-    static const uint8_t k_tree[UI_SPLIT_NODES] = {
-        UI_RATIO_1_2 | UI_SPLIT_NO_LINE,
-        UI_RATIO_1_4 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, UI_RATIO_1_3 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0,
-        UI_RATIO_1_2 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, 0,
-        UI_RATIO_1_4 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, UI_RATIO_1_3 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0,
-        UI_RATIO_1_2 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE, 0, 0,
-    };
+    static const uint8_t k_tree[UI_SPLIT_NODES] = { UI_RATIO_1_3 | UI_SPLIT_NO_LINE, EIGHT_COLUMNS,
+                                                    UI_RATIO_1_2 | UI_SPLIT_NO_LINE, EIGHT_COLUMNS, EIGHT_COLUMNS };
     memset(&s_p, 0, sizeof(s_p));
     for (int i = 0; i < UI_PRESET_MAX; i++) {
         ui_preset_t *p = &s_p.presets[i];
@@ -517,9 +522,44 @@ static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
     static char buf[UI_PRESETS_JSON_MAX];
     size_t n = ui_presets_to_json(&s_p, buf, sizeof(buf));
     TEST_ASSERT_TRUE_MESSAGE(n > 0, "the worst case must fit UI_PRESETS_JSON_MAX");
+    char size_msg[48];
+    snprintf(size_msg, sizeof(size_msg), "the largest presets.json: %zu bytes", n);
+    TEST_MESSAGE(size_msg);
     ui_presets_t back;
     TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(buf, &back, s_err, sizeof(s_err)), s_err);
     TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(s_p));
+}
+
+/* The deepest tree there can be (M6c): 13 splits in a chain, seven rows then six columns, each leaving a cell
+ * beside the next split; its last cells are 41×20. Its file nests 17 levels, under UI_JSON_MAX_DEPTH. */
+static void test_the_deepest_tree_fits_the_nesting_limit(void)
+{
+    static const uint8_t k_tree[UI_SPLIT_NODES] = {
+        UI_RATIO_1_4, 0, UI_RATIO_1_4, 0, UI_RATIO_1_4, 0, UI_RATIO_1_4, 0, UI_RATIO_1_4, 0, UI_RATIO_1_3, 0,
+        UI_RATIO_1_2, 0,
+        UI_RATIO_1_4 | UI_SPLIT_COLUMNS, 0, UI_RATIO_1_4 | UI_SPLIT_COLUMNS, 0, UI_RATIO_1_4 | UI_SPLIT_COLUMNS, 0,
+        UI_RATIO_1_4 | UI_SPLIT_COLUMNS, 0, UI_RATIO_1_3 | UI_SPLIT_COLUMNS, 0, UI_RATIO_1_2 | UI_SPLIT_COLUMNS, 0, 0,
+    };
+    ui_split_geometry_t g;
+    TEST_ASSERT_TRUE(ui_split_layout(k_tree, ui_split_area(), &g));
+    TEST_ASSERT_EQUAL_INT(14, g.cells);
+    TEST_ASSERT_EQUAL_INT(41, g.cell[13].w);
+    TEST_ASSERT_EQUAL_INT(20, g.cell[13].h);
+    memset(&s_p, 0, sizeof(s_p));
+    ui_preset_t *p = &s_p.presets[0];
+    snprintf(p->id, sizeof(p->id), "deep");
+    snprintf(p->name, sizeof(p->name), "Deep");
+    p->layout = UI_LAYOUT_SPLIT;
+    memcpy(p->split, k_tree, sizeof(k_tree));
+    p->slots[13] = UI_FIELD_ENV_TEMP;
+    s_p.count = 1;
+    static char buf[UI_PRESETS_JSON_MAX];
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, buf, sizeof(buf)) > 0);
+    TEST_ASSERT_EQUAL_INT(17, util_json_depth(buf));
+    TEST_ASSERT_TRUE(17 <= UI_JSON_MAX_DEPTH);
+    ui_presets_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(buf, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(k_tree, back.presets[0].split, UI_SPLIT_NODES);
 }
 
 static void test_a_preset_counts_the_slots_its_layout_uses(void)
@@ -562,6 +602,7 @@ int main(void)
     RUN_TEST(test_a_split_preset_without_a_tree_is_one_empty_cell);
     RUN_TEST(test_bad_split_trees_are_rejected_with_a_reason);
     RUN_TEST(test_a_full_set_of_split_presets_fits_the_save_buffer);
+    RUN_TEST(test_the_deepest_tree_fits_the_nesting_limit);
     RUN_TEST(test_a_preset_counts_the_slots_its_layout_uses);
     return UNITY_END();
 }

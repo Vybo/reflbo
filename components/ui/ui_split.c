@@ -64,7 +64,7 @@ typedef struct {
 } walk_t;
 
 /* One node and everything under it, laid over r. Each call takes a node, so it recurses at most
- * UI_SPLIT_NODES deep. */
+ * UI_SPLIT_NODES deep, and 14 deep in a tree of 40×20 parts (13 splits in a chain at most). */
 static void walk(walk_t *w, gfx_rect_t r)
 {
     if (!w->ok || w->at >= UI_SPLIT_NODES || r.w < UI_SPLIT_MIN_W || r.h < UI_SPLIT_MIN_H) {

@@ -19,8 +19,8 @@
 #define UI_CYCLE_MIN_S 10
 #define UI_CYCLE_MAX_S 3600
 #define UI_SCHEDULE_MAX 8
-#define UI_PRESETS_JSON_MAX 20480 /* presets.json at its largest is 16 253 bytes (test_ui_preset.c) */
-#define UI_JSON_MAX_DEPTH 16      /* presets.json nests 11 levels at most (a split tree's chain of 7 splits),
+#define UI_PRESETS_JSON_MAX 49152 /* presets.json at its largest: 24 cells a preset (test_ui_preset.c, M6c) */
+#define UI_JSON_MAX_DEPTH 20      /* presets.json nests 17 levels at most (a split tree's chain of 13 splits),
                                      settings.json 5; anything deeper is rejected unparsed */
 
 typedef enum {

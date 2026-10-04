@@ -11,6 +11,7 @@
  */
 
 #define BACKUP_FORMAT 1
+#define BACKUP_MAX_DEPTH 22 /* a file's own 20 levels (presets.json's UI_JSON_MAX_DEPTH), inside the bundle's two */
 
 typedef struct {
     const char *name; /* "settings.json": a plain file name in /cfg */

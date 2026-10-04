@@ -507,13 +507,14 @@ test('a preset on a radar layout has no slots to fill', async () => {
 
 /* The device's rules (GET /api/layouts, ui_catalog.c) for the kinds these tests use. */
 const SPLIT = {
-  x: 0, y: 21, w: 400, h: 279, cells: 8, min_w: 90, min_h: 40, narrow_w: 150, inset: 8,
+  x: 0, y: 21, w: 400, h: 279, cells: 24, min_w: 40, min_h: 20, narrow_w: 150, inset: 8, /* M6c, D34 */
   ratios: ['1/4', '1/3', '1/2', '2/3', '3/4'],
   sizes: [
     { size: 'XL', min_w: 400, min_h: [120, 120], kinds: { time: [120, 120], number: [120, 120] } },
     { size: 'L', min_w: 200, min_h: [150, 150], kinds: { time: [150, 150], number: [150, 150] } },
     { size: 'M', min_w: 130, min_h: [80, 80], kinds: { time: [80, 80], number: [80, 80], series: [80, 80] } },
-    { size: 'S', min_w: 90, min_h: [80, 40], kinds: { time: [80, 40], number: [80, 40] } },
+    { size: 'S', min_w: 90, min_h: [40, 40], kinds: { time: [40, 40], number: [40, 40] } },
+    { size: 'XS', min_w: 40, min_h: [20, 20], kinds: { time: [20, 20], number: [20, 20] } },
   ],
 };
 const SPLIT_CATALOGUE = { ...CATALOGUE, layouts: [...CATALOGUE.layouts, { id: 'split', slots: [] }], split: SPLIT };
@@ -573,16 +574,43 @@ test('Split into rows halves a cell, its field going to the first part', async (
   assert.deepEqual(p.split, { split: 'rows', ratio: '1/2', line: true, a: { field: 'time.clock' }, b: {} });
 });
 
-test('a split offers only the ratios that leave every part 90×40', async () => {
-  const { ctx, main } = await load(splitDevice([], { split: 'rows', ratio: '1/2', line: true, a: {},
-                                                     b: { split: 'rows', ratio: '1/2', line: true, a: {}, b: {} } }));
+test('a split offers only the ratios that leave every part 40×20', async () => {
+  const { ctx, main } = await load(splitDevice([], { split: 'rows', ratio: '1/4', line: true,
+                                                     a: { split: 'rows', ratio: '1/2', line: true, a: {}, b: {} },
+                                                     b: {} }));
   await ctx.presetsPage();
   const [outer, inner] = ratioSelects(main);
   const disabled = (sel) => sel.children.filter((o) => o.disabled).map((o) => o.value);
-  assert.deepEqual(disabled(outer), ['3/4']);        /* 69 px below, split in two: 34 */
-  assert.deepEqual(disabled(inner), ['1/4', '3/4']); /* 139 px: 34 at a quarter */
+  assert.deepEqual(disabled(outer), []);             /* a quarter, 69 px, halves into 34 */
+  assert.deepEqual(disabled(inner), ['1/4', '3/4']); /* 69 px: 17 at a quarter */
   const splitButtons = below(main).filter((e) => e.tag === 'button' && /^Split into/.test(text(e)));
-  assert.deepEqual(splitButtons.map((b) => b.disabled), [false, false, true, false, true, false]); /* 400×69 */
+  assert.deepEqual(splitButtons.map((b) => b.disabled), [true, false, true, false, false, false]); /* 400×34 */
+});
+
+/* Eight columns of halves, a row of cells 50 or 49 px wide (M6c). */
+const eightColumns = () => {
+  const half = (a, b) => ({ split: 'columns', ratio: '1/2', line: true, a, b });
+  const four = () => half(half({}, {}), half({}, {}));
+  return half(four(), four());
+};
+
+test('a cell under 90 px wide is XS', async () => {
+  const { ctx, main } = await load(splitDevice([], { split: 'columns', ratio: '1/4', line: true,
+    a: { split: 'columns', ratio: '1/2', line: true, a: { field: 'env.temp' }, b: {} }, b: {} }));
+  await ctx.presetsPage();
+  assert.deepEqual(cellLabels(main), ['1 · 50×279 · XS', '2 · 49×279 · XS', '3 · 299×279 · L']);
+});
+
+test('a tree of 24 cells splits no further', async () => {
+  const rows = { split: 'rows', ratio: '1/3', line: true, a: eightColumns(),
+                 b: { split: 'rows', ratio: '1/2', line: true, a: eightColumns(), b: eightColumns() } };
+  const { ctx, main } = await load(splitDevice([], rows));
+  await ctx.presetsPage();
+  assert.equal(cellLabels(main).length, 24);
+  assert.equal(cellLabels(main)[23], '24 · 49×92 · XS');
+  const splitButtons = below(main).filter((e) => e.tag === 'button' && /^Split into/.test(text(e)));
+  assert.equal(splitButtons.length, 48);
+  assert.ok(splitButtons.every((b) => b.disabled));
 });
 
 test('a cell offers only the fields that fit it', async () => {

@@ -9,15 +9,15 @@
 
 /*
  * The split layout (spec §5.2, D31): the area under the status bar split into rows or columns, each
- * part split again, at most 8 cells. A tree is kept in preorder, a byte a node: 0 is a cell; a split
- * has its ratio in the low bits, and flags for columns and a hidden separator. The cells' fields are
- * the preset's slots, in the order the cells come. Pure C, host-buildable.
+ * part split again, at most 24 cells (M6c, D34; 8 before). A tree is kept in preorder, a byte a node:
+ * 0 is a cell; a split has its ratio in the low bits, and flags for columns and a hidden separator.
+ * The cells' fields are the preset's slots, in the order the cells come. Pure C, host-buildable.
  */
 
-#define UI_SPLIT_CELLS 8
+#define UI_SPLIT_CELLS 24
 #define UI_SPLIT_NODES (2 * UI_SPLIT_CELLS - 1)
-#define UI_SPLIT_MIN_W 90     /* no part is smaller (spec §5.2) */
-#define UI_SPLIT_MIN_H 40
+#define UI_SPLIT_MIN_W 40     /* no part is smaller (spec §5.2; M6c, D34: 90×40 before) */
+#define UI_SPLIT_MIN_H 20
 #define UI_SPLIT_NARROW_W 150 /* narrower: a kind's narrow height; S stacks from 80 px tall (D34) */
 #define UI_SPLIT_INSET 8      /* a separator stops this short of each end */
 
@@ -49,7 +49,7 @@ typedef struct {
 /* What a split preset divides: everything under the status bar and its line (400×279). */
 gfx_rect_t ui_split_area(void);
 /* Lays the tree out over `area`. False if it is cut short, has a node it doesn't know, or has a
- * part under 90×40; *out is then unspecified. */
+ * part under 40×20; *out is then unspecified. */
 bool ui_split_layout(const uint8_t tree[UI_SPLIT_NODES], gfx_rect_t area, ui_split_geometry_t *out);
 /* How many of the tree's nodes it uses: 1 to UI_SPLIT_NODES, or 0 if it is cut short. */
 int ui_split_nodes(const uint8_t tree[UI_SPLIT_NODES]);

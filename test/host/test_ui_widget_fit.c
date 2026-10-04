@@ -6,6 +6,7 @@
 #include "dashboard_fixtures.h"
 #include "gfx.h"
 #include "gfx_fonts.h"
+#include "gfx_icons.h"
 #include "ui_layout.h"
 #include "ui_split.h"
 #include "unity.h"
@@ -196,7 +197,13 @@ static void test_a_number_keeps_its_size_as_its_digits_change(void)
 /* The data a split cell's field is drawn from: 0 fresh in English, 1 fresh in Czech (its decimal
  * comma and longer words), 2 three hours old in Czech with a forecast two days old, 3 nothing yet,
  * 4 a 12-hour clock, 5 a hot day in °F (100.8 °F inside, 102 °F out), 6 frost in Czech (-12,5 °C
- * inside, -13 °C out, a dew point of -18,7 °C), 7 the clock with its seconds. */
+ * inside, -13 °C out, a dew point of -18,7 °C), 7 the clock with its seconds; from M6c 8 a thunderstorm
+ * by day and rain today, 9 snow showers at night in Czech and a battery charging at 100 %, 10 Monday
+ * 28 September in Czech, a public holiday, 11 a polar night (89.9° N), 12 a polar day (89.9° S) in Czech,
+ * 13 Wednesday 30 September on a 12-hour clock, 14 the largest values (-23.5 °C at 100 %, 123 days of battery, an
+ * air quality index of 250, a UV index of 13, PM at 255 µg/m³, pollen at 6 500 grains/m³). */
+#define VARIANTS 15
+
 static ui_context_t split_context(int variant)
 {
     ui_context_t ctx = fixture_context();
@@ -218,6 +225,48 @@ static ui_context_t split_context(int variant)
     }
     if (variant == 5 || variant == 6) {
         fixture_forecast_shift(&s_fix_ds, variant == 5 ? 388 : -125);
+    }
+    if (variant == 8 || variant == 9) { /* other skies: their icons differ in size */
+        static ds_weather_t w;
+        w = *ds_weather(&s_fix_ds);
+        w.now_code = variant == 8 ? 95 : 86;
+        w.now_is_day = variant == 8;
+        w.days[0].code = variant == 8 ? 63 : 75;
+        ds_set_weather(&s_fix_ds, &w);
+    }
+    if (variant == 9) {
+        ctx.lang = lang_get("cs");
+        ds_set_battery(&s_fix_ds, 100, 4180, DS_BAT_CHARGING, FIX_NOW);
+    }
+    if (variant == 10 || variant == 13) { /* another day: a holiday, a long weekday; the forecast doesn't cover it */
+        int days = variant == 10 ? 3 : 5;
+        ctx.lang = lang_get(variant == 10 ? "cs" : "en");
+        ctx.clock_24h = variant != 13;
+        ctx.now = FIX_NOW + days * 86400;
+        ctx.local_day = FIX_DAY + days;
+        ctx.local.tm_mday += days;
+        ctx.local.tm_wday = (ctx.local.tm_wday + days) % 7;
+        ctx.local.tm_yday += days;
+        fixture_fill(&s_fix_ds, ctx.now);
+    }
+    if (variant == 14) { /* the largest values: -23.5 °C at 100 %, 123 days of battery, the air at its worst */
+        ds_set_env(&s_fix_ds, -2350, 10000, FIX_NOW, FIX_DAY);
+        ds_set(&s_fix_ds, DS_BAT_DAYS, 1234, FIX_NOW);
+        static ds_air_t a;
+        a = *ds_air(&s_fix_ds);
+        for (int i = 0; i < DS_WX_HOURS; i++) {
+            a.aqi[i] = 250, a.pm25[i] = 255, a.pm10[i] = 255, a.uv10[i] = 125;
+        }
+        for (int d = 0; d < DS_WX_DAYS; d++) {
+            for (int t = 0; t < DS_POLLEN_TYPES; t++) {
+                a.pollen[d][t] = 65000;
+            }
+        }
+        ds_set_air(&s_fix_ds, &a);
+    }
+    if (variant == 11 || variant == 12) { /* the sun neither rises nor sets */
+        ctx.lang = lang_get(variant == 12 ? "cs" : "en");
+        ctx.lat_e4 = variant == 11 ? 899000 : -899000;
     }
     return ctx;
 }
@@ -267,7 +316,7 @@ static void test_every_field_fits_every_cell_a_split_can_make(void)
     s_cell_count = 0;
     reach(400, 279, 0);
     TEST_ASSERT_EQUAL_INT(336, s_cell_count);
-    for (int variant = 0; variant < 8; variant++) {
+    for (int variant = 0; variant < VARIANTS; variant++) {
         ui_context_t ctx = split_context(variant);
         for (int i = 0; i < s_cell_count; i++) {
             int w = s_cells[i].w, h = s_cells[i].h;
@@ -371,6 +420,38 @@ static bool has_ellipsis(gfx_rect_t r)
     return false;
 }
 
+static bool icon_ink(const gfx_bitmap_t *icon, int x, int y)
+{
+    return (icon->bits[y * ((icon->width + 7) / 8) + x / 8] >> (7 - x % 8)) & 1;
+}
+
+/* Whether `r` shows the stale mark where draw_age() puts it, in the cell's bottom 26 rows: its icon's 16×16 box,
+ * ink and blank alike (a solid bar holds every pattern's ink). */
+static bool stale_mark(gfx_rect_t r)
+{
+    const gfx_bitmap_t *icon = &gfx_icon_stale_16;
+    int fx, fy;
+    first_ink(icon->bits, icon->width, icon->height, &fx, &fy);
+    gfx_rect_t bottom = { r.x, (int16_t)(r.h > 26 ? r.y + r.h - 26 : r.y), r.w, 0 };
+    bottom.h = (int16_t)(r.y + r.h - bottom.y);
+    for (int x = bottom.x, y = bottom.y; next_ink(bottom, &x, &y); x++) {
+        int x0 = x - fx, y0 = y - fy;
+        if (x0 < r.x || y0 < bottom.y || x0 + icon->width > r.x + r.w || y0 + icon->height > r.y + r.h) {
+            continue;
+        }
+        bool same = true;
+        for (int iy = 0; iy < icon->height && same; iy++) {
+            for (int ix = 0; ix < icon->width && same; ix++) {
+                same = gfx_get_pixel(&s_fb, x0 + ix, y0 + iy) == icon_ink(icon, ix, iy);
+            }
+        }
+        if (same) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* The kinds whose value must never be cut: a number, a time, today's high and low, the sun's times. */
 static bool never_cut(ui_field_kind_t kind)
 {
@@ -393,6 +474,7 @@ static void check_xs_cell(const ui_context_t *ctx, int w, int h, int variant)
         snprintf(msg, sizeof(msg), "%s at %d×%d (XS), variant %d", info->id, w, h, variant);
         TEST_ASSERT_TRUE_MESSAGE(inked(r.x + 2, r.x + w - 3, r.y + 2, r.y + h - 3), msg);
         TEST_ASSERT_FALSE_MESSAGE(never_cut(info->kind) && has_ellipsis(r), msg);
+        TEST_ASSERT_FALSE_MESSAGE(stale_mark(r), msg);
         TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y, r.y + 1), msg);
         TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y + h - 2, r.y + h - 1), msg);
         TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + 1, r.y, r.y + h - 1), msg);
@@ -403,7 +485,7 @@ static void check_xs_cell(const ui_context_t *ctx, int w, int h, int variant)
 /* Every small field shows in every XS cell and stays clear of its edges, in every set of data. */
 static void test_every_small_field_fits_every_xs_cell(void)
 {
-    for (int variant = 0; variant < 8; variant++) {
+    for (int variant = 0; variant < VARIANTS; variant++) {
         ui_context_t ctx = split_context(variant);
         for (size_t i = 0; i < sizeof(k_xs_w) / sizeof(k_xs_w[0]); i++) {
             for (size_t j = 0; j < sizeof(k_xs_h) / sizeof(k_xs_h[0]); j++) {
@@ -416,6 +498,52 @@ static void test_every_small_field_fits_every_xs_cell(void)
             }
         }
     }
+}
+
+/* S cells under 80 px tall (D34): the icon beside the value, narrow or wide, at every height S takes. */
+static const int16_t k_s_w[] = { 90,  91,  100, 110, 119, 120, 129, 133, 140,
+                                 149, 150, 151, 160, 199, 200, 266, 399, 400 };
+static const int16_t k_s_h[] = { 40, 41, 42, 44, 46, 48, 49, 50, 51, 53, 55, 56, 59, 60, 61, 65, 69, 70, 75, 79 };
+
+static void check_s_cell(const ui_context_t *ctx, int w, int h, int variant)
+{
+    for (int f = UI_FIELD_NONE + 1; f < UI_FIELD_COUNT; f++) {
+        const ui_field_info_t *info = ui_field_info((ui_field_id_t)f);
+        if (ui_split_field_size(info->kind, w, h) != UI_SIZE_S) {
+            continue;
+        }
+        gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), (int16_t)w, (int16_t)h };
+        gfx_fb_init(&s_fb, s_buf, 400, 300);
+        gfx_clear(&s_fb, GFX_WHITE);
+        ui_draw_cell(&s_fb, r, ctx, (ui_field_id_t)f, UI_STALE_STALE);
+        char msg[80];
+        snprintf(msg, sizeof(msg), "%s at %d×%d (S), variant %d", info->id, w, h, variant);
+        TEST_ASSERT_TRUE_MESSAGE(inked(r.x + 2, r.x + w - 3, r.y + 2, r.y + h - 3), msg);
+        TEST_ASSERT_FALSE_MESSAGE(never_cut(info->kind) && has_ellipsis(r), msg);
+        TEST_ASSERT_FALSE_MESSAGE(stale_mark(r), msg); /* under 80 px the status bar's warning stands for it */
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y, r.y + 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y + h - 2, r.y + h - 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + 1, r.y, r.y + h - 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x + w - 2, r.x + w - 1, r.y, r.y + h - 1), msg);
+    }
+}
+
+/* Every small field that draws at S in a short cell shows, clear of the cell's edges, in every set of data; a
+ * field draws at S from the heights spec §5.2 gives (M6c). */
+static void test_every_small_field_fits_every_short_s_cell(void)
+{
+    for (int variant = 0; variant < VARIANTS; variant++) {
+        ui_context_t ctx = split_context(variant);
+        for (size_t i = 0; i < sizeof(k_s_w) / sizeof(k_s_w[0]); i++) {
+            for (size_t j = 0; j < sizeof(k_s_h) / sizeof(k_s_h[0]); j++) {
+                check_s_cell(&ctx, k_s_w[i], k_s_h[j], variant);
+            }
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_NOW, 90, 40)); /* the heights measured */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_LEVEL, 90, 40));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_SUN, 90, 49));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_POLLEN, 90, 42));
 }
 
 /* Runs of inked rows in `r`: the lines a widget drew, one above the other. */
@@ -500,6 +628,35 @@ static void test_xs_keeps_the_marks_s_shows(void)
     }
 }
 
+/* A short S cell shows the date's weekday and day, or the Moon's short name, before it cuts a longer form; a
+ * stale value shows its mark where there is room for it, as in Classic's small slots (D34). */
+static void test_short_s_cells_show_a_short_form_before_cutting(void)
+{
+    static const int16_t k_cells[][2] = { { 100, 69 }, { 125, 69 }, { 133, 45 }, { 99, 41 } };
+    for (int variant = 0; variant < VARIANTS; variant++) {
+        ui_context_t ctx = split_context(variant);
+        for (size_t i = 0; i < sizeof(k_cells) / sizeof(k_cells[0]); i++) {
+            int16_t w = k_cells[i][0], h = k_cells[i][1];
+            gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), w, h };
+            static const ui_field_id_t k_fields[] = { UI_FIELD_DATE_DAY, UI_FIELD_MOON_PHASE };
+            for (size_t f = 0; f < 2; f++) {
+                gfx_fb_init(&s_fb, s_buf, 400, 300);
+                gfx_clear(&s_fb, GFX_WHITE);
+                ui_draw_cell(&s_fb, r, &ctx, k_fields[f], UI_STALE_STALE);
+                char msg[64];
+                snprintf(msg, sizeof(msg), "field %d at %d×%d, variant %d", (int)k_fields[f], r.w, r.h, variant);
+                TEST_ASSERT_FALSE_MESSAGE(has_ellipsis(r), msg);
+            }
+        }
+    }
+    ui_context_t ctx = split_context(2); /* three hours old */
+    gfx_rect_t r = { 300, 189, 100, 111 };
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    gfx_clear(&s_fb, GFX_WHITE);
+    ui_draw_cell(&s_fb, r, &ctx, UI_FIELD_ENV_TEMP, UI_STALE_STALE);
+    TEST_ASSERT_TRUE(stale_mark(r));
+}
+
 /* A field with no room in its cell isn't drawn at all, rather than cut. */
 static void test_a_field_without_room_draws_nothing(void)
 {
@@ -525,5 +682,7 @@ int main(void)
     RUN_TEST(test_every_small_field_fits_every_xs_cell);
     RUN_TEST(test_xs_draws_one_line_or_the_symbol_over_the_value);
     RUN_TEST(test_xs_keeps_the_marks_s_shows);
+    RUN_TEST(test_every_small_field_fits_every_short_s_cell);
+    RUN_TEST(test_short_s_cells_show_a_short_form_before_cutting);
     return UNITY_END();
 }

@@ -138,8 +138,8 @@ static void test_a_bad_node_is_refused(void)
     TEST_ASSERT_FALSE(lay(k_flag, sizeof(k_flag)));
 }
 
-/* XL 400 wide and at least 120 tall; L at least 200×150; M at least 130×80; S wide from 150 px with 40 px of
- * height, narrower with 80; XS from 40×20 (spec §5.2, D34). */
+/* XL 400 wide and at least 120 tall; L at least 200×150; M at least 130×80; S at least 90×40; XS from 40×20
+ * (spec §5.2, D34). */
 static void test_a_cells_size_follows_its_dimensions(void)
 {
     TEST_ASSERT_EQUAL_INT(UI_SIZE_XL, ui_split_cell_size(400, 120));
@@ -153,8 +153,9 @@ static void test_a_cells_size_follows_its_dimensions(void)
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_cell_size(150, 40));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_M, ui_split_cell_size(149, 80));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_cell_size(150, 79));
-    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(149, 79)); /* narrow S needs 80 */
-    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(90, 40));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_cell_size(149, 79)); /* M6c: the icon beside the value */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_cell_size(90, 40));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(89, 279));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(150, 39));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(40, 20));
     TEST_ASSERT_EQUAL_INT(-1, ui_split_cell_size(39, 279));
@@ -196,12 +197,17 @@ static void test_a_field_draws_at_the_largest_size_with_room_for_it(void)
     TEST_ASSERT_EQUAL_INT(-1, ui_split_field_size(UI_FK_SERIES, 199, 69));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_POLLEN, 199, 104)); /* M pollen needs 105 */
     TEST_ASSERT_EQUAL_INT(UI_SIZE_M, ui_split_field_size(UI_FK_POLLEN, 199, 105));
-    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_DAY, 199, 69)); /* wide S needs 51 */
-    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_field_size(UI_FK_WEATHER_DAY, 129, 98)); /* narrow S needs 99 */
-    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_DAY, 129, 99));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_DAY, 199, 69)); /* M6c: S's own 40 px */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_DAY, 90, 40));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_NOW, 133, 69)); /* the owner's 132×69 */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_NOW, 90, 40));  /* narrow or wide */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_SUN, 90, 49));          /* the sun needs 49 */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_field_size(UI_FK_SUN, 400, 48));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_POLLEN, 90, 42));       /* pollen 42 */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_field_size(UI_FK_POLLEN, 400, 41));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_M, ui_split_field_size(UI_FK_WEATHER_DAY, 149, 94)); /* narrow M needs 94 */
-    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_field_size(UI_FK_NUMBER, 99, 69));
-    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_NUMBER, 99, 80));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_NUMBER, 99, 69));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_NUMBER, 90, 40));
 }
 
 /* A larger cell never takes a field that a smaller one inside it takes: Join keeps a field. */

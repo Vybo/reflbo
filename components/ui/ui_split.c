@@ -20,7 +20,7 @@ static const struct {
     uint32_t kinds;
 } k_sizes[] = {
     [UI_SIZE_XS] = { 40, 20, 20, UI_KINDS_XS },
-    [UI_SIZE_S] = { 90, 80, 40, UI_KINDS_S },
+    [UI_SIZE_S] = { 90, 40, 40, UI_KINDS_S }, /* M6c: under 150×80 the icon goes beside the value */
     [UI_SIZE_M] = { 130, 80, 80, UI_KINDS_M },
     [UI_SIZE_L] = { 200, 150, 150, UI_KINDS_L },
     [UI_SIZE_XL] = { 400, 120, 120, UI_KINDS_XL },
@@ -34,11 +34,8 @@ static const struct {
     uint8_t size, kind;
     uint8_t narrow_h, wide_h;
 } k_needs[] = {
-    { UI_SIZE_S, UI_FK_WEATHER_NOW, 86, 61 },
-    { UI_SIZE_S, UI_FK_WEATHER_DAY, 99, 51 },
-    { UI_SIZE_S, UI_FK_SUN, 80, 49 },
-    { UI_SIZE_S, UI_FK_LEVEL, 83, 40 },
-    { UI_SIZE_S, UI_FK_POLLEN, 86, 42 },
+    { UI_SIZE_S, UI_FK_SUN, 49, 49 }, /* M6c: S's other kinds fit its own 40 px, the sky beside the value */
+    { UI_SIZE_S, UI_FK_POLLEN, 42, 42 },
     { UI_SIZE_M, UI_FK_WEATHER_NOW, 98, 80 },
     { UI_SIZE_M, UI_FK_WEATHER_DAY, 94, 80 },
     { UI_SIZE_M, UI_FK_SUN, 94, 94 },

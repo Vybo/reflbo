@@ -18,7 +18,7 @@
 #define UI_SPLIT_NODES (2 * UI_SPLIT_CELLS - 1)
 #define UI_SPLIT_MIN_W 90     /* no part is smaller (spec §5.2) */
 #define UI_SPLIT_MIN_H 40
-#define UI_SPLIT_NARROW_W 150 /* a narrower cell stacks a field's symbol above its value */
+#define UI_SPLIT_NARROW_W 150 /* narrower: a kind's narrow height; S stacks from 80 px tall (D34) */
 #define UI_SPLIT_INSET 8      /* a separator stops this short of each end */
 
 typedef enum {

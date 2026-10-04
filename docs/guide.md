@@ -2,7 +2,7 @@
 
 reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display. Its 4.2″ reflective screen is always on and shows dashboards like a watch face: the time, your room's climate, the weather, the sun, a rain radar and the aircraft overhead.
 
-This guide covers what the firmware does today, version 0.1.0-dev (milestones M0 to M6b). [Coming next](#coming-next) lists what is designed or planned.
+This guide covers what the firmware does today, version 0.1.0-dev (milestones M0 to M6c). [Coming next](#coming-next) lists what is designed or planned.
 
 The images are the firmware's own output. The panel images are the host build's golden renders, which match the device pixel for pixel. The web pages ran against a demo device that draws its previews with the same renderer. On the device the screen is grey and reflective, lit by the room.
 
@@ -93,7 +93,7 @@ The top 20 pixels show the state of the device. On the left: "Set time" while th
 | Focus | A large slot and two medium ones |
 | Radar | The weather radar, full width |
 | Flights | The flight radar, with the nearest aircraft below |
-| Split | Your own arrangement of up to 8 cells ([Your own layout](#your-own-layout)) |
+| Split | Your own arrangement of up to 24 cells ([Your own layout](#your-own-layout)) |
 
 <p><img src="images/panel/home.png" width="400" alt="Classic: a large 20:48, Friday 25 September, and below 23.4 °C rising, 45 % humidity, full moon and the battery at 87 %"> <img src="images/panel/indoor.png" width="400" alt="Grid with the clock in the status bar: temperature 23.4 °C rising, humidity 45 %, dew point 10.8 °C, today's low 20.4 °C, today's high 24.1 °C, battery left 8.5 days"></p>
 <p><img src="images/panel/weather.png" width="400" alt="Weather: 14 °C, partly cloudy, feels like 12 °C; today 18° and 9° with 60 % rain; the next hours from 21:00 to 07:00; room temperature and humidity"> <img src="images/panel/focus.png" width="400" alt="Focus: a large clock over today's forecast and the next hours"></p>
@@ -147,11 +147,15 @@ Presets, the auto-cycle and the schedule are edited on the web page, with a live
 
 ## Your own layout
 
-The Split layout divides the screen under the status bar into rows or columns, at 1/4, 1/3, 1/2, 2/3 or 3/4. Each part can be split again, up to 8 cells of at least 90×40 pixels. Each split's line can be shown or hidden.
+The Split layout divides the screen under the status bar into rows or columns, at 1/4, 1/3, 1/2, 2/3 or 3/4. Each part can be split again, up to 24 cells of at least 40×20 pixels. Each split's line can be shown or hidden.
 
 The editor shows each cell's size and offers only the fields that fit it. A field draws at the largest size its cell allows: a large clock needs the full width, while a temperature fits anywhere.
 
 <p><img src="images/panel/split-weather.png" width="400" alt="A split layout: the weather now on the left, today and the next hours on the right, temperature and humidity below without a line between them"> <img src="images/panel/split-eight.png" width="400" alt="A split layout of eight cells: the clock, the date, temperature, humidity, the weather, the next hours, the moon and the battery"></p>
+
+Small cells draw a field the way the status bar does. A cell under 90 pixels wide or 40 tall shows it in one line, the icon then the value, or with the icon over the value in a narrow, taller cell; the date shows its weekday over its day. A short cell, under 80 pixels tall, puts the icon beside the value. Before anything is cut, a value gives way: a shorter form, a smaller face, then its unit or its icon. A stale value's age mark appears only where it has room; the status bar's warning stands for it in small cells.
+
+<p><img src="images/panel/split-compact.png" width="400" alt="A split layout of twelve cells: the clock, the date, the weather, temperature, humidity, today, the sun, air quality, pollen, UV, the battery and the moon, each icon beside its value"> <img src="images/panel/split-small.png" width="400" alt="A split layout of 24 small cells, each with its icon over its value"></p>
 
 ## Weather, air and the sun
 
@@ -284,7 +288,6 @@ tools/idf.sh exec python tools/devlog.py --cmd "field set env.temp -5.5" --cmd "
 
 ## Coming next
 
-- **Smaller split cells (M6c, designed).** Split presets with up to 24 cells as small as 40×20 pixels, which draw a value like the status bar does: one line, or the icon over the value in a narrow cell.
 - **Solar (M6d, designed).** A forecast of your PV system's output for the day, from Open-Meteo (no account), Forecast.Solar or Solcast, as a layout with a chart and as fields; the house's energy now from SolaX Cloud (solar output, grid import and export, consumption, a home battery if you have one) as a second layout and as fields; and a switch for each step of the sync, so services you don't use cost no requests.
 - **MQTT and Home Assistant (M7, designed).** The device's sensors and state in Home Assistant through MQTT discovery; its preset as a select; Sync now and Next preset as buttons; key presses as device triggers; a message from Home Assistant as a banner; and values from Home Assistant or other devices as fields on the dashboard.
 - **Audio (M8, planned).** Alarms that ring from sleep, with snooze; internet radio.

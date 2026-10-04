@@ -40,6 +40,8 @@ SINGLE = {
     "flights": "dash_flights",
     "split-weather": "dash_split_weather",
     "split-eight": "dash_split_eight",
+    "split-compact": "dash_split_compact",
+    "split-small": "dash_split_xs_grid",
     "menu": "screen_menu_root_en",
     "menu-time": "screen_menu_edit_zone_en",
     "config": "screen_config_ap_en",

@@ -9,7 +9,7 @@ Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-
 ## Features
 
 - **Dashboards.** Seven layouts and up to 16 presets. KEY switches them, an auto-cycle steps through them, and a schedule changes them by the time of day or turns the screen off for the night.
-- **Your own layouts.** Split the screen into up to 8 cells on the web page, with a live preview drawn by the device.
+- **Your own layouts.** Split the screen into up to 24 cells, as small as the status bar, on the web page, with a live preview drawn by the device.
 - **Indoor climate.** Temperature and humidity with their trends, the dew point, and the day's low and high.
 - **Weather and air.** From [Open-Meteo](https://open-meteo.com): now, today, the next hours and days, rain in the next 2 hours, air quality, PM2.5 and PM10, UV and pollen. Sunrise and sunset are computed on the device.
 - **Weather radar.** Rain from ČHMÚ, or RainViewer outside its area, on a built-in world map, with the last hour as a loop.
@@ -103,7 +103,7 @@ python3 tools/docs_images.py     # the panel images in docs/images from the gold
 | M5: time sync, weather, air quality, the sync schedule | Built |
 | M6: weather radar and flight radar | Built |
 | M6b: layouts of your own, BOOT double for Always on | Built |
-| M6c: smaller split cells, down to the status bar's size | Designed |
+| M6c: smaller split cells, down to the status bar's size | Built |
 | M6d: solar forecast and the house's energy (SolaX Cloud) | Designed |
 | M7: MQTT and Home Assistant | Designed, on hold until M6d |
 | M8: alarms and internet radio | Planned |

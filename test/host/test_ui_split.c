@@ -138,8 +138,8 @@ static void test_a_bad_node_is_refused(void)
     TEST_ASSERT_FALSE(lay(k_flag, sizeof(k_flag)));
 }
 
-/* XL 400 wide and at least 120 tall; L at least 200×150; M at least 130×80; S otherwise: wide from
- * 150 px with 40 px of height, narrower with 80 (spec §5.2). */
+/* XL 400 wide and at least 120 tall; L at least 200×150; M at least 130×80; S wide from 150 px with 40 px of
+ * height, narrower with 80; XS from 40×20 (spec §5.2, D34). */
 static void test_a_cells_size_follows_its_dimensions(void)
 {
     TEST_ASSERT_EQUAL_INT(UI_SIZE_XL, ui_split_cell_size(400, 120));
@@ -153,9 +153,32 @@ static void test_a_cells_size_follows_its_dimensions(void)
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_cell_size(150, 40));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_M, ui_split_cell_size(149, 80));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_cell_size(150, 79));
-    TEST_ASSERT_EQUAL_INT(-1, ui_split_cell_size(149, 79)); /* narrow S needs 80 */
-    TEST_ASSERT_EQUAL_INT(-1, ui_split_cell_size(90, 40));
-    TEST_ASSERT_EQUAL_INT(-1, ui_split_cell_size(150, 39));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(149, 79)); /* narrow S needs 80 */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(90, 40));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(150, 39));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_cell_size(40, 20));
+    TEST_ASSERT_EQUAL_INT(-1, ui_split_cell_size(39, 279));
+    TEST_ASSERT_EQUAL_INT(-1, ui_split_cell_size(400, 19));
+}
+
+/* XS (D34) takes every kind S takes, from 40×20 whatever the width; series and maps still need M. */
+static void test_xs_takes_the_small_kinds_from_40_by_20(void)
+{
+    TEST_ASSERT_EQUAL_INT(40, ui_split_min_w(UI_SIZE_XS));
+    TEST_ASSERT_EQUAL_INT(20, ui_split_min_h(UI_SIZE_XS, true));
+    TEST_ASSERT_EQUAL_INT(20, ui_split_min_h(UI_SIZE_XS, false));
+    static const ui_field_kind_t k_small[] = { UI_FK_TIME, UI_FK_DATE, UI_FK_NUMBER, UI_FK_BATTERY, UI_FK_MOON,
+                                               UI_FK_TEXT, UI_FK_WEATHER_NOW, UI_FK_WEATHER_DAY, UI_FK_SUN,
+                                               UI_FK_LEVEL, UI_FK_POLLEN };
+    for (size_t i = 0; i < sizeof(k_small) / sizeof(k_small[0]); i++) {
+        TEST_ASSERT_EQUAL_INT(20, ui_split_need(UI_SIZE_XS, k_small[i], true));
+        TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_field_size(k_small[i], 40, 20));
+        TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_field_size(k_small[i], 400, 39));
+    }
+    TEST_ASSERT_EQUAL_INT(-1, ui_split_need(UI_SIZE_XS, UI_FK_SERIES, true));
+    TEST_ASSERT_EQUAL_INT(-1, ui_split_field_size(UI_FK_SERIES, 89, 279));
+    TEST_ASSERT_EQUAL_INT(-1, ui_split_field_size(UI_FK_RAIN_MAP, 400, 79));
+    TEST_ASSERT_EQUAL_INT(-1, ui_split_field_size(UI_FK_NUMBER, 39, 20));
 }
 
 /* A field draws at the largest size its cell allows that takes its kind and has room for it. */
@@ -174,10 +197,10 @@ static void test_a_field_draws_at_the_largest_size_with_room_for_it(void)
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_POLLEN, 199, 104)); /* M pollen needs 105 */
     TEST_ASSERT_EQUAL_INT(UI_SIZE_M, ui_split_field_size(UI_FK_POLLEN, 199, 105));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_DAY, 199, 69)); /* wide S needs 51 */
-    TEST_ASSERT_EQUAL_INT(-1, ui_split_field_size(UI_FK_WEATHER_DAY, 129, 98));        /* narrow S needs 99 */
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_field_size(UI_FK_WEATHER_DAY, 129, 98)); /* narrow S needs 99 */
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_WEATHER_DAY, 129, 99));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_M, ui_split_field_size(UI_FK_WEATHER_DAY, 149, 94)); /* narrow M needs 94 */
-    TEST_ASSERT_EQUAL_INT(-1, ui_split_field_size(UI_FK_NUMBER, 99, 69));
+    TEST_ASSERT_EQUAL_INT(UI_SIZE_XS, ui_split_field_size(UI_FK_NUMBER, 99, 69));
     TEST_ASSERT_EQUAL_INT(UI_SIZE_S, ui_split_field_size(UI_FK_NUMBER, 99, 80));
 }
 
@@ -185,8 +208,8 @@ static void test_a_field_draws_at_the_largest_size_with_room_for_it(void)
 static void test_more_room_never_loses_a_field(void)
 {
     for (int k = 0; k < UI_FK_COUNT; k++) {
-        for (int w = 90; w <= 400; w += 1) {
-            for (int h = 40; h <= 279; h += 7) {
+        for (int w = 40; w <= 400; w += 1) {
+            for (int h = 20; h <= 279; h += 7) {
                 if (ui_split_field_size((ui_field_kind_t)k, w, h) >= 0) {
                     TEST_ASSERT_TRUE(ui_split_field_size((ui_field_kind_t)k, w + 1 > 400 ? 400 : w + 1, h) >=
                                      ui_split_field_size((ui_field_kind_t)k, w, h));
@@ -252,6 +275,7 @@ int main(void)
     RUN_TEST(test_a_part_under_90_by_40_is_refused);
     RUN_TEST(test_a_bad_node_is_refused);
     RUN_TEST(test_a_cells_size_follows_its_dimensions);
+    RUN_TEST(test_xs_takes_the_small_kinds_from_40_by_20);
     RUN_TEST(test_a_field_draws_at_the_largest_size_with_room_for_it);
     RUN_TEST(test_more_room_never_loses_a_field);
     RUN_TEST(test_ratios_have_names);

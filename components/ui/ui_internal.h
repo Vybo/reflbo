@@ -24,9 +24,15 @@ bool ui_radar_widget(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_
 bool ui_resolve_forecast(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);
 /* Their widgets; false for a kind they don't draw. */
 bool ui_forecast_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v);
-/* A sky's icon at 24 or 48 px, its night variant where it has one. */
+/* A sky's icon at 16, 24 or 48 px, its night variant where it has one. */
 const gfx_bitmap_t *ui_sky_icon(int sky, bool night, int size);
 
+/* XS draws the symbol over the value in a cell narrower than 120 px and at least 44 tall, else one line
+ * (ui_widget.c, D34). */
+bool ui_tiny_stacked(gfx_rect_t r);
+/* How far `text`'s ink reaches above and below the baseline in `f` (ui_widget.c). */
+int ui_ink_above(const gfx_font_t *f, const char *text);
+int ui_ink_below(const gfx_font_t *f, const char *text);
 void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, ui_stale_policy_t policy,
                     const lang_t *lang);
 void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, bool any_stale);

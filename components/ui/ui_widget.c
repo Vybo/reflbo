@@ -20,6 +20,7 @@ typedef struct {
 } ui_fonts_t;
 
 static const ui_fonts_t k_fonts[] = {
+    [UI_SIZE_XS] = { NULL, &gfx_font_sans_bold_16, &gfx_font_sans_bold_16, &gfx_font_sans_12, 16 },
     [UI_SIZE_S] = { NULL, &gfx_font_sans_bold_28, &gfx_font_sans_bold_16, &gfx_font_sans_16, 24 },
     [UI_SIZE_M] = { &gfx_font_sans_12, &gfx_font_num_cb_48, &gfx_font_sans_bold_20, &gfx_font_sans_16, 48 },
     [UI_SIZE_L] = { &gfx_font_sans_16, &gfx_font_num_cb_72, &gfx_font_sans_bold_28, &gfx_font_sans_bold_20, 48 },
@@ -43,50 +44,50 @@ static int digit_height(const gfx_font_t *f)
 
 static const gfx_bitmap_t *field_icon(ui_field_id_t field, int size)
 {
-    const gfx_bitmap_t *s24 = NULL, *s48 = NULL;
+    const gfx_bitmap_t *s16 = NULL, *s24 = NULL, *s48 = NULL;
     switch (field) {
     case UI_FIELD_ENV_TEMP:
     case UI_FIELD_ENV_TEMP_MIN:
     case UI_FIELD_ENV_TEMP_MAX:
-        s24 = &gfx_icon_thermometer_24, s48 = &gfx_icon_thermometer_48;
+        s16 = &gfx_icon_thermometer_16, s24 = &gfx_icon_thermometer_24, s48 = &gfx_icon_thermometer_48;
         break;
     case UI_FIELD_ENV_HUM:
-        s24 = &gfx_icon_drop_24, s48 = &gfx_icon_drop_48;
+        s16 = &gfx_icon_drop_16, s24 = &gfx_icon_drop_24, s48 = &gfx_icon_drop_48;
         break;
     case UI_FIELD_ENV_DEW:
-        s24 = &gfx_icon_dew_24, s48 = &gfx_icon_dew_48;
+        s16 = &gfx_icon_dew_16, s24 = &gfx_icon_dew_24, s48 = &gfx_icon_dew_48;
         break;
     case UI_FIELD_TIME_CLOCK:
-        s24 = &gfx_icon_clock_24, s48 = &gfx_icon_clock_48;
+        s16 = &gfx_icon_clock_16, s24 = &gfx_icon_clock_24, s48 = &gfx_icon_clock_48;
         break;
     case UI_FIELD_DATE_DAY:
     case UI_FIELD_DATE_WEEK:
-        s24 = &gfx_icon_calendar_24, s48 = &gfx_icon_calendar_48;
+        s16 = &gfx_icon_calendar_16, s24 = &gfx_icon_calendar_24, s48 = &gfx_icon_calendar_48;
         break;
     case UI_FIELD_DATE_NAMEDAY:
-        s24 = &gfx_icon_person_24, s48 = &gfx_icon_person_48;
+        s16 = &gfx_icon_person_16, s24 = &gfx_icon_person_24, s48 = &gfx_icon_person_48;
         break;
     case UI_FIELD_DATE_HOLIDAY:
-        s24 = &gfx_icon_celebration_24, s48 = &gfx_icon_celebration_48;
+        s16 = &gfx_icon_celebration_16, s24 = &gfx_icon_celebration_24, s48 = &gfx_icon_celebration_48;
         break;
     case UI_FIELD_WX_NOW:
     case UI_FIELD_WX_TODAY:
     case UI_FIELD_WX_HOURLY:
-    case UI_FIELD_WX_DAILY:
-        s24 = &gfx_icon_cloud_24, s48 = &gfx_icon_cloud_48; /* missing: drawn as the placeholder */
+    case UI_FIELD_WX_DAILY: /* missing: drawn as the placeholder */
+        s16 = &gfx_icon_cloud_16, s24 = &gfx_icon_cloud_24, s48 = &gfx_icon_cloud_48;
         break;
     case UI_FIELD_SUN_TIMES:
-        s24 = &gfx_icon_sunrise_24, s48 = &gfx_icon_sunrise_48;
+        s16 = &gfx_icon_sunrise_16, s24 = &gfx_icon_sunrise_24, s48 = &gfx_icon_sunrise_48;
         break;
     case UI_FIELD_AQ_INDEX:
-        s24 = &gfx_icon_air_24, s48 = &gfx_icon_air_48;
+        s16 = &gfx_icon_air_16, s24 = &gfx_icon_air_24, s48 = &gfx_icon_air_48;
         break;
     case UI_FIELD_AQ_PM25:
     case UI_FIELD_AQ_PM10:
-        s24 = &gfx_icon_particles_24, s48 = &gfx_icon_particles_48;
+        s16 = &gfx_icon_particles_16, s24 = &gfx_icon_particles_24, s48 = &gfx_icon_particles_48;
         break;
     case UI_FIELD_AQ_UV:
-        s24 = &gfx_icon_uv_24, s48 = &gfx_icon_uv_48;
+        s16 = &gfx_icon_uv_16, s24 = &gfx_icon_uv_24, s48 = &gfx_icon_uv_48;
         break;
     case UI_FIELD_POLLEN_TOP:
     case UI_FIELD_POLLEN_ALDER:
@@ -95,12 +96,12 @@ static const gfx_bitmap_t *field_icon(ui_field_id_t field, int size)
     case UI_FIELD_POLLEN_MUGWORT:
     case UI_FIELD_POLLEN_OLIVE:
     case UI_FIELD_POLLEN_RAGWEED:
-        s24 = &gfx_icon_pollen_24, s48 = &gfx_icon_pollen_48;
+        s16 = &gfx_icon_pollen_16, s24 = &gfx_icon_pollen_24, s48 = &gfx_icon_pollen_48;
         break;
     default:
         break;
     }
-    return size >= 48 ? s48 : s24;
+    return size >= 48 ? s48 : size >= 24 ? s24 : s16;
 }
 
 /* How far `text`'s ink reaches below the baseline in `f`: a comma's tail, the "g" of "µg/m³". */
@@ -114,6 +115,29 @@ static int ink_below(const gfx_font_t *f, const char *text)
         }
     }
     return below;
+}
+
+/* How far `text`'s ink reaches above the baseline in `f`: a capital's caron ("Čt") rises above the digits. */
+static int ink_above(const gfx_font_t *f, const char *text)
+{
+    int above = 0;
+    for (const char *s = text; *s != '\0';) {
+        const gfx_glyph_t *g = gfx_font_glyph(f, gfx_utf8_next(&s));
+        if (g != NULL && -g->y_offset > above) {
+            above = -g->y_offset;
+        }
+    }
+    return above;
+}
+
+int ui_ink_above(const gfx_font_t *f, const char *text)
+{
+    return ink_above(f, text);
+}
+
+int ui_ink_below(const gfx_font_t *f, const char *text)
+{
+    return ink_below(f, text);
 }
 
 /* The number's digits centred in max_h, with room below for its tail and its unit's, and 2 px to
@@ -347,6 +371,297 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     draw_group(fb, f, vf, &shown, value, x, r.y + (r.h + digit_height(vf)) / 2);
 }
 
+/* ---- XS (M6c, D34): the status bar's look ---- */
+
+/* The faces an XS value tries, largest first; a number's unit goes smaller beside it. */
+static const gfx_font_t *const k_fit_xs[] = { &gfx_font_sans_bold_28, &gfx_font_sans_bold_20, &gfx_font_sans_bold_16,
+                                              &gfx_font_sans_12 };
+
+static const gfx_font_t *xs_unit_font(const gfx_font_t *vf)
+{
+    return vf == &gfx_font_sans_bold_28 ? &gfx_font_sans_16 : &gfx_font_sans_12;
+}
+
+bool ui_tiny_stacked(gfx_rect_t r)
+{
+    return r.w < 120 && r.h >= 44;
+}
+
+/* A number's group in the largest of `count` faces from k_fit_xs that fits max_w and, its digits and tails,
+ * max_h (fits_height()), with the unit and the trend arrow, then without the arrow, then (with `below`, where
+ * `unit_h` more fits) with the unit under it, then without the unit; each with the value as it is or in its short
+ * form. Else sans 12 alone, cut. It changes *shown's unit and trend in place, as the fit drew them; *below says
+ * the unit goes under the value. */
+static const gfx_font_t *fit_tiny(ui_value_t *shown, const char **value, int max_w, int max_h, size_t count,
+                                  ui_fonts_t *uf, bool *below, int unit_h, char *buf, size_t size)
+{
+    char unit[sizeof(shown->unit)];
+    memcpy(unit, shown->unit, sizeof(unit));
+    int trend = shown->trend;
+    const char *full = *value;
+    if (below != NULL) {
+        *below = false;
+    }
+    for (int pass = 0; pass < 4; pass++) {
+        if (pass == 2 && (below == NULL || !unit[0] || gfx_text_width(&gfx_font_sans_12, unit) > max_w)) {
+            continue;
+        }
+        shown->trend = pass >= 1 ? 0 : trend;
+        memcpy(shown->unit, unit, sizeof(unit));
+        if (pass >= 2) {
+            shown->unit[0] = '\0';
+        }
+        for (size_t i = 0; i < count; i++) {
+            const gfx_font_t *f = k_fit_xs[i];
+            uf->unit = xs_unit_font(f);
+            const char *forms[2] = { full, shown->short_text };
+            for (int k = 0; k < 2; k++) {
+                if (forms[k][0] && group_width(uf, f, shown, forms[k]) <= max_w &&
+                    fits_height(uf, f, shown, forms[k], max_h - (pass == 2 ? unit_h : 0))) {
+                    *value = forms[k];
+                    if (below != NULL) {
+                        *below = pass == 2;
+                    }
+                    return f;
+                }
+            }
+        }
+    }
+    shown->trend = 0;
+    shown->unit[0] = '\0';
+    uf->unit = xs_unit_font(&gfx_font_sans_12);
+    gfx_text_ellipsize(&gfx_font_sans_12, shown->short_text[0] ? shown->short_text : full, max_w, buf, size);
+    *value = buf;
+    return &gfx_font_sans_12;
+}
+
+/* Words: the largest of bold 20, bold 16 and sans 12 that fits max_w, its ink 2 px clear of either edge of max_h;
+ * NULL when none does. */
+static const gfx_font_t *tiny_text_face(const char *text, int max_w, int max_h)
+{
+    static const gfx_font_t *const k_faces[] = { &gfx_font_sans_bold_20, &gfx_font_sans_bold_16, &gfx_font_sans_12 };
+    for (size_t i = 0; i < sizeof(k_faces) / sizeof(k_faces[0]); i++) {
+        const gfx_font_t *f = k_faces[i];
+        if (gfx_text_width(f, text) <= max_w && ink_above(f, text) + ink_below(f, text) + 4 <= max_h) {
+            return f;
+        }
+    }
+    return NULL;
+}
+
+/* Words as tiny_text_face() fits them, or sans 12 cut to max_w. */
+static const gfx_font_t *fit_tiny_text(const char *text, int max_w, int max_h, char *buf, size_t size)
+{
+    const gfx_font_t *f = tiny_text_face(text, max_w, max_h);
+    if (f != NULL) {
+        snprintf(buf, size, "%s", text);
+        return f;
+    }
+    gfx_text_ellipsize(&gfx_font_sans_12, text, max_w, buf, size);
+    return &gfx_font_sans_12;
+}
+
+/* What S marks beside a symbol, XS too: today's low (↓) or high (↑); a charging battery's bolt. */
+static const char *tiny_mark(const ui_value_t *v)
+{
+    return v->field == UI_FIELD_ENV_TEMP_MIN ? ARROW_DOWN : v->field == UI_FIELD_ENV_TEMP_MAX ? ARROW_UP : NULL;
+}
+
+static bool tiny_bolt(const ui_value_t *v)
+{
+    return v->kind == UI_FK_BATTERY && v->state != UI_VALUE_MISSING && v->battery == DS_BAT_CHARGING;
+}
+
+/* The symbol's size at `sym` px, its marks included: the battery's outline and bolt, the Moon, or the field's icon
+ * and its arrow; 0 × 0 for a time and for a field without one. */
+static void tiny_symbol_size(const ui_value_t *v, int sym, int *w, int *h)
+{
+    *w = *h = 0;
+    if (v->kind == UI_FK_BATTERY) {
+        *w = sym + 6 + (tiny_bolt(v) ? 2 + 16 : 0), *h = sym / 2 + 2;
+        *h = tiny_bolt(v) && *h < 16 ? 16 : *h;
+    } else if (v->kind == UI_FK_MOON) {
+        *w = *h = sym;
+    } else if (v->kind != UI_FK_TIME) {
+        const gfx_bitmap_t *icon = field_icon(v->field, sym);
+        if (icon != NULL) {
+            const char *mark = tiny_mark(v);
+            *w = icon->width + (mark != NULL ? 1 + gfx_text_width(&gfx_font_sans_12, mark) : 0), *h = icon->height;
+        }
+    }
+}
+
+/* The symbol with its top left at (x, y), `h` px tall as tiny_symbol_size() gave it. */
+static void draw_tiny_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int sym, int h)
+{
+    int cy = y + h / 2;
+    if (v->kind == UI_FK_BATTERY) {
+        int bh = sym / 2 + 2;
+        ui_draw_battery(fb, x, cy - bh / 2, sym + 6, bh, v->state == UI_VALUE_MISSING ? -1 : v->percent);
+        if (tiny_bolt(v)) {
+            gfx_bitmap(fb, x + sym + 6 + 2, cy - 8, &gfx_icon_bolt_16, GFX_BLACK);
+        }
+    } else if (v->kind == UI_FK_MOON) {
+        if (v->state == UI_VALUE_MISSING) {
+            gfx_circle(fb, x + sym / 2, cy, sym / 2 - 1, GFX_BLACK);
+        } else {
+            ui_draw_moon(fb, x + sym / 2, cy, sym / 2 - 1, v->moon.age);
+        }
+    } else if (v->kind != UI_FK_TIME) {
+        const gfx_bitmap_t *icon = field_icon(v->field, sym);
+        if (icon != NULL) {
+            gfx_bitmap(fb, x, cy - icon->height / 2, icon, GFX_BLACK);
+            const char *mark = tiny_mark(v);
+            if (mark != NULL) {
+                gfx_text(fb, &gfx_font_sans_12, x + icon->width + 1, cy + icon->height / 2, mark, GFX_BLACK);
+            }
+        }
+    }
+}
+
+/* One line, like the status bar: the 16 px symbol (24 px from 34 px of height), then the value. A number that would
+ * only fit cut beside its symbol stands alone, centred, as a time does; words keep 4 px at the right for an
+ * accent's overhang. The date is "Fri 25 Sep", or "Fri 25" where that doesn't fit; the Moon keeps its disc, with
+ * its name, its short name or its illumination, whichever fits. */
+static void draw_tiny_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
+{
+    int sym = r.h >= 34 ? 24 : 16;
+    int sym_w, sym_h;
+    tiny_symbol_size(v, sym, &sym_w, &sym_h);
+    int cy = r.y + r.h / 2, top = cy - sym_h / 2;
+    char fit[48];
+    if (numeric(v)) {
+        for (int with = sym_w > 0; with >= 0; with--) {
+            bool centre = v->kind == UI_FK_TIME || (sym_w > 0 && !with); /* alone, or its symbol given up */
+            int x = r.x + 3 + (with ? sym_w + 3 : 0), max_w = centre ? r.w - 4 : r.x + r.w - 2 - x;
+            ui_value_t shown = *v;
+            ui_fonts_t uf = k_fonts[UI_SIZE_XS];
+            const char *value = v->text;
+            const gfx_font_t *vf = fit_tiny(&shown, &value, max_w, r.h, 4, &uf, NULL, 0, fit, sizeof(fit));
+            if (value == fit && with) {
+                continue; /* cut beside the symbol: the value alone */
+            }
+            if (with) {
+                draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h);
+            }
+            int w = group_width(&uf, vf, &shown, value);
+            draw_group(fb, &uf, vf, &shown, value, centre ? r.x + (r.w - w) / 2 : x, cy + digit_height(vf) / 2);
+            return;
+        }
+    }
+    if (v->kind == UI_FK_MOON && v->state != UI_VALUE_MISSING) {
+        draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h);
+        int x = r.x + 3 + sym_w + 4, max_w = r.x + r.w - 4 - x;
+        const char *forms[3] = { v->text, v->short_text, v->extra };
+        for (int k = r.w >= 120 ? 0 : 1; k < 3; k++) {
+            const gfx_font_t *tf = tiny_text_face(forms[k], max_w, r.h);
+            if (tf != NULL) {
+                gfx_text(fb, tf, x, r.y + (r.h + ink_above(tf, forms[k]) - ink_below(tf, forms[k])) / 2, forms[k],
+                         GFX_BLACK);
+                return;
+            }
+        }
+        return; /* the disc alone */
+    }
+    const char *text = v->state == UI_VALUE_MISSING ? PLACEHOLDER : v->kind == UI_FK_DATE ? v->extra : v->text;
+    for (int with = sym_w > 0; with >= 0; with--) {
+        int x = r.x + 3 + (with ? sym_w + 3 : 0), max_w = r.x + r.w - 4 - x;
+        const char *t = text;
+        if (v->kind == UI_FK_DATE && v->state != UI_VALUE_MISSING && gfx_text_width(&gfx_font_sans_12, t) > max_w) {
+            t = v->short_text;
+        }
+        if (with && gfx_text_width(&gfx_font_sans_12, t) > max_w) {
+            continue;
+        }
+        const gfx_font_t *tf = fit_tiny_text(t, max_w, r.h, fit, sizeof(fit));
+        if (with) {
+            draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h);
+        }
+        gfx_text(fb, tf, x, r.y + (r.h + ink_above(tf, fit) - ink_below(tf, fit)) / 2, fit, GFX_BLACK);
+        return;
+    }
+}
+
+/* The symbol over the value, both centred: a 16 px symbol (24 px from 60 px of height) with its marks; the date
+ * as its weekday over its day; a time alone. A number's group fits 2 px inside either edge, words 4 px. */
+static void draw_tiny_stacked(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
+{
+    int sym = r.h >= 60 ? 24 : 16;
+    int cx = r.x + r.w / 2;
+    char fit[48];
+    if (v->kind == UI_FK_DATE && v->state != UI_VALUE_MISSING) { /* "Fri" over "25", "Pá" over "25." */
+        char wd[16];
+        snprintf(wd, sizeof(wd), "%s", v->short_text);
+        char *space = strrchr(wd, ' ');
+        const char *day = space != NULL ? space + 1 : wd;
+        if (space != NULL) {
+            *space = '\0';
+        }
+        const char *weekday = space != NULL ? wd : "";
+        const gfx_font_t *wf = &gfx_font_sans_12;
+        int above = ink_above(wf, weekday);
+        const gfx_font_t *df = &gfx_font_sans_12;
+        for (size_t i = 0; i < sizeof(k_fit_xs) / sizeof(k_fit_xs[0]); i++) {
+            if (above + 4 + digit_height(k_fit_xs[i]) + 4 <= r.h && gfx_text_width(k_fit_xs[i], day) <= r.w - 4) {
+                df = k_fit_xs[i];
+                break;
+            }
+        }
+        int block = above + 4 + digit_height(df);
+        int top = r.y + (r.h - block) / 2;
+        gfx_text(fb, wf, cx - gfx_text_width(wf, weekday) / 2, top + above, weekday, GFX_BLACK);
+        gfx_text(fb, df, cx - gfx_text_width(df, day) / 2, top + block, day, GFX_BLACK);
+        return;
+    }
+    int sym_w, sym_h;
+    tiny_symbol_size(v, sym, &sym_w, &sym_h);
+    int gap = sym_h ? 4 : 0;
+    int room = r.h - 4 - sym_h - gap;
+    const gfx_font_t *vf;
+    const char *value;
+    ui_value_t shown = *v;
+    ui_fonts_t uf = k_fonts[UI_SIZE_XS];
+    bool below = false;
+    int unit_h = 4 + ink_above(&gfx_font_sans_12, v->unit) + ink_below(&gfx_font_sans_12, v->unit);
+    int value_h; /* the value's ink: from its top to its lowest tail */
+    if (numeric(v)) {
+        value = v->text;
+        vf = fit_tiny(&shown, &value, r.w - 4, room + 4, 3, &uf, &below, unit_h, fit, sizeof(fit));
+        int tail = ink_below(vf, value);
+        int unit_tail = shown.unit[0] ? ink_below(uf.unit, shown.unit) : 0;
+        value_h = digit_height(vf) + (tail > unit_tail ? tail : unit_tail);
+    } else {
+        const char *text = v->state == UI_VALUE_MISSING ? PLACEHOLDER : v->kind == UI_FK_MOON ? v->short_text : v->text;
+        vf = fit_tiny_text(text, r.w - 8, room + 4, fit, sizeof(fit));
+        value = fit;
+        value_h = ink_above(vf, value) + ink_below(vf, value);
+    }
+    int block = sym_h + gap + value_h + (below ? unit_h : 0);
+    int top = r.y + (r.h - block) / 2;
+    draw_tiny_symbol(fb, v, cx - sym_w / 2, top, sym, sym_h);
+    int y = top + sym_h + gap;
+    if (numeric(v)) {
+        int baseline = y + digit_height(vf);
+        draw_group(fb, &uf, vf, &shown, value, cx - group_width(&uf, vf, &shown, value) / 2, baseline);
+        if (below) {
+            int base = top + block - ink_below(&gfx_font_sans_12, v->unit);
+            gfx_text(fb, &gfx_font_sans_12, cx - gfx_text_width(&gfx_font_sans_12, v->unit) / 2, base, v->unit,
+                     GFX_BLACK);
+        }
+        return;
+    }
+    gfx_text(fb, vf, cx - gfx_text_width(vf, value) / 2, y + ink_above(vf, value), value, GFX_BLACK);
+}
+
+static void draw_tiny(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
+{
+    if (ui_tiny_stacked(r)) {
+        draw_tiny_stacked(fb, r, v);
+    } else {
+        draw_tiny_line(fb, r, v);
+    }
+}
+
 static void draw_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v)
 {
     const ui_fonts_t *f = &k_fonts[size];
@@ -447,12 +762,14 @@ void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t
         /* the weather, air quality, pollen and sun widgets (ui_forecast.c) */
     } else if (ui_radar_widget(fb, r, size, &shown)) {
         /* rain.map (ui_radar.c) */
+    } else if (size == UI_SIZE_XS) {
+        draw_tiny(fb, r, &shown);
     } else if (size == UI_SIZE_S) {
         draw_small(fb, r, &shown);
     } else {
         draw_labelled(fb, r, size, &shown);
     }
-    if (shown.state == UI_VALUE_STALE) {
+    if (shown.state == UI_VALUE_STALE && size != UI_SIZE_XS) { /* XS has no room; the status bar marks it */
         draw_age(fb, r, &shown, lang);
     }
     fb->clip = saved;

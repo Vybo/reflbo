@@ -32,6 +32,8 @@ static void test_dates_in_three_styles(void)
     TEST_ASSERT_EQUAL_STRING("Fri 25 Sep", out);
     lang_format_date(en, &tm, LANG_DATE_SHORT, out, sizeof(out));
     TEST_ASSERT_EQUAL_STRING("25 Sep", out);
+    lang_format_date(en, &tm, LANG_DATE_DAY, out, sizeof(out)); /* M6c: XS's weekday over its day */
+    TEST_ASSERT_EQUAL_STRING("Fri 25", out);
 }
 
 static void test_an_impossible_date_formats_as_empty(void)
@@ -106,6 +108,8 @@ static void test_czech_dates_numbers_and_names(void)
     TEST_ASSERT_EQUAL_STRING("Pá 25. 9.", out);
     lang_format_date(cs, &tm, LANG_DATE_SHORT, out, sizeof(out));
     TEST_ASSERT_EQUAL_STRING("25. 9.", out);
+    lang_format_date(cs, &tm, LANG_DATE_DAY, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("Pá 25.", out);
     tm = date(2026, 3, 2, 1);
     lang_format_date(cs, &tm, LANG_DATE_LONG, out, sizeof(out));
     TEST_ASSERT_EQUAL_STRING("Pondělí 2. března", out);

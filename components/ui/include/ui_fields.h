@@ -150,6 +150,7 @@ typedef struct {
     int sky;           /* weather_sky_t of a weather value */
     bool night;        /* its icon's night variant */
     int polar;         /* sun.times: 0, or 1 on a polar day and 2 on a polar night */
+    bool set_next;     /* sun.times: the next event is the sunset; else a sunrise. `short_text` has its time */
     int bands;         /* UI_FK_LEVEL: how many bands its scale has; `percent` is the one it is in */
     int series_count;
     ui_series_point_t series[UI_SERIES_MAX];

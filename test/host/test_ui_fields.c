@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L /* setenv() in fixture_zone() */
 
+#include <stdio.h>
 #include <string.h>
 
 #include "context_fixtures.h"
@@ -247,6 +248,31 @@ static void test_the_sun_rises_and_sets_over_brno(void)
     TEST_ASSERT_EQUAL_STRING("12 h 1 min, -4 min", v.detail); /* D26: Open-Meteo has 3.6 min less than the 24th */
 }
 
+/* The sun's next event, for a cell with room for one time (owner, 2026-10-05): the sunrise before it, the sunset in
+ * the day, tomorrow's sunrise after the sunset. */
+static void test_the_sun_names_its_next_event(void)
+{
+    s_ctx.local_day = FIX_DAY + 1; /* tomorrow's sunrise, to compare with */
+    s_ctx.now = FIX_NOW + 86400;
+    char tomorrow[16];
+    snprintf(tomorrow, sizeof(tomorrow), "%s", resolve(UI_FIELD_SUN_TIMES).text);
+    s_ctx = fixture_context(); /* 20:48, after the sunset */
+    ui_value_t v = resolve(UI_FIELD_SUN_TIMES);
+    TEST_ASSERT_FALSE(v.set_next);
+    TEST_ASSERT_EQUAL_STRING(tomorrow, v.short_text);
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(v.text, tomorrow)); /* not today's */
+    s_ctx.now = FIX_NOW - 8 * 3600 - 48 * 60; /* 12:00 */
+    s_ctx.local = fixture_local(12, 0, 0);
+    v = resolve(UI_FIELD_SUN_TIMES);
+    TEST_ASSERT_TRUE(v.set_next);
+    TEST_ASSERT_EQUAL_STRING("18:45", v.short_text);
+    s_ctx.now = FIX_NOW - 15 * 3600 - 48 * 60; /* 05:00 */
+    s_ctx.local = fixture_local(5, 0, 0);
+    v = resolve(UI_FIELD_SUN_TIMES);
+    TEST_ASSERT_FALSE(v.set_next);
+    TEST_ASSERT_EQUAL_STRING("06:44", v.short_text);
+}
+
 static void test_air_quality_and_pollen_name_their_band_and_level(void)
 {
     fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
@@ -328,6 +354,7 @@ int main(void)
     RUN_TEST(test_the_rain_map_shows_a_frame_with_its_time);
     RUN_TEST(test_a_forecast_older_than_its_ttl_is_stale);
     RUN_TEST(test_the_sun_rises_and_sets_over_brno);
+    RUN_TEST(test_the_sun_names_its_next_event);
     RUN_TEST(test_air_quality_and_pollen_name_their_band_and_level);
     RUN_TEST(test_the_uv_index_reads_rounded_in_the_who_bands);
     RUN_TEST(test_old_readings_are_stale_with_their_age);

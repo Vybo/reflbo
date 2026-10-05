@@ -96,6 +96,14 @@ static void resolve_sun(const ui_context_t *ctx, ui_value_t *out)
     }
     ui_clock_text(ctx, (time_t)sun.sunrise, out->text, sizeof(out->text));
     ui_clock_text(ctx, (time_t)sun.sunset, out->extra, sizeof(out->extra));
+    /* the next event, for a cell with room for one time (owner, 2026-10-05): after the sunset, tomorrow's sunrise */
+    int64_t next = ctx->now < sun.sunrise ? sun.sunrise : ctx->now < sun.sunset ? sun.sunset : 0;
+    out->set_next = next == sun.sunset;
+    if (next == 0) {
+        astro_sun_t tomorrow = sun_on(ctx, ctx->local_day + 1);
+        next = tomorrow.kind == ASTRO_NORMAL ? tomorrow.sunrise : sun.sunrise;
+    }
+    ui_clock_text(ctx, (time_t)next, out->short_text, sizeof(out->short_text));
     int minutes = (sun.day_length_s + 30) / 60;
     const char *h = lang_str(ctx->lang, LS_HOURS_UNIT), *min = lang_str(ctx->lang, LS_MINUTES_UNIT);
     astro_sun_t before = sun_on(ctx, ctx->local_day - 1); /* D26: the change since yesterday */
@@ -666,8 +674,8 @@ static void tiny_sun_stack(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
 }
 
 /* The sun in one line: its rise and its set, each beside its icon, in the largest face that takes both, a 12-hour
- * time's suffix kept before smaller faces are tried without it; where none takes both, the rise alone, as tiny_row()
- * fits it (M6c review). */
+ * time's suffix kept before smaller faces are tried without it (M6c review); where none takes both, the next event
+ * alone, as tiny_row() fits it. */
 static void tiny_sun_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, bool big)
 {
     const gfx_bitmap_t *icons[2] = { big ? &gfx_icon_sunrise_24 : &gfx_icon_sunrise_16,
@@ -696,8 +704,10 @@ static void tiny_sun_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, bool 
             return;
         }
     }
-    bool whole = tiny_line_fits(r, icons[0], v->text);
-    tiny_row(fb, r, icons[0], whole ? v->text : brief[0], NULL, NULL, NULL, true);
+    const gfx_bitmap_t *icon = icons[v->set_next ? 1 : 0]; /* one time: the next event (owner, 2026-10-05) */
+    char next[16];
+    time_short(v->short_text, next, sizeof(next));
+    tiny_row(fb, r, icon, tiny_line_fits(r, icon, v->short_text) ? v->short_text : next, NULL, NULL, NULL, true);
 }
 
 /* ---- S in a short cell (M6c, D34): the sky beside the value ---- */

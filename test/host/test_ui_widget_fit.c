@@ -710,6 +710,45 @@ static void test_xs_sun_shows_its_set_where_both_times_fit(void)
     TEST_ASSERT_TRUE(checked > 1000);
 }
 
+/* Where a one-line XS sun cell has room for one time, it shows the next event beside its icon: the sunrise before it,
+ * the sunset in the day, tomorrow's sunrise after the sunset (owner, 2026-10-05). */
+static void test_xs_sun_shows_its_next_event_where_one_time_fits(void)
+{
+    static const struct {
+        int hour;
+        bool set;
+    } k_times[] = { { 5, false }, { 12, true }, { 20, false } };
+    int checked = 0;
+    for (size_t t = 0; t < sizeof(k_times) / sizeof(k_times[0]); t++) {
+        ui_context_t ctx = split_context(0);
+        ctx.now = FIX_NOW + (k_times[t].hour - 20) * 3600; /* 20:48 local, moved by whole hours */
+        ctx.local = fixture_local(k_times[t].hour, 48, 0);
+        for (int w = 40; w <= 400; w += 3) {
+            for (int h = 20; h <= 43; h++) {
+                if (ui_split_field_size(UI_FK_SUN, w, h) != UI_SIZE_XS) {
+                    continue;
+                }
+                int icon = h >= 34 ? 24 : 16, time_w = gfx_text_width(&gfx_font_sans_12, "18:45");
+                if (3 + icon + 3 + time_w + 5 + icon + 3 + time_w + 2 <= w || 3 + icon + 3 + time_w + 2 > w) {
+                    continue; /* both times fit, or not even one beside its icon */
+                }
+                gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), (int16_t)w, (int16_t)h };
+                gfx_fb_init(&s_fb, s_buf, 400, 300);
+                gfx_clear(&s_fb, GFX_WHITE);
+                ui_draw_cell(&s_fb, r, &ctx, UI_FIELD_SUN_TIMES, UI_STALE_STALE);
+                char msg[64];
+                snprintf(msg, sizeof(msg), "sun.times at %d×%d, %02d:48", w, h, k_times[t].hour);
+                const gfx_bitmap_t *rise = icon == 24 ? &gfx_icon_sunrise_24 : &gfx_icon_sunrise_16;
+                const gfx_bitmap_t *set = icon == 24 ? &gfx_icon_sunset_24 : &gfx_icon_sunset_16;
+                TEST_ASSERT_TRUE_MESSAGE(icon_in(r, r, k_times[t].set ? set : rise), msg);
+                TEST_ASSERT_FALSE_MESSAGE(icon_in(r, r, k_times[t].set ? rise : set), msg);
+                checked++;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(checked > 100);
+}
+
 /* The age mark goes only where nothing is drawn under it: in every cell a tree makes, a stale value's mark, where it
  * is drawn, has nothing else within 1 px of its icon's ink or its age's (M6c review: narrow S cells 81-104 px tall,
  * and some M cells, had it on the value). The mark alone, drawn as draw_age() places it, tells its pixels from the
@@ -833,6 +872,7 @@ int main(void)
     RUN_TEST(test_every_field_fits_every_cell_a_split_can_make);
     RUN_TEST(test_a_field_without_room_draws_nothing);
     RUN_TEST(test_xs_sun_shows_its_set_where_both_times_fit);
+    RUN_TEST(test_xs_sun_shows_its_next_event_where_one_time_fits);
     RUN_TEST(test_the_age_mark_never_lands_on_the_value);
     RUN_TEST(test_xs_moon_gives_its_illumination_before_a_cut);
     RUN_TEST(test_every_small_field_fits_every_xs_cell);

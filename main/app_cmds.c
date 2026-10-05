@@ -405,7 +405,8 @@ static void print_wh(const char *label, uint32_t wh)
     if (wh == SOLAR_WH_NONE) {
         printf(" %s -", label);
     } else {
-        printf(" %s %lu.%lu kWh", label, (unsigned long)(wh / 1000), (unsigned long)(wh % 1000 / 100));
+        uint32_t tenths = wh / 100 + (wh % 100 >= 50); /* rounded, as the panel shows it */
+        printf(" %s %lu.%lu kWh", label, (unsigned long)(tenths / 10), (unsigned long)(tenths % 10));
     }
 }
 

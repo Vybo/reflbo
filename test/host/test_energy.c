@@ -327,6 +327,21 @@ static void test_a_reading_is_fresh_for_15_minutes(void)
     TEST_ASSERT_FALSE(energy_fresh(&r, 1791195300));
 }
 
+/* A reading ahead of the clock is fresh only within the same 15 minutes; one more than a day ahead (a dongle's clock or
+ * a site's time zone gone wrong) is refused, as it would hold the day's totals until its own day came; an upload time
+ * past what the reading keeps is no data (Review Focus). */
+static void test_a_reading_from_the_future_is_refused(void)
+{
+    energy_reading_t r = reading(local(2026, 10, 5, 13, 0), 0, 0, 0, 0);
+    TEST_ASSERT_FALSE(energy_fresh(&r, r.at - ENERGY_FRESH_S - 1));
+    TEST_ASSERT_FALSE(energy_reading_ahead(&r, r.at - ENERGY_AHEAD_S));
+    TEST_ASSERT_TRUE(energy_reading_ahead(&r, r.at - ENERGY_AHEAD_S - 1));
+    TEST_ASSERT_FALSE(energy_reading_ahead(&r, 0)); /* no clock: nothing to tell it by */
+    const char *json = "{\"success\":true,\"result\":{\"acpower\":100.0,\"uploadTime\":\"9999-12-31 23:59:59\"}}";
+    TEST_ASSERT_FALSE(energy_parse_solax(json, strlen(json), &r, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_STRING("no data", s_err);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -347,5 +362,6 @@ int main(void)
     RUN_TEST(test_a_new_day_starts_afresh);
     RUN_TEST(test_own_use_is_the_share_the_house_kept);
     RUN_TEST(test_a_reading_is_fresh_for_15_minutes);
+    RUN_TEST(test_a_reading_from_the_future_is_refused);
     return UNITY_END();
 }

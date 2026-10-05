@@ -17,6 +17,7 @@
 #define ENERGY_NONE UINT16_MAX     /* a quarter hour without a reading */
 #define ENERGY_WH_NONE UINT32_MAX  /* a total there is no reading for */
 #define ENERGY_FRESH_S (15 * 60)   /* a reading is fresh for 15 min (spec §5.1) */
+#define ENERGY_AHEAD_S (24 * 3600) /* a reading further ahead of the clock is refused */
 #define ENERGY_MIDNIGHT_S 3600     /* the reading taken as midnight's lies within an hour of it */
 
 /* energy.battery; the values match settings_energy_battery_t. */
@@ -55,8 +56,11 @@ size_t energy_solax_url(char *out, size_t size, const char *token, const char *s
 bool energy_parse_solax(const char *json, size_t len, energy_reading_t *out, char *err, size_t err_size);
 /* The battery shows: `on`; with `auto`, a hybrid inverter or a charge above 0 % (spec §11.6). */
 bool energy_battery_shown(energy_battery_t setting, const energy_reading_t *r);
-/* At most ENERGY_FRESH_S old at `now` (UTC). */
+/* At most ENERGY_FRESH_S old at `now` (UTC), or ahead of it (the inverter's clock) by no more. */
 bool energy_fresh(const energy_reading_t *r, uint32_t now);
+/* More than ENERGY_AHEAD_S ahead of `now` (UTC): a dongle's clock or a site's time zone gone wrong. Such a reading
+ * would hold the day's totals until its own day came, so the Energy step refuses it; false without a clock (0). */
+bool energy_reading_ahead(const energy_reading_t *r, uint32_t now);
 
 void energy_day_init(energy_day_t *d);
 /* A reading into its local day: a later day starts afresh, an earlier one is left out. */

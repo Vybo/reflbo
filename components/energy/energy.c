@@ -113,7 +113,7 @@ bool energy_parse_solax(const char *json, size_t len, energy_reading_t *out, cha
         }
     }
     if (!cJSON_IsObject(r) || !cJSON_IsString(upload) || !timekeeping_parse_iso8601(upload->valuestring, &at) ||
-        at <= 0 || (!have_ac && !have_dc)) {
+        at <= 0 || at > (time_t)UINT32_MAX || (!have_ac && !have_dc)) { /* a time the reading can keep */
         cJSON_Delete(root);
         return fail(err, err_size, "no data");
     }
@@ -158,7 +158,12 @@ bool energy_battery_shown(energy_battery_t setting, const energy_reading_t *r)
 
 bool energy_fresh(const energy_reading_t *r, uint32_t now)
 {
-    return r != NULL && r->at != 0 && (now <= r->at || now - r->at <= ENERGY_FRESH_S);
+    return r != NULL && r->at != 0 && (now <= r->at ? r->at - now : now - r->at) <= ENERGY_FRESH_S;
+}
+
+bool energy_reading_ahead(const energy_reading_t *r, uint32_t now)
+{
+    return now != 0 && r->at > now && r->at - now > ENERGY_AHEAD_S;
 }
 
 /* The local day of `t` and the UTC instants of its midnight and the next. */

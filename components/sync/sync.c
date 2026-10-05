@@ -358,6 +358,10 @@ static void step_energy(void)
         failed(SYNC_STEP_ENERGY, detail);
         return;
     }
+    if (energy_reading_ahead(&s_report.energy, sync_now())) {
+        failed(SYNC_STEP_ENERGY, "upload time ahead"); /* it would hold the day's totals until its own day */
+        return;
+    }
     s_report.result[SYNC_STEP_ENERGY] = SYNC_STEP_OK;
 }
 

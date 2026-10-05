@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "dashboard_fixtures.h"
+#include "solar_fixtures.h"
 #include "gfx.h"
 #include "gfx_fonts.h"
 #include "gfx_icons.h"
@@ -203,7 +204,8 @@ static void test_a_number_keeps_its_size_as_its_digits_change(void)
  * by day and rain today, 9 snow showers at night in Czech and a battery charging at 100 %, 10 Monday
  * 28 September in Czech, a public holiday, 11 a polar night (89.9° N), 12 a polar day (89.9° S) in Czech,
  * 13 Wednesday 30 September on a 12-hour clock, 14 the largest values (-23.5 °C at 100 %, 123 days of battery, an
- * air quality index of 250, a UV index of 13, PM at 255 µg/m³, pollen at 6 500 grains/m³). */
+ * air quality index of 250, a UV index of 13, PM at 255 µg/m³, pollen at 6 500 grains/m³; from M6d 200 kW from the
+ * roof and 1599 kWh today). Each set also has the solar view (solar_fixtures.h). */
 #define VARIANTS 15
 
 static ui_context_t split_context(int variant)
@@ -269,6 +271,14 @@ static ui_context_t split_context(int variant)
     if (variant == 11 || variant == 12) { /* the sun neither rises nor sets */
         ctx.lang = lang_get(variant == 12 ? "cs" : "en");
         ctx.lat_e4 = variant == 11 ? 899000 : -899000;
+    }
+    /* M6d: the sample day, a battery in every other set; read three hours ago and forecast two days ago in 2, nothing
+     * in 3, the largest values in 14 */
+    ctx.solar = variant == 3    ? fixture_solar_none()
+                : variant == 14 ? fixture_solar_largest(FIX_NOW)
+                                : fixture_solar(variant == 2 ? FIX_NOW - 3 * 3600 : FIX_NOW, true, variant % 2 == 1);
+    if (variant == 2) {
+        s_fix_forecast.fetched = (uint32_t)(FIX_NOW - 50 * 3600);
     }
     return ctx;
 }
@@ -859,6 +869,60 @@ static void test_a_field_without_room_draws_nothing(void)
     TEST_ASSERT_FALSE(inked(0, 399, 0, 299));
 }
 
+/* The house's fields and the forecast's show their own symbols (spec §5.1, D35): the sun for the forecast, the panels
+ * for what they make, the house, the grid's meter and the leaf for own use. */
+static void test_the_solar_fields_show_their_symbols(void)
+{
+    static const struct {
+        ui_field_id_t field;
+        const gfx_bitmap_t *s24, *s16;
+    } k_fields[] = {
+        { UI_FIELD_PV_NOW, &gfx_icon_forecast_24, &gfx_icon_forecast_16 },
+        { UI_FIELD_PV_TODAY, &gfx_icon_forecast_24, &gfx_icon_forecast_16 },
+        { UI_FIELD_EN_PV, &gfx_icon_solar_24, &gfx_icon_solar_16 },
+        { UI_FIELD_EN_YIELD, &gfx_icon_solar_24, &gfx_icon_solar_16 },
+        { UI_FIELD_EN_LOAD, &gfx_icon_house_24, &gfx_icon_house_16 },
+        { UI_FIELD_EN_GRID, &gfx_icon_grid_24, &gfx_icon_grid_16 },
+        { UI_FIELD_EN_EXPORT, &gfx_icon_grid_24, &gfx_icon_grid_16 },
+        { UI_FIELD_EN_SELF, &gfx_icon_self_use_24, &gfx_icon_self_use_16 },
+    };
+    ui_context_t ctx = split_context(0);
+    for (size_t i = 0; i < sizeof(k_fields) / sizeof(k_fields[0]); i++) {
+        gfx_rect_t s = { 267, 231, 133, 69 }, xs = { 200, 278, 200, 22 };
+        gfx_fb_init(&s_fb, s_buf, 400, 300);
+        gfx_clear(&s_fb, GFX_WHITE);
+        ui_draw_cell(&s_fb, s, &ctx, k_fields[i].field, UI_STALE_STALE);
+        ui_draw_cell(&s_fb, xs, &ctx, k_fields[i].field, UI_STALE_STALE);
+        const char *id = ui_field_info(k_fields[i].field)->id;
+        TEST_ASSERT_TRUE_MESSAGE(icon_in(s, s, k_fields[i].s24), id);
+        TEST_ASSERT_TRUE_MESSAGE(icon_in(xs, xs, k_fields[i].s16), id);
+    }
+}
+
+/* The grid's way shows as an arrow in S and XS, up to the grid, down from it; in M its label says it, "Export" or
+ * "Import", without the arrow (spec §5.1). */
+static void test_the_grid_shows_which_way_its_power_goes(void)
+{
+    static uint8_t out[133 * 69], in[133 * 69];
+    ui_context_t ctx = split_context(0);
+    static const int16_t k_cells[][2] = { { 133, 69 }, { 66, 69 }, { 120, 22 } };
+    for (size_t i = 0; i < sizeof(k_cells) / sizeof(k_cells[0]); i++) {
+        int w = k_cells[i][0], h = k_cells[i][1];
+        s_fix_reading.grid_w = -2560;
+        cell_bits(&ctx, UI_FIELD_EN_GRID, w, h, out);
+        s_fix_reading.grid_w = 2560;
+        cell_bits(&ctx, UI_FIELD_EN_GRID, w, h, in);
+        TEST_ASSERT_FALSE(memcmp(out, in, (size_t)(w * h)) == 0);
+    }
+    gfx_rect_t m = { 200, 160, 200, 140 };
+    s_fix_reading.grid_w = -2560;
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    gfx_clear(&s_fb, GFX_WHITE);
+    ui_draw_cell(&s_fb, m, &ctx, UI_FIELD_EN_GRID, UI_STALE_STALE);
+    int pen = m.x + 6 + gfx_text_width(&gfx_font_sans_12, "Export");
+    TEST_ASSERT_FALSE(inked(pen + 1, m.x + m.w - 1, m.y, m.y + 6 + gfx_font_sans_12.line_height)); /* no arrow */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -880,5 +944,7 @@ int main(void)
     RUN_TEST(test_xs_keeps_the_marks_s_shows);
     RUN_TEST(test_every_small_field_fits_every_short_s_cell);
     RUN_TEST(test_short_s_cells_show_a_short_form_before_cutting);
+    RUN_TEST(test_the_solar_fields_show_their_symbols);
+    RUN_TEST(test_the_grid_shows_which_way_its_power_goes);
     return UNITY_END();
 }

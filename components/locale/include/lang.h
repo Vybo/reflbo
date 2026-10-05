@@ -199,6 +199,21 @@ typedef enum {
     LS_DIR_SW,
     LS_DIR_W,
     LS_DIR_NW,
+    LS_PV_NOW, /* the PV forecast's fields (spec §11.5, M6d) */
+    LS_PV_TODAY,
+    LS_PV_LEFT,
+    LS_PV_TOMORROW,
+    LS_PV_PEAK,
+    LS_EN_PV, /* the house's energy fields (spec §11.6, M6d) */
+    LS_EN_GRID,
+    LS_EN_LOAD,
+    LS_EN_BATTERY,
+    LS_EN_YIELD,
+    LS_EN_EXPORT,
+    LS_EN_IMPORT,
+    LS_EN_SELF,
+    LS_EN_EXPORTING, /* energy.grid's label in M and up while power goes out, and in */
+    LS_EN_IMPORTING,
     LS_COUNT,
 } lang_str_t;
 

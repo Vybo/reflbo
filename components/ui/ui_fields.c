@@ -40,6 +40,19 @@ static const ui_field_info_t k_fields[UI_FIELD_COUNT] = {
     [UI_FIELD_POLLEN_RAGWEED] = { "pollen.ragweed", UI_FK_POLLEN, LS_POLLEN_RAGWEED, -1 },
     [UI_FIELD_WX_RAIN2H] = { "wx.rain2h", UI_FK_SERIES, LS_RAIN_2H, -1 },
     [UI_FIELD_RAIN_MAP] = { "rain.map", UI_FK_RAIN_MAP, LS_RAIN_MAP, -1 },
+    [UI_FIELD_PV_NOW] = { "pv.now", UI_FK_NUMBER, LS_PV_NOW, -1 },
+    [UI_FIELD_PV_TODAY] = { "pv.today", UI_FK_NUMBER, LS_PV_TODAY, -1 },
+    [UI_FIELD_PV_LEFT] = { "pv.left", UI_FK_NUMBER, LS_PV_LEFT, -1 },
+    [UI_FIELD_PV_TOMORROW] = { "pv.tomorrow", UI_FK_NUMBER, LS_PV_TOMORROW, -1 },
+    [UI_FIELD_PV_PEAK] = { "pv.peak", UI_FK_NUMBER, LS_PV_PEAK, -1 },
+    [UI_FIELD_EN_PV] = { "energy.pv", UI_FK_NUMBER, LS_EN_PV, -1 },
+    [UI_FIELD_EN_GRID] = { "energy.grid", UI_FK_NUMBER, LS_EN_GRID, -1 },
+    [UI_FIELD_EN_LOAD] = { "energy.load", UI_FK_NUMBER, LS_EN_LOAD, -1 },
+    [UI_FIELD_EN_BATTERY] = { "energy.battery", UI_FK_BATTERY, LS_EN_BATTERY, -1 },
+    [UI_FIELD_EN_YIELD] = { "energy.yield", UI_FK_NUMBER, LS_EN_YIELD, -1 },
+    [UI_FIELD_EN_EXPORT] = { "energy.export", UI_FK_NUMBER, LS_EN_EXPORT, -1 },
+    [UI_FIELD_EN_IMPORT] = { "energy.import", UI_FK_NUMBER, LS_EN_IMPORT, -1 },
+    [UI_FIELD_EN_SELF] = { "energy.self", UI_FK_NUMBER, LS_EN_SELF, -1 },
 };
 
 const ui_field_info_t *ui_field_info(ui_field_id_t field)
@@ -215,7 +228,8 @@ void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out)
     out->label = lang_str(ctx->lang, info->label);
     if (info->ds_field >= 0) {
         resolve_store(ctx, field, out);
-    } else if (!ui_resolve_forecast(ctx, field, out) && !ui_resolve_radar(ctx, field, out)) {
+    } else if (!ui_resolve_forecast(ctx, field, out) && !ui_resolve_radar(ctx, field, out) &&
+               !ui_resolve_solar(ctx, field, out)) {
         resolve_clock(ctx, field, out);
     }
 }

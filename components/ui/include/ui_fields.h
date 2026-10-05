@@ -67,6 +67,19 @@ typedef enum {
     UI_FIELD_POLLEN_RAGWEED,
     UI_FIELD_WX_RAIN2H, /* M6 (D27) */
     UI_FIELD_RAIN_MAP,  /* M6 (D23) */
+    UI_FIELD_PV_NOW,    /* M6d (D35): the PV forecast */
+    UI_FIELD_PV_TODAY,
+    UI_FIELD_PV_LEFT,
+    UI_FIELD_PV_TOMORROW,
+    UI_FIELD_PV_PEAK,
+    UI_FIELD_EN_PV, /* M6d (D36): the house's energy */
+    UI_FIELD_EN_GRID,
+    UI_FIELD_EN_LOAD,
+    UI_FIELD_EN_BATTERY,
+    UI_FIELD_EN_YIELD,
+    UI_FIELD_EN_EXPORT,
+    UI_FIELD_EN_IMPORT,
+    UI_FIELD_EN_SELF,
     UI_FIELD_COUNT,
 } ui_field_id_t;
 
@@ -107,6 +120,7 @@ typedef struct {
 } ui_series_point_t;
 
 typedef struct ui_radar ui_radar_t; /* ui_radar.h */
+typedef struct ui_solar ui_solar_t; /* ui_solar.h */
 
 /* Everything the dashboard reads, gathered by the app for one render. */
 typedef struct {
@@ -124,6 +138,7 @@ typedef struct {
     ui_sync_mark_t sync;    /* the status bar's sync state (spec §5.2) */
     ui_wifi_mark_t wifi;
     const ui_radar_t *radar; /* M6: the radars' map, frames and settings; NULL for none */
+    const ui_solar_t *solar; /* M6d: the PV forecast and the house's energy; NULL for none */
 } ui_context_t;
 
 typedef enum {
@@ -157,6 +172,7 @@ typedef struct {
     uint8_t rain_mm10[UI_RAIN_STEPS]; /* wx.rain2h: each quarter hour from now, as ds_rain_t keeps them */
     uint8_t rain_prob[UI_RAIN_STEPS];
     const ui_radar_t *radar; /* rain.map: what its map draws; `text` is its frame's time */
+    const ui_solar_t *solar; /* pv.* and energy.*: the view they come from */
 } ui_value_t;
 
 void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);

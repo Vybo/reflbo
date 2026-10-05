@@ -199,7 +199,7 @@ file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)
 add_library(ui STATIC ${UI_SOURCES})
 target_include_directories(ui PUBLIC ${REPO_ROOT}/components/ui/include)
 target_compile_options(ui PRIVATE ${REFLBO_WARNINGS})
-target_link_libraries(ui PUBLIC gfx locale datastore util map radar_logic adsb_logic
+target_link_libraries(ui PUBLIC gfx locale datastore util map radar_logic adsb_logic solar_logic energy_logic
                       PRIVATE cjson scheduler weather_logic astro m)
 
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.
@@ -293,12 +293,12 @@ add_executable(render_dashboard render_dashboard.c)
 target_compile_options(render_dashboard PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(render_dashboard PRIVATE ui)
 
-reflbo_host_test(test_ui_screens_golden ui timekeeping_logic)
+reflbo_host_test(test_ui_screens_golden ui) # the time zones through ui's solar and energy
 target_compile_definitions(test_ui_screens_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
 
 add_executable(render_screen render_screen.c)
 target_compile_options(render_screen PRIVATE ${REFLBO_WARNINGS})
-target_link_libraries(render_screen PRIVATE ui timekeeping_logic)
+target_link_libraries(render_screen PRIVATE ui)
 
 # Python tool tests (stdlib unittest; pyserial is not needed).
 find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)

@@ -19,6 +19,13 @@ air            air                   16 24 48
 particles      blur_on               16 24 48
 uv             light_mode            16 24 48
 pollen         local_florist         16 24 48
+# The PV forecast and the house's energy (M6d, D35, D36): a sun for the forecast, panels for what they
+# make, the house, the grid's meter and a leaf for own use.
+forecast       wb_sunny              16 24 48
+solar          solar_power           16 24 48
+house          house                 16 24 48
+grid           electric_meter        16 24 48
+self_use       energy_savings_leaf   16 24 48
 # Weather codes (spec §11), day and night where they differ, and the sun's times (M5); 16 px for XS cells (M6c).
 wx_clear_day        wi:day-sunny                16 24 48
 wx_clear_night      wi:night-clear              16 24 48

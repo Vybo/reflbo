@@ -19,6 +19,8 @@ void ui_fill(const char *pattern, const char *value, char *out, size_t size);
 bool ui_resolve_radar(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);
 /* Its widget in an M or L slot; false for any other kind. */
 bool ui_radar_widget(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v);
+/* pv.* and energy.* (ui_solar.c, M6d); false for any other field. */
+bool ui_resolve_solar(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);
 
 /* The weather, air quality, pollen and sun fields (ui_forecast.c, D25); false for any other field. */
 bool ui_resolve_forecast(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);

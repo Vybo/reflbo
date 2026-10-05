@@ -98,6 +98,28 @@ static const gfx_bitmap_t *field_icon(ui_field_id_t field, int size)
     case UI_FIELD_POLLEN_RAGWEED:
         s16 = &gfx_icon_pollen_16, s24 = &gfx_icon_pollen_24, s48 = &gfx_icon_pollen_48;
         break;
+    case UI_FIELD_PV_NOW: /* the forecast: a sun; what the panels make: the panels (spec §5.1, D35) */
+    case UI_FIELD_PV_TODAY:
+    case UI_FIELD_PV_LEFT:
+    case UI_FIELD_PV_TOMORROW:
+    case UI_FIELD_PV_PEAK:
+        s16 = &gfx_icon_forecast_16, s24 = &gfx_icon_forecast_24, s48 = &gfx_icon_forecast_48;
+        break;
+    case UI_FIELD_EN_PV:
+    case UI_FIELD_EN_YIELD:
+        s16 = &gfx_icon_solar_16, s24 = &gfx_icon_solar_24, s48 = &gfx_icon_solar_48;
+        break;
+    case UI_FIELD_EN_LOAD:
+        s16 = &gfx_icon_house_16, s24 = &gfx_icon_house_24, s48 = &gfx_icon_house_48;
+        break;
+    case UI_FIELD_EN_GRID:
+    case UI_FIELD_EN_EXPORT:
+    case UI_FIELD_EN_IMPORT:
+        s16 = &gfx_icon_grid_16, s24 = &gfx_icon_grid_24, s48 = &gfx_icon_grid_48;
+        break;
+    case UI_FIELD_EN_SELF:
+        s16 = &gfx_icon_self_use_16, s24 = &gfx_icon_self_use_24, s48 = &gfx_icon_self_use_48;
+        break;
     default:
         break;
     }
@@ -817,11 +839,13 @@ static void draw_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_v
     int top = r.y + 6;
     if (f->label != NULL && v->kind != UI_FK_TIME && !(size == UI_SIZE_M && v->kind == UI_FK_DATE)) {
         char label[40];
-        int arrow_w = v->trend ? gfx_text_width(f->label, ARROW_UP) + 4 : 0;
+        bool says = v->field == UI_FIELD_EN_GRID || v->field == UI_FIELD_EN_EXPORT || v->field == UI_FIELD_EN_IMPORT;
+        int trend = says ? 0 : v->trend; /* "Export" or "To grid today" says which way */
+        int arrow_w = trend ? gfx_text_width(f->label, ARROW_UP) + 4 : 0;
         gfx_text_ellipsize(f->label, v->label, r.w - 12 - arrow_w, label, sizeof(label));
         int pen = gfx_text(fb, f->label, r.x + 6, top + f->label->ascent, label, GFX_BLACK);
-        if (v->trend) { /* beside the label, where it doesn't widen the value */
-            gfx_text(fb, f->label, pen + 4, top + f->label->ascent, v->trend > 0 ? ARROW_UP : ARROW_DOWN, GFX_BLACK);
+        if (trend) { /* beside the label, where it doesn't widen the value */
+            gfx_text(fb, f->label, pen + 4, top + f->label->ascent, trend > 0 ? ARROW_UP : ARROW_DOWN, GFX_BLACK);
         }
         top += f->label->line_height;
     }

@@ -6,6 +6,7 @@
 #include "context_fixtures.h"
 #include "ui_fields.h"
 #include "ui_radar.h"
+#include "ui_solar.h"
 #include "unity.h"
 
 static ui_context_t s_ctx;
@@ -337,6 +338,224 @@ static void test_none_resolves_to_missing(void)
     TEST_ASSERT_EQUAL(UI_FIELD_NONE, v.field);
 }
 
+/* --- the PV forecast and the house (M6d) --- */
+
+#define FIX_1320 (FIX_NOW - 7 * 3600 - 28 * 60) /* 13:20 CEST on the fixture's day */
+
+static solar_forecast_t s_forecast;
+static energy_reading_t s_reading;
+static energy_day_t s_day;
+static ui_solar_t s_solar;
+
+/* A forecast fetched at 05:48 for the fixture's day and the next, and a reading at 13:17 with today's midnight
+ * reading at 00:02; the context at 13:20. */
+static void with_solar(void)
+{
+    memset(&s_forecast, 0, sizeof(s_forecast));
+    s_forecast.day = FIX_DAY;
+    s_forecast.fetched = (uint32_t)(FIX_NOW - 15 * 3600);
+    s_forecast.q[0][51] = 360; /* 12:45: the day's peak, 3.6 kW */
+    s_forecast.q[0][53] = 350; /* 13:15-13:30 */
+    s_forecast.q[0][54] = 86;  /* 0.86 kW */
+    s_forecast.q[1][48] = 100;
+    s_forecast.wh[0] = 18400;
+    s_forecast.wh[1] = 1400;
+    s_forecast.wh[2] = 27400;
+    energy_day_init(&s_day);
+    s_day.day = FIX_DAY;
+    s_day.base_at = (uint32_t)(FIX_1320 - 13 * 3600 - 18 * 60); /* 00:02 */
+    s_day.base_to_wh = 1000000;
+    s_day.base_from_wh = 2000000;
+    s_reading = (energy_reading_t){ .at = (uint32_t)(FIX_1320 - 180), .pv_w = 3420, .grid_w = -2560, .load_w = 860,
+                                    .bat_w = 0, .soc = -1, .inverter = 4, .yield_wh = 9400,
+                                    .to_grid_wh = 1004900, .from_grid_wh = 2000600 };
+    s_solar = (ui_solar_t){ .forecast = &s_forecast, .forecast_ttl_s = 26 * 3600, .reading = &s_reading,
+                            .day = &s_day, .battery = false };
+    s_ctx.solar = &s_solar;
+    s_ctx.now = FIX_1320;
+    s_ctx.local = fixture_local(13, 20, 0);
+}
+
+static void test_the_forecast_fields_read_the_quarter_hour_now(void)
+{
+    with_solar();
+    ui_value_t v = resolve(UI_FIELD_PV_NOW);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+    TEST_ASSERT_EQUAL_STRING("3.50", v.text); /* 13:15-13:30 */
+    TEST_ASSERT_EQUAL_STRING("3.5", v.short_text);
+    TEST_ASSERT_EQUAL_STRING("kW", v.unit);
+    TEST_ASSERT_EQUAL_STRING("Forecast now", v.label);
+    v = resolve(UI_FIELD_PV_TODAY);
+    TEST_ASSERT_EQUAL_STRING("18.4", v.text);
+    TEST_ASSERT_EQUAL_STRING("18", v.short_text);
+    TEST_ASSERT_EQUAL_STRING("kWh", v.unit);
+    v = resolve(UI_FIELD_PV_LEFT); /* two thirds of 13:15's and all of 13:30's: 583 + 215 Wh */
+    TEST_ASSERT_EQUAL_STRING("0.8", v.text);
+    TEST_ASSERT_EQUAL_STRING("", v.short_text); /* small values keep their decimals */
+    v = resolve(UI_FIELD_PV_TOMORROW);
+    TEST_ASSERT_EQUAL_STRING("1.4", v.text);
+    v = resolve(UI_FIELD_PV_PEAK);
+    TEST_ASSERT_EQUAL_STRING("3.60", v.text);
+    TEST_ASSERT_EQUAL_STRING("12:45", v.extra);
+    s_ctx.clock_24h = false;
+    v = resolve(UI_FIELD_PV_PEAK);
+    TEST_ASSERT_EQUAL_STRING("12:45 PM", v.extra);
+}
+
+static void test_kilowatts_shorten_only_from_one_and_kilowatt_hours_from_ten(void)
+{
+    with_solar();
+    s_forecast.q[0][53] = 86;
+    ui_value_t v = resolve(UI_FIELD_PV_NOW);
+    TEST_ASSERT_EQUAL_STRING("0.86", v.text);
+    TEST_ASSERT_EQUAL_STRING("", v.short_text);
+    s_forecast.q[0][53] = 1234; /* 12.34 kW: one decimal from 10 kW */
+    v = resolve(UI_FIELD_PV_NOW);
+    TEST_ASSERT_EQUAL_STRING("12.3", v.text);
+    TEST_ASSERT_EQUAL_STRING("12", v.short_text);
+    s_forecast.q[0][53] = 19999; /* 199.99 kW */
+    v = resolve(UI_FIELD_PV_NOW);
+    TEST_ASSERT_EQUAL_STRING("200.0", v.text);
+    TEST_ASSERT_EQUAL_STRING("200", v.short_text);
+    s_forecast.wh[0] = 9949;
+    v = resolve(UI_FIELD_PV_TODAY);
+    TEST_ASSERT_EQUAL_STRING("9.9", v.text);
+    TEST_ASSERT_EQUAL_STRING("", v.short_text);
+    s_ctx.lang = lang_get("cs");
+    v = resolve(UI_FIELD_PV_TODAY);
+    TEST_ASSERT_EQUAL_STRING("9,9", v.text);
+    TEST_ASSERT_EQUAL_STRING("Předpověď dnes", v.label);
+}
+
+static void test_after_midnight_tomorrow_is_today(void)
+{
+    with_solar();
+    s_ctx.now += 86400;
+    s_ctx.local_day = FIX_DAY + 1;
+    TEST_ASSERT_EQUAL_STRING("1.4", resolve(UI_FIELD_PV_TODAY).text);
+    TEST_ASSERT_EQUAL_STRING("27.4", resolve(UI_FIELD_PV_TOMORROW).text); /* the third day's total */
+    TEST_ASSERT_EQUAL_STRING("0.00", resolve(UI_FIELD_PV_NOW).text);
+    s_ctx.now += 86400;
+    s_ctx.local_day = FIX_DAY + 2;
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_PV_NOW).state); /* no quarter hours for that day */
+    TEST_ASSERT_EQUAL_STRING("27.4", resolve(UI_FIELD_PV_TODAY).text);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_PV_TOMORROW).state);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_PV_LEFT).state);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_PV_PEAK).state);
+}
+
+static void test_the_forecast_goes_stale_after_its_wait(void)
+{
+    with_solar();
+    s_ctx.now = (time_t)s_forecast.fetched + 26 * 3600 + 60;
+    ui_value_t v = resolve(UI_FIELD_PV_TODAY);
+    TEST_ASSERT_EQUAL(UI_VALUE_STALE, v.state);
+    TEST_ASSERT_EQUAL_UINT32(26 * 3600 + 60, v.age_s);
+    s_solar.forecast_ttl_s = 0; /* sync mode manual: never stale, only old */
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, resolve(UI_FIELD_PV_TODAY).state);
+}
+
+static void test_without_a_forecast_or_a_reading_the_fields_are_missing(void)
+{
+    with_solar();
+    s_forecast.day = 0;
+    s_reading.at = 0;
+    for (int f = UI_FIELD_PV_NOW; f <= UI_FIELD_EN_SELF; f++) {
+        TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve((ui_field_id_t)f).state);
+    }
+    s_ctx.solar = NULL;
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_PV_NOW).state);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_EN_PV).state);
+    TEST_ASSERT_EQUAL_STRING("Solar", resolve(UI_FIELD_EN_PV).label);
+}
+
+static void test_the_house_now(void)
+{
+    with_solar();
+    ui_value_t v = resolve(UI_FIELD_EN_PV);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+    TEST_ASSERT_EQUAL_STRING("3.42", v.text);
+    TEST_ASSERT_EQUAL_STRING("kW", v.unit);
+    TEST_ASSERT_EQUAL_STRING("0.86", resolve(UI_FIELD_EN_LOAD).text);
+    v = resolve(UI_FIELD_EN_GRID); /* exporting: its label in M and up, an arrow up in S and XS */
+    TEST_ASSERT_EQUAL_STRING("2.56", v.text);
+    TEST_ASSERT_EQUAL_STRING("Export", v.label);
+    TEST_ASSERT_EQUAL_INT(1, v.trend);
+    s_reading.grid_w = 430;
+    v = resolve(UI_FIELD_EN_GRID);
+    TEST_ASSERT_EQUAL_STRING("0.43", v.text);
+    TEST_ASSERT_EQUAL_STRING("Import", v.label);
+    TEST_ASSERT_EQUAL_INT(-1, v.trend);
+    s_reading.grid_w = -12; /* under 20 W flows nowhere */
+    v = resolve(UI_FIELD_EN_GRID);
+    TEST_ASSERT_EQUAL_STRING("Grid", v.label);
+    TEST_ASSERT_EQUAL_INT(0, v.trend);
+}
+
+static void test_the_home_battery(void)
+{
+    with_solar();
+    s_reading.soc = 64;
+    s_reading.bat_w = 1200;
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_EN_BATTERY).state); /* it doesn't show */
+    s_solar.battery = true;
+    ui_value_t v = resolve(UI_FIELD_EN_BATTERY);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+    TEST_ASSERT_EQUAL_STRING("64", v.text);
+    TEST_ASSERT_EQUAL_STRING("%", v.unit);
+    TEST_ASSERT_EQUAL_INT(64, v.percent);
+    TEST_ASSERT_EQUAL(DS_BAT_CHARGING, v.battery); /* the bolt */
+    TEST_ASSERT_EQUAL_INT(0, v.trend);
+    TEST_ASSERT_EQUAL_STRING("1.20 kW", v.extra); /* its power in M and up */
+    TEST_ASSERT_EQUAL_STRING("Home battery", v.label);
+    s_reading.bat_w = -800;
+    v = resolve(UI_FIELD_EN_BATTERY);
+    TEST_ASSERT_EQUAL(DS_BAT_DISCHARGING, v.battery);
+    TEST_ASSERT_EQUAL_INT(-1, v.trend); /* the arrow down */
+    TEST_ASSERT_EQUAL_STRING("0.80 kW", v.extra);
+    s_reading.bat_w = 5;
+    TEST_ASSERT_EQUAL_STRING("", resolve(UI_FIELD_EN_BATTERY).extra);
+    s_reading.soc = -1; /* shown, but the reply has no charge */
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_EN_BATTERY).state);
+}
+
+static void test_todays_totals(void)
+{
+    with_solar();
+    ui_value_t v = resolve(UI_FIELD_EN_YIELD);
+    TEST_ASSERT_EQUAL_STRING("9.4", v.text);
+    TEST_ASSERT_EQUAL_STRING("kWh", v.unit);
+    v = resolve(UI_FIELD_EN_EXPORT);
+    TEST_ASSERT_EQUAL_STRING("4.9", v.text);
+    TEST_ASSERT_EQUAL_INT(1, v.trend);
+    v = resolve(UI_FIELD_EN_IMPORT);
+    TEST_ASSERT_EQUAL_STRING("0.6", v.text);
+    TEST_ASSERT_EQUAL_INT(-1, v.trend);
+    v = resolve(UI_FIELD_EN_SELF);
+    TEST_ASSERT_EQUAL_STRING("48", v.text); /* (9.4 - 4.9) / 9.4 */
+    TEST_ASSERT_EQUAL_STRING("%", v.unit);
+    s_day.base_at = 0; /* no reading near midnight */
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_EN_EXPORT).state);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_EN_IMPORT).state);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_EN_SELF).state);
+    TEST_ASSERT_EQUAL_STRING("9.4", resolve(UI_FIELD_EN_YIELD).text);
+    s_ctx.now += 86400; /* yesterday's reading says nothing about today's totals */
+    s_ctx.local_day = FIX_DAY + 1;
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_EN_YIELD).state);
+    TEST_ASSERT_EQUAL(UI_VALUE_STALE, resolve(UI_FIELD_EN_PV).state); /* the power is stale, not gone */
+}
+
+static void test_a_reading_goes_stale_after_15_minutes(void)
+{
+    with_solar();
+    s_ctx.now = (time_t)s_reading.at + 15 * 60;
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, resolve(UI_FIELD_EN_PV).state);
+    s_ctx.now += 60;
+    ui_value_t v = resolve(UI_FIELD_EN_PV);
+    TEST_ASSERT_EQUAL(UI_VALUE_STALE, v.state);
+    TEST_ASSERT_EQUAL_UINT32(16 * 60, v.age_s);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -360,5 +579,14 @@ int main(void)
     RUN_TEST(test_old_readings_are_stale_with_their_age);
     RUN_TEST(test_none_resolves_to_missing);
     RUN_TEST(test_numbers_with_decimals_carry_a_whole_number_form);
+    RUN_TEST(test_the_forecast_fields_read_the_quarter_hour_now);
+    RUN_TEST(test_kilowatts_shorten_only_from_one_and_kilowatt_hours_from_ten);
+    RUN_TEST(test_after_midnight_tomorrow_is_today);
+    RUN_TEST(test_the_forecast_goes_stale_after_its_wait);
+    RUN_TEST(test_without_a_forecast_or_a_reading_the_fields_are_missing);
+    RUN_TEST(test_the_house_now);
+    RUN_TEST(test_the_home_battery);
+    RUN_TEST(test_todays_totals);
+    RUN_TEST(test_a_reading_goes_stale_after_15_minutes);
     return UNITY_END();
 }

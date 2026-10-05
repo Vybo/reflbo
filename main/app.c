@@ -49,8 +49,8 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      9 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
-                                  9: 24 cells (M6c) */
+#define SNAP_VERSION      10 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
+                                   9: 24 cells (M6c); 10: the solar state and the sync's two steps (M6d) */
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */
@@ -588,6 +588,7 @@ static esp_err_t boot(void)
         app_ui_defaults();
         app_ui_load();
         app_ui_restore_forecast(); /* spec §6: shown as stale by its age */
+        app_solar_restore();       /* spec §11.5, §11.6: the forecast and today's readings */
     }
 
     ESP_RETURN_ON_ERROR(board_init(wake == POWER_WAKE_COLD), TAG, "board");

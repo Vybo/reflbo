@@ -7,16 +7,19 @@
 #include "adsb_task.h"
 #include "board_buttons.h"
 #include "datastore.h"
+#include "energy.h"
 #include "esp_err.h"
 #include "radar_fetch.h"
 #include "scheduler.h"
 #include "settings.h"
+#include "solar.h"
 #include "sync.h"
 #include "sync_plan.h"
 #include "ui_fields.h"
 #include "ui_menu.h"
 #include "ui_preset.h"
 #include "ui_radar.h"
+#include "ui_solar.h"
 #include "webui.h"
 
 /* The dashboard's state and behaviour (main/app_ui.c, main/app_menu.c). All of it belongs to the
@@ -32,6 +35,23 @@ typedef struct {
     char last_detail[SYNC_DETAIL_LEN];
 } app_sync_state_t;
 
+/* The PV forecast and the house's energy (main/app_solar.c, spec §11.5, §11.6): kept through deep sleep
+ * with the rest, and in /fs/state/solar.bin. */
+typedef struct {
+    solar_forecast_t forecast;            /* day 0: none yet */
+    uint32_t solcast_asked;               /* when Solcast was last asked (UTC), its budget's clock */
+    uint8_t solcast_sites;                /* its sites at the last step: its wait (spec §11.5) */
+    uint32_t forecast_tried;              /* when the last Solar step ran (UTC); 0: none since the cold boot */
+    char forecast_error[SYNC_DETAIL_LEN]; /* why its last call failed; "" after a good one; a kept step leaves it */
+    char forecast_kept[SYNC_DETAIL_LEN];  /* why the last step kept it ("kept", "HTTP 429"); "" if it didn't */
+    energy_reading_t reading;             /* at 0: none yet */
+    energy_day_t day;                     /* today's totals and quarter hours */
+    uint32_t energy_tried;                /* when the last Energy step ran (UTC) */
+    char energy_error[SYNC_DETAIL_LEN];
+    uint32_t saved_at;                    /* when solar.bin last took the readings (UTC) */
+    bool demo;                            /* `solar demo on`: the sample day (spec §15) */
+} app_solar_state_t;
+
 typedef struct {
     ds_t ds;
     settings_t settings;
@@ -44,6 +64,7 @@ typedef struct {
     bool critical;        /* the critical-battery screen is up (spec §8) */
     bool first_run;       /* settings.json didn't exist at boot: the first-run screen (spec §5.5) */
     app_sync_state_t sync;
+    app_solar_state_t solar; /* M6d */
 } app_ui_state_t;
 
 /* Kconfig settings, the built-in presets and an empty datastore. */
@@ -145,6 +166,27 @@ bool app_sync_lan_ui(void);      /* sync mode `always` is on a network: the web 
 uint32_t app_sync_expected_s(void);
 /* Info ▸ Last sync: "12:05 OK", "05:30 Weather: HTTP 503", "Running", "Never". */
 void app_sync_summary(char *out, size_t size);
+
+/* The PV forecast and the house's energy (main/app_solar.c, M6d). */
+const ui_solar_t *app_solar_ui(void); /* what a render draws now: the state, or the sample day */
+const app_solar_state_t *app_solar_state(void);
+/* A Solar step that ran: the reply in `acc`, or NULL with why it failed (`error`) or kept the forecast (`kept`,
+ * which leaves the last call's error be); `asked` when it asked Solcast (0: it didn't), `sites` Solcast's (0: as
+ * they were). Saved to solar.bin, unless the step kept everything. */
+void app_solar_forecast_done(const solar_acc_t *acc, const char *error, const char *kept, uint32_t asked,
+                             uint8_t sites);
+/* A new Solcast key or site (spec §11.5): its budget starts over, so the next step or check asks at once. */
+void app_solar_budget_reset(void);
+/* An Energy step or refresh that ran: the reading, or NULL and why. Into today's totals, and solar.bin at most
+ * every 30 min. */
+void app_solar_reading_done(const energy_reading_t *r, const char *error);
+void app_solar_restore(void); /* a cold boot: solar.bin */
+void app_solar_demo(bool on); /* `solar demo on|off` */
+
+/* The keys in NVS `secrets` (main/app_secrets.c, spec §14.2): write-only from the web UI, never logged. */
+bool app_secret_get(settings_secret_t which, char *out, size_t size); /* false and "" when unset */
+bool app_secret_set(settings_secret_t which);
+esp_err_t app_secrets_apply(const settings_secrets_t *secrets); /* the given ones written, "" erased */
 
 /* The weather radar (main/app_radar.c, spec §11.2): its frames, kept in PSRAM, the newest also in
  * /fs/state/radar.bin; the sync task fetches them. */

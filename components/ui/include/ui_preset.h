@@ -97,8 +97,10 @@ time_t ui_schedule_after_night(time_t until);
 enum {
     UI_OFFERED_RAIN = 1u << 0,    /* "rain": Rain radar (M6) */
     UI_OFFERED_FLIGHTS = 1u << 1, /* "flights": Flights (M6) */
+    UI_OFFERED_SOLAR = 1u << 2,   /* "solar": Solar (M6d) */
+    UI_OFFERED_ENERGY = 1u << 3,  /* "energy": Energy (M6d) */
 };
-#define UI_OFFERED_ALL (UI_OFFERED_RAIN | UI_OFFERED_FLIGHTS)
+#define UI_OFFERED_ALL (UI_OFFERED_RAIN | UI_OFFERED_FLIGHTS | UI_OFFERED_SOLAR | UI_OFFERED_ENERGY)
 
 typedef struct {
     uint8_t count;

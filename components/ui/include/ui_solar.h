@@ -24,6 +24,15 @@ struct ui_solar {
     bool battery;                     /* the battery shows (energy.battery, spec §11.6) */
 };
 
+/* The Solar layout under the status bar in `a` (spec §11.5): today's total, now, the peak and what is still to
+ * come; the day's chart; the next two days' totals with their weather. "No solar forecast yet" without today's
+ * quarter hours. Returns whether what it shows is stale, for the status bar's warning. */
+bool ui_draw_solar_layout(gfx_fb_t *fb, gfx_rect_t a, const ui_context_t *ctx);
+/* The Energy layout (spec §11.6): the reading's time, the panels above a junction, the grid left, the house right,
+ * the battery below when it shows; today's totals. "No data from the inverter yet" before the first reading.
+ * Returns whether the reading is stale. */
+bool ui_draw_energy_layout(gfx_fb_t *fb, gfx_rect_t a, const ui_context_t *ctx);
+
 /* The sample day (spec §15): a 5.2 kWp roof facing south on local day `day`, whose midnight is `midnight` (UTC),
  * its forecast fetched at 05:48: a clear morning with cloud passing in the afternoon, tomorrow overcast, the day
  * after sunny. With `live`, the inverter's readings until `now`: a misty start, then a little above the forecast,

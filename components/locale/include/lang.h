@@ -216,6 +216,14 @@ typedef enum {
     LS_EN_IMPORTING,
     LS_PV_CHART, /* pv.chart and energy.flow (spec §5.3) */
     LS_EN_FLOW,
+    LS_NOW, /* the Solar and Energy layouts (spec §11.5, §11.6) */
+    LS_EN_CHARGING,
+    LS_EN_DISCHARGING,
+    LS_EN_PRODUCED,
+    LS_EN_EXPORTED,
+    LS_EN_IMPORTED,
+    LS_NO_SOLAR,
+    LS_NO_ENERGY,
     LS_COUNT,
 } lang_str_t;
 

@@ -2,6 +2,7 @@
 
 #include "ui_internal.h"
 #include "ui_radar.h"
+#include "ui_solar.h"
 #include "ui_split.h"
 
 static void draw_separators(gfx_fb_t *fb, ui_layout_id_t layout)
@@ -93,6 +94,10 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
         ui_draw_flights_view(fb, below, &c);
     } else if (preset->layout == UI_LAYOUT_SPLIT) {
         any_stale = draw_split(fb, &c, preset);
+    } else if (preset->layout == UI_LAYOUT_SOLAR) { /* M6d */
+        any_stale = ui_draw_solar_layout(fb, below, &c);
+    } else if (preset->layout == UI_LAYOUT_ENERGY) {
+        any_stale = ui_draw_energy_layout(fb, below, &c);
     } else if (layout != NULL) {
         draw_separators(fb, (ui_layout_id_t)preset->layout);
         for (int i = 0; i < layout->slot_count; i++) {

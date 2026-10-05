@@ -367,6 +367,39 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
         ctx->clock_24h = false;
         ctx->local = fixture_local(12, 58, 0);
+    } else if (strcmp(name, "solar") == 0) { /* M6d: the forecast alone, at 13:20 */
+        *preset = fixture_preset("solar");
+        fixture_solar_ctx(ctx, false, false);
+    } else if (strcmp(name, "solar_actual") == 0) { /* with the inverter's readings: what came, against the line */
+        *preset = fixture_preset("solar");
+        fixture_solar_ctx(ctx, true, false);
+    } else if (strcmp(name, "solar_cs") == 0) {
+        fixture_dashboard("solar_actual", ctx, preset);
+        ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "solar_none") == 0) { /* before the first forecast */
+        *preset = fixture_preset("solar");
+        fixture_solar_ctx(ctx, false, false);
+        ctx->solar = fixture_solar_none();
+    } else if (strcmp(name, "energy") == 0) { /* the house now, without a battery: exporting */
+        *preset = fixture_preset("energy");
+        fixture_solar_ctx(ctx, true, false);
+    } else if (strcmp(name, "energy_battery") == 0) { /* with a battery, charging */
+        *preset = fixture_preset("energy");
+        fixture_solar_ctx(ctx, true, true);
+    } else if (strcmp(name, "energy_night_cs") == 0) { /* 22:08 in Czech: nothing from the roof, importing */
+        *preset = fixture_preset("energy");
+        ctx->lang = lang_get("cs");
+        fixture_solar_ctx(ctx, true, false);
+        ctx->now = FIX_NOW + 80 * 60;
+        ctx->local = fixture_local(22, 8, 0);
+        fixture_fill(&s_fix_ds, ctx->now);
+        s_fix_reading.at = (uint32_t)(ctx->now - 3 * 60);
+        s_fix_reading.pv_w = 0;
+        s_fix_reading.load_w = 430;
+        s_fix_reading.grid_w = 430;
+    } else if (strcmp(name, "energy_none") == 0) { /* before the first reading */
+        *preset = fixture_preset("energy");
+        fixture_solar_ctx(ctx, false, false);
     } else if (strcmp(name, "home_energy") == 0) { /* M6d: Classic's small slots, the house now */
         *preset = fixture_preset("home");
         preset->slots[2] = UI_FIELD_EN_PV;
@@ -416,4 +449,6 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "weather_frost_cs", "weather_hot_f", "split_compact",
                                                     "split_compact_cs", "split_xs_rows", "split_xs_grid",
                                                     "split_xs_narrow", "home_energy", "grid_solar",
-                                                    "weather_solar", "focus_solar" };
+                                                    "weather_solar", "focus_solar", "solar", "solar_actual",
+                                                    "solar_cs", "solar_none", "energy", "energy_battery",
+                                                    "energy_night_cs", "energy_none" };

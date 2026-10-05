@@ -265,6 +265,8 @@ const lang_t lang_cs = {
         [LS_EN_SELF] = "Vlastní spotřeba",
         [LS_EN_EXPORTING] = "Přetok",
         [LS_EN_IMPORTING] = "Odběr",
+        [LS_PV_CHART] = "Předpověď FVE",
+        [LS_EN_FLOW] = "Toky energie",
     },
     .weekdays = { "Neděle", "Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek", "Sobota" },
     .weekdays_short = { "Ne", "Po", "Út", "St", "Čt", "Pá", "So" },

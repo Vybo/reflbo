@@ -80,8 +80,10 @@ static void test_layouts_list_their_slots_with_rectangles_sizes_and_kinds(void)
     const cJSON *hourly = by_id(cJSON_GetObjectItemCaseSensitive(by_id(layouts, "weather"), "slots"), "hourly");
     TEST_ASSERT_EQUAL_STRING("M", str(hourly, "size"));
     const cJSON *hourly_kinds = cJSON_GetObjectItemCaseSensitive(hourly, "kinds");
-    const cJSON *last = cJSON_GetArrayItem(hourly_kinds, cJSON_GetArraySize(hourly_kinds) - 1);
-    TEST_ASSERT_EQUAL_STRING("rain_map", last->valuestring); /* a medium slot takes the rain map */
+    int n = cJSON_GetArraySize(hourly_kinds); /* a medium slot takes the rain map, the chart and the flow (M6d) */
+    TEST_ASSERT_EQUAL_STRING("rain_map", cJSON_GetArrayItem(hourly_kinds, n - 3)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("chart", cJSON_GetArrayItem(hourly_kinds, n - 2)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("flow", cJSON_GetArrayItem(hourly_kinds, n - 1)->valuestring);
 }
 
 /* The size a field draws at by the published rules, as the editor reads them (web/app.js). */
@@ -145,10 +147,15 @@ static void test_layouts_publish_the_split_rules(void)
     TEST_ASSERT_EQUAL_INT(49, cJSON_GetArrayItem(sun, 0)->valueint);
     TEST_ASSERT_EQUAL_INT(49, cJSON_GetArrayItem(sun, 1)->valueint);
     TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(s, "kinds"), "series"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(s, "kinds"), "chart"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(xs, "kinds"), "flow"));
+    const cJSON *m = cJSON_GetArrayItem(sizes, 2); /* the chart and the flow need M or larger (spec §5.1) */
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(m, "kinds"), "chart"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(m, "kinds"), "flow"));
     /* the rules give what the renderer does, everywhere */
     static const char *const k_kinds[UI_FK_COUNT] = { "time", "date", "number", "battery", "moon", "text",
                                                       "weather_now", "weather_day", "series", "sun", "level",
-                                                      "pollen", "rain_map" };
+                                                      "pollen", "rain_map", "chart", "flow" };
     static const char *const k_names[] = { "XS", "S", "M", "L", "XL" };
     for (int k = 0; k < UI_FK_COUNT; k++) {
         for (int w = UI_SPLIT_MIN_W; w <= 400; w++) { /* every size, so no boundary falls between two */

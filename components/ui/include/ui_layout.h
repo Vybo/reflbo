@@ -35,8 +35,9 @@ typedef enum {
      UI_KIND(UI_FK_MOON) | UI_KIND(UI_FK_TEXT) | UI_KIND(UI_FK_WEATHER_NOW) | UI_KIND(UI_FK_WEATHER_DAY) |           \
      UI_KIND(UI_FK_SUN) | UI_KIND(UI_FK_LEVEL) | UI_KIND(UI_FK_POLLEN))
 #define UI_KINDS_XS UI_KINDS_S
-#define UI_KINDS_M (UI_KINDS_S | UI_KIND(UI_FK_SERIES) | UI_KIND(UI_FK_RAIN_MAP))
-#define UI_KINDS_L (UI_KINDS_S | UI_KIND(UI_FK_RAIN_MAP))
+#define UI_KINDS_M                                                                                                   \
+    (UI_KINDS_S | UI_KIND(UI_FK_SERIES) | UI_KIND(UI_FK_RAIN_MAP) | UI_KIND(UI_FK_CHART) | UI_KIND(UI_FK_FLOW))
+#define UI_KINDS_L (UI_KINDS_S | UI_KIND(UI_FK_RAIN_MAP) | UI_KIND(UI_FK_CHART) | UI_KIND(UI_FK_FLOW))
 #define UI_KINDS_XL (UI_KIND(UI_FK_TIME) | UI_KIND(UI_FK_NUMBER))
 
 typedef struct {

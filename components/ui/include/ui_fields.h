@@ -29,6 +29,8 @@ typedef enum {
     UI_FK_LEVEL,  /* a number and its band: the air quality index (D25) */
     UI_FK_POLLEN, /* a pollen level, and its type or count (D25) */
     UI_FK_RAIN_MAP, /* the weather radar's map (M6) */
+    UI_FK_CHART,    /* the day's PV forecast as bars (M6d) */
+    UI_FK_FLOW,     /* the house's energy flow (M6d) */
     UI_FK_COUNT,
 } ui_field_kind_t;
 
@@ -80,6 +82,8 @@ typedef enum {
     UI_FIELD_EN_EXPORT,
     UI_FIELD_EN_IMPORT,
     UI_FIELD_EN_SELF,
+    UI_FIELD_PV_CHART, /* M6d: the day's forecast and the readings, as bars */
+    UI_FIELD_EN_FLOW,  /* M6d: the house's energy flow now */
     UI_FIELD_COUNT,
 } ui_field_id_t;
 
@@ -173,6 +177,9 @@ typedef struct {
     uint8_t rain_prob[UI_RAIN_STEPS];
     const ui_radar_t *radar; /* rain.map: what its map draws; `text` is its frame's time */
     const ui_solar_t *solar; /* pv.* and energy.*: the view they come from */
+    int quarter, minute;     /* pv.chart: the local quarter hour now and the minute */
+    const uint16_t *chart_q;    /* pv.chart: today's forecast by quarter hour, in tens of W */
+    const uint16_t *chart_read; /* and the readings' means (0xFFFF where none came); NULL without readings */
 } ui_value_t;
 
 void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);

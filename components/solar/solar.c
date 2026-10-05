@@ -202,3 +202,12 @@ bool solar_solcast_due(uint32_t last_asked, int sites, uint32_t now)
 {
     return last_asked == 0 || now < last_asked || now - last_asked >= solar_solcast_wait_s(sites);
 }
+
+uint32_t solar_fresh_s(solar_source_t source, int sites, uint32_t expected_s)
+{
+    if (expected_s == 0) {
+        return 0;
+    }
+    uint32_t wait = source == SOLAR_SOLCAST ? solar_solcast_wait_s(sites) : 0;
+    return (expected_s > wait ? expected_s : wait) + 2 * 3600;
+}

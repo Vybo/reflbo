@@ -11,6 +11,7 @@
 #include "netmgr.h"
 #include "ui_fields.h"
 #include "ui_layout.h"
+#include "util_time.h"
 
 /* `field` and `preset` (spec §15): inspect the dashboard and inject test data on the device. */
 
@@ -398,6 +399,84 @@ static int cmd_radar(int argc, char **argv)
     return diag_on_owner(radar_body, argc, argv);
 }
 
+/* "18.4 kWh", or "-" for a day without one. */
+static void print_wh(const char *label, uint32_t wh)
+{
+    if (wh == SOLAR_WH_NONE) {
+        printf(" %s -", label);
+    } else {
+        printf(" %s %lu.%lu kWh", label, (unsigned long)(wh / 1000), (unsigned long)(wh % 1000 / 100));
+    }
+}
+
+/* `solar status | demo on | demo off` (spec §15, M6d): never a key. */
+static int solar_body(int argc, char **argv)
+{
+    static const char *const k_usage = "solar status | solar demo on | solar demo off";
+    if (argc == 3 && strcmp(argv[1], "demo") == 0 && (strcmp(argv[2], "on") == 0 || strcmp(argv[2], "off") == 0)) {
+        app_solar_demo(strcmp(argv[2], "on") == 0);
+        app_ui_render();
+        printf("solar: the sample day %s\n", strcmp(argv[2], "on") == 0 ? "shows" : "is gone");
+        return 0;
+    }
+    if (argc != 2 || strcmp(argv[1], "status") != 0) {
+        return usage(k_usage);
+    }
+    static const char *const k_sources[] = { "off", "open-meteo", "forecast-solar", "solcast" };
+    const settings_t *set = app_settings();
+    const app_solar_state_t *s = app_solar_state();
+    printf("forecast: %s%s\n", k_sources[set->solar_source <= SETTINGS_SOLAR_SOLCAST ? set->solar_source : 0],
+           s->demo ? " (the sample day shows)" : "");
+    print_time("  fetched", (time_t)s->forecast.fetched);
+    if (s->forecast.day != 0) {
+        int y, m, d;
+        util_civil_from_days(s->forecast.day, &y, &m, &d);
+        printf("  from %04d-%02d-%02d:", y, m, d);
+        print_wh("first", s->forecast.wh[0]);
+        print_wh("next", s->forecast.wh[1]);
+        print_wh("after", s->forecast.wh[2]);
+        printf("\n");
+    }
+    print_time("  last step", (time_t)s->forecast_tried);
+    if (s->forecast_kept[0] != '\0') {
+        printf("  kept: %s\n", s->forecast_kept);
+    }
+    if (s->forecast_error[0] != '\0') {
+        printf("  last call's error: %s\n", s->forecast_error);
+    }
+    if (set->solar_source == SETTINGS_SOLAR_SOLCAST) {
+        print_time("  Solcast asked", (time_t)s->solcast_asked);
+        printf("  its sites: %u\n", s->solcast_sites);
+    }
+    printf("energy: %s, battery %s\n", set->energy_source == SETTINGS_ENERGY_SOLAX ? "solax" : "off",
+           set->energy_battery == SETTINGS_BATTERY_ON ? "on" : set->energy_battery == SETTINGS_BATTERY_OFF ? "off"
+                                                                                                          : "auto");
+    const energy_reading_t *r = &s->reading;
+    print_time("  reading", (time_t)r->at);
+    if (r->at != 0) {
+        printf("  solar %ld W, grid %ld W, home %ld W, battery %ld W at %d %%, inverter type %u\n", (long)r->pv_w,
+               (long)r->grid_w, (long)r->load_w, (long)r->bat_w, r->soc, r->inverter);
+        int32_t day = energy_reading_day(r);
+        uint32_t out = energy_to_grid_wh(&s->day, r, day), in = energy_from_grid_wh(&s->day, r, day);
+        printf("  its day:");
+        print_wh("produced", r->yield_wh);
+        print_wh("to the grid", out == ENERGY_WH_NONE ? SOLAR_WH_NONE : out);
+        print_wh("from it", in == ENERGY_WH_NONE ? SOLAR_WH_NONE : in);
+        printf("\n");
+        print_time("  midnight's reading", (time_t)s->day.base_at);
+    }
+    print_time("  last step", (time_t)s->energy_tried);
+    if (s->energy_error[0] != '\0') {
+        printf("  error: %s\n", s->energy_error);
+    }
+    return 0;
+}
+
+static int cmd_solar(int argc, char **argv)
+{
+    return diag_on_owner(solar_body, argc, argv);
+}
+
 void app_register_commands(void)
 {
     const esp_console_cmd_t cmds[] = {
@@ -409,6 +488,7 @@ void app_register_commands(void)
         { .command = "wifi", .help = "wifi status | scan", .func = &cmd_wifi },
         { .command = "sync", .help = "sync now | status (spec §9.3)", .func = &cmd_sync },
         { .command = "radar", .help = "radar status | loop (spec §11.2, §11.3)", .func = &cmd_radar },
+        { .command = "solar", .help = "solar status | demo on | demo off (spec §11.5, §11.6)", .func = &cmd_solar },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_err_t err = esp_console_cmd_register(&cmds[i]);

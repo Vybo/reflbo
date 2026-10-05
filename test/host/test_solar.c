@@ -569,6 +569,17 @@ static void test_solcast_keeps_within_its_ten_calls_a_day(void)
     TEST_ASSERT_EQUAL_UINT32(6 * 3600, solar_solcast_wait_s(2));
 }
 
+/* pv.* are fresh as the weather is (spec §5.1), Solcast's wait in place of a shorter sync interval. */
+static void test_the_forecast_is_fresh_for_the_sync_interval_and_two_hours(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(26 * 3600, solar_fresh_s(SOLAR_OPEN_METEO, 1, 24 * 3600)); /* one sync a day */
+    TEST_ASSERT_EQUAL_UINT32(3 * 3600, solar_fresh_s(SOLAR_FORECAST_SOLAR, 1, 3600));
+    TEST_ASSERT_EQUAL_UINT32(5 * 3600, solar_fresh_s(SOLAR_SOLCAST, 1, 3600)); /* it waits 3 h between calls */
+    TEST_ASSERT_EQUAL_UINT32(8 * 3600, solar_fresh_s(SOLAR_SOLCAST, 2, 3600)); /* and 6 h with two sites */
+    TEST_ASSERT_EQUAL_UINT32(26 * 3600, solar_fresh_s(SOLAR_SOLCAST, 2, 24 * 3600));
+    TEST_ASSERT_EQUAL_UINT32(0, solar_fresh_s(SOLAR_SOLCAST, 1, 0)); /* sync mode manual: never stale */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -604,5 +615,6 @@ int main(void)
     RUN_TEST(test_two_solcast_sites_add_up);
     RUN_TEST(test_solcast_refusals);
     RUN_TEST(test_solcast_keeps_within_its_ten_calls_a_day);
+    RUN_TEST(test_the_forecast_is_fresh_for_the_sync_interval_and_two_hours);
     return UNITY_END();
 }

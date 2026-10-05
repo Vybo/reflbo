@@ -19,6 +19,9 @@
 #define SOLAR_URL_MAX 320
 #define SOLAR_KEY_MAX 64 /* a key or a site id, NUL included */
 
+/* solar.source; the values match settings_solar_source_t. */
+typedef enum { SOLAR_OFF, SOLAR_OPEN_METEO, SOLAR_FORECAST_SOLAR, SOLAR_SOLCAST } solar_source_t;
+
 /* A roof plane (spec §11.5): azimuth 0 south, -90 east, 90 west. */
 typedef struct {
     float kwp;   /* 0.1..100 */
@@ -94,3 +97,6 @@ bool solar_parse_solcast(const char *json, size_t len, solar_acc_t *acc, char *e
 uint32_t solar_solcast_wait_s(int sites);
 /* Whether a sync may ask now, given when it last asked (0 for never; failed calls count). */
 bool solar_solcast_due(uint32_t last_asked, int sites, uint32_t now);
+/* How long a forecast stays fresh (spec §5.1): the expected sync interval, or Solcast's wait where that is
+ * longer, and 2 h; 0, never stale, without an expected interval (sync mode `manual`). */
+uint32_t solar_fresh_s(solar_source_t source, int sites, uint32_t expected_s);

@@ -1,19 +1,21 @@
 # reflbo
 
-Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-S3-RLCD-4.2): a battery-powered desk display with an always-on 4.2″ reflective screen. It shows dashboards like a watch face: the time, your room's climate, the weather and air quality, the sun, a rain radar and the aircraft overhead. Between updates it sleeps, with Wi-Fi off.
+Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-S3-RLCD-4.2): a battery-powered desk display with an always-on 4.2″ reflective screen. It shows dashboards like a watch face: the time, your room's climate, the weather and air quality, the sun, a rain radar, the aircraft overhead, your solar panels' forecast and the house's energy. Between updates it sleeps, with Wi-Fi off.
 
 <p align="center"><img src="docs/images/panel/hero.png" width="820" alt="Four dashboards: a large clock with the date, indoor temperature, humidity, the moon and the battery; the current weather with today's forecast and the next hours; a rain radar map of Czechia; a flight radar with aircraft around Brno"></p>
 
-**Status:** version 0.1.0-dev. Milestones M0 to M6b are built: dashboards and presets, the on-device menu, Wi-Fi with a web configurator, syncing, weather and air quality, both radars, and layouts of your own. MQTT and Home Assistant (M7) are designed; audio and microSD come after. The **[user guide](docs/guide.md)** describes every feature.
+**Status:** version 0.1.0-dev. Milestones M0 to M6d are built: dashboards and presets, the on-device menu, Wi-Fi with a web configurator, syncing, weather and air quality, both radars, layouts of your own down to the status bar's size, and the solar forecast with the house's energy. MQTT and Home Assistant (M7) are designed; audio and microSD come after. The **[user guide](docs/guide.md)** describes every feature.
 
 ## Features
 
-- **Dashboards.** Seven layouts and up to 16 presets. KEY switches them, an auto-cycle steps through them, and a schedule changes them by the time of day or turns the screen off for the night.
+- **Dashboards.** Nine layouts and up to 16 presets. KEY switches them, an auto-cycle steps through them, and a schedule changes them by the time of day or turns the screen off for the night.
 - **Your own layouts.** Split the screen into up to 24 cells, as small as the status bar, on the web page, with a live preview drawn by the device.
 - **Indoor climate.** Temperature and humidity with their trends, the dew point, and the day's low and high.
 - **Weather and air.** From [Open-Meteo](https://open-meteo.com): now, today, the next hours and days, rain in the next 2 hours, air quality, PM2.5 and PM10, UV and pollen. Sunrise and sunset are computed on the device.
 - **Weather radar.** Rain from ČHMÚ, or RainViewer outside its area, on a built-in world map, with the last hour as a loop.
 - **Flight radar.** Aircraft from adsb.fi around a point you choose, with the nearest one's route.
+- **Solar.** Your PV system's forecast for the day from Open-Meteo through the device's own model (no account), Forecast.Solar or Solcast, with a chart; the house's energy now from SolaX Cloud: solar output, the grid, the house, a home battery and today's totals.
+- **Only what you use.** Each step of the sync can be switched off, so services you don't use cost no requests.
 - **Battery first.** Wi-Fi only for a sync, once a day by default; light sleep between the minute updates; a battery gauge that can learn its cell.
 - **Accurate time.** NTP to the millisecond, a trim for the clock chip's drift, and time zones with daylight saving.
 - **Set up from a phone.** The device's own Wi-Fi with a QR code, then a password-protected web configurator: presets, sync, location, radars, firmware updates with rollback, backup and restore.
@@ -32,6 +34,10 @@ Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-
 <td><img src="docs/images/panel/weather-rain.png" width="400" alt="The Weather layout with rain from 21:45 in the next two hours"><br>Rain in the next 2 hours</td>
 </tr>
 <tr>
+<td><img src="docs/images/panel/solar.png" width="400" alt="The Solar layout: 27.4 kWh forecast today, now, the peak and what is still to come, the day's chart, and the next two days"><br>Today's solar forecast, with what was produced so far</td>
+<td><img src="docs/images/panel/energy.png" width="400" alt="The Energy layout: solar output flowing to the grid, the home and a charging battery, with today's totals"><br>The house's energy now, from SolaX Cloud</td>
+</tr>
+<tr>
 <td><img src="docs/images/panel/menu.png" width="400" alt="The menu: Presets, Wi-Fi, Sync, Time, Display, Sensors and Info"><br>The menu, driven by two buttons</td>
 <td><img src="docs/images/panel/config.png" width="400" alt="Wi-Fi setup with a QR code, the device's network name, its password and its address"><br>Wi-Fi setup: scan the code with a phone</td>
 </tr>
@@ -39,7 +45,7 @@ Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-
 
 The web configurator, on a phone:
 
-<p><img src="docs/images/web/status.png" width="200" alt="The Status page with the screen's image and the device's facts"> <img src="docs/images/web/presets-edit.png" width="200" alt="The preset editor with a live preview of a split layout"> <img src="docs/images/web/sync.png" width="200" alt="The Sync page: the last sync's steps and the schedule"> <img src="docs/images/web/radar.png" width="200" alt="The Radar page with the weather radar's preview"></p>
+<p><img src="docs/images/web/status.png" width="200" alt="The Status page with the screen's image and the device's facts"> <img src="docs/images/web/presets-edit.png" width="200" alt="The preset editor with a live preview of a split layout"> <img src="docs/images/web/sync.png" width="200" alt="The Sync page: the last sync's steps and the schedule"> <img src="docs/images/web/radar.png" width="200" alt="The Radar page with the weather radar's preview"> <img src="docs/images/web/solar.png" width="200" alt="The Solar page: the forecast's source and the roof"></p>
 
 The images are the firmware's own output: the panel images are its golden renders, pixel for pixel what the device draws, and the web pages ran against a demo device using the same renderer.
 
@@ -60,7 +66,7 @@ The board has no backup cell for the clock, so it forgets the time when switched
 | KEY | Next preset | Auto-cycle on or off | Menu |
 | BOOT | Read the sensors now | Sync mode Always on, or back | Wi-Fi setup (3 s) |
 
-The [user guide](docs/guide.md) has the rest: every layout and field, the menu, the web pages, syncing, the radars, time and power.
+The [user guide](docs/guide.md) has the rest: every layout and field, the menu, the web pages, syncing, the radars, solar, time and power.
 
 ## Power
 
@@ -104,8 +110,8 @@ python3 tools/docs_images.py     # the panel images in docs/images from the gold
 | M6: weather radar and flight radar | Built |
 | M6b: layouts of your own, BOOT double for Always on | Built |
 | M6c: smaller split cells, down to the status bar's size | Built |
-| M6d: solar forecast and the house's energy (SolaX Cloud) | Designed |
-| M7: MQTT and Home Assistant | Designed, on hold until M6d |
+| M6d: solar forecast and the house's energy (SolaX Cloud) | Built |
+| M7: MQTT and Home Assistant | Designed |
 | M8: alarms and internet radio | Planned |
 | M9: microSD | Planned |
 
@@ -118,6 +124,8 @@ The device fetches or carries data from these services and datasets:
 - Weather, air quality, pollen and the place search: [Open-Meteo](https://open-meteo.com), CC BY 4.0.
 - The weather radar: "Data: ČHMÚ, [opendata.chmi.cz](https://opendata.chmi.cz), CC BY 4.0"; outside ČHMÚ's area, [RainViewer](https://www.rainviewer.com).
 - The flight radar: aircraft from [adsb.fi](https://adsb.fi), routes from [adsb.lol](https://adsb.lol).
+- The solar forecast: [Open-Meteo](https://open-meteo.com) (CC BY 4.0) through the device's own model, or [Forecast.Solar](https://forecast.solar) (CC BY-SA 4.0), or [Solcast](https://solcast.com) (for personal use only, as its terms say).
+- The house's energy: [SolaX Cloud](https://www.solaxcloud.com), with your own account's keys.
 - The built-in map: borders, coasts and towns from [Natural Earth](https://www.naturalearthdata.com) and airports from [OurAirports](https://ourairports.com), both public domain; more towns inside ČHMÚ's radar area from [GeoNames](https://www.geonames.org), CC BY 4.0.
 
 ## Licence

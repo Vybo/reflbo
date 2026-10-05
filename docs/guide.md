@@ -1,8 +1,8 @@
 # reflbo user guide
 
-reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display. Its 4.2″ reflective screen is always on and shows dashboards like a watch face: the time, your room's climate, the weather, the sun, a rain radar and the aircraft overhead.
+reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display. Its 4.2″ reflective screen is always on and shows dashboards like a watch face: the time, your room's climate, the weather, the sun, a rain radar, the aircraft overhead, your solar panels' forecast and the house's energy.
 
-This guide covers what the firmware does today, version 0.1.0-dev (milestones M0 to M6c). [Coming next](#coming-next) lists what is designed or planned.
+This guide covers what the firmware does today, version 0.1.0-dev (milestones M0 to M6d). [Coming next](#coming-next) lists what is designed or planned.
 
 The images are the firmware's own output. The panel images are the host build's golden renders, which match the device pixel for pixel. The web pages ran against a demo device that draws its previews with the same renderer. On the device the screen is grey and reflective, lit by the room.
 
@@ -19,6 +19,7 @@ The images are the firmware's own output. The panel images are the host build's 
 - [Weather, air and the sun](#weather-air-and-the-sun)
 - [Weather radar](#weather-radar)
 - [Flight radar](#flight-radar)
+- [Solar and the house's energy](#solar-and-the-houses-energy)
 - [The menu](#the-menu)
 - [Wi-Fi and the web configurator](#wi-fi-and-the-web-configurator)
 - [Syncing](#syncing)
@@ -94,6 +95,8 @@ The top 20 pixels show the state of the device. On the left: "Set time" while th
 | Radar | The weather radar, full width |
 | Flights | The flight radar, with the nearest aircraft below |
 | Split | Your own arrangement of up to 24 cells ([Your own layout](#your-own-layout)) |
+| Solar | Today's PV forecast with its chart, and the next two days ([Solar](#solar-and-the-houses-energy)) |
+| Energy | The house's energy now as a flow, and today's totals |
 
 <p><img src="images/panel/home.png" width="400" alt="Classic: a large 20:48, Friday 25 September, and below 23.4 °C rising, 45 % humidity, full moon and the battery at 87 %"> <img src="images/panel/indoor.png" width="400" alt="Grid with the clock in the status bar: temperature 23.4 °C rising, humidity 45 %, dew point 10.8 °C, today's low 20.4 °C, today's high 24.1 °C, battery left 8.5 days"></p>
 <p><img src="images/panel/weather.png" width="400" alt="Weather: 14 °C, partly cloudy, feels like 12 °C; today 18° and 9° with 60 % rain; the next hours from 21:00 to 07:00; room temperature and humidity"> <img src="images/panel/focus.png" width="400" alt="Focus: a large clock over today's forecast and the next hours"></p>
@@ -114,6 +117,11 @@ The top 20 pixels show the state of the device. On the left: "Set time" while th
 | Air quality, PM2.5, PM10, UV index | The European air quality index and its band, particles in µg/m³, the UV index and its band |
 | Pollen | The strongest pollen today, or alder, birch, grass, mugwort, olive or ragweed alone |
 | Rain map | The weather radar, cropped to the slot |
+| Forecast now, today, tomorrow, Still to come, Peak | Your PV system's forecast: the output now, the day's totals, what today still brings, the peak and its time |
+| Solar forecast | Today's output as a chart, a quarter hour a bar: what was produced so far, and the forecast for the rest |
+| Solar, Grid, Home, Home battery | The house now: the panels' output, import or export, the house's use, the battery's charge and power |
+| Produced today, To grid today, From grid today, Own use | Today's totals, and the share of the day's output the house used itself |
+| Energy flow | The panels, the grid, the house and the battery as icons with arrows |
 
 <p><img src="images/panel/air.png" width="400" alt="A grid of air quality 38 fair, PM2.5 11 µg/m³, pollen moderate grass, grass moderate 6 per m³, sunrise 06:44 and sunset 18:45, and three days of forecast"> <img src="images/panel/sun-uv.png" width="400" alt="A grid at 13:00: the weather, sunrise and sunset with a day of 12 h 1 min, 4 minutes shorter, UV index 5 moderate, today's forecast, PM10 15 µg/m³ and birch pollen none"></p>
 <p><img src="images/panel/weather-rain.png" width="400" alt="Weather with rain in the next 2 hours: Rain from 21:45 over eight bars"> <img src="images/panel/rain-map.png" width="400" alt="A grid with the rain map in two cells beside humidity, dew point, today's low and battery left"></p>
@@ -126,7 +134,7 @@ Each preset can draw white on black, show seconds (which wakes the device every 
 
 ## Presets
 
-A preset is a layout, its fields and its options. The device holds up to 16. It comes with six:
+A preset is a layout, its fields and its options. The device holds up to 16. It comes with eight:
 
 | Preset | Layout |
 |---|---|
@@ -136,6 +144,8 @@ A preset is a layout, its fields and its options. The device holds up to 16. It 
 | Focus clock | Focus |
 | Rain radar | Radar |
 | Flights | Flights; the cycle visits it only in sync mode Always on |
+| Solar | Solar; outside the cycle until you add it |
+| Energy | Energy; outside the cycle until you add it |
 
 KEY steps through the presets marked "cycle". KEY double starts or stops the auto-cycle, which switches every 10 s to 1 h. A preset chosen by hand stays chosen after a restart.
 
@@ -143,7 +153,7 @@ The schedule switches presets at set times of day, on chosen days. It can also s
 
 Presets, the auto-cycle and the schedule are edited on the web page, with a live preview drawn by the device.
 
-<p><img src="images/web/presets.png" width="260" alt="The Presets page: Home, Indoor, Weather, My weather (active), Focus clock, Rain radar and Flights, each with a cycle box"> <img src="images/web/presets-edit.png" width="260" alt="Editing My weather: a preview with numbered cells, the name, the layout Split and its first split, rows at 3/4"></p>
+<p><img src="images/web/presets.png" width="260" alt="The Presets page: Home, Indoor, Weather, My weather (active), Focus clock, Rain radar and Flights in the cycle, Solar and Energy outside it"> <img src="images/web/presets-edit.png" width="260" alt="Editing My weather: a preview with numbered cells, the name, the layout Split and its first split, rows at 3/4"></p>
 
 ## Your own layout
 
@@ -189,6 +199,45 @@ It runs only in sync mode Always on, while its view is on the screen, as it asks
 
 <p><img src="images/panel/flights.png" width="400" alt="The flight radar around Brno at 50 km: aircraft BLX204, SIA321, TVS7UZ and BAW15 with their flight levels, towns and rings; the nearest is TVS7UZ, a B38M at 3675 ft and 459 km/h, 22 km south-east, from Brno to Antalya"> <img src="images/web/radar-flights.png" width="260" alt="The Flight radar card on the web page: its preview, the note that it runs only in sync mode Always on, the centre, range and lowest altitude"></p>
 
+## Solar and the house's energy
+
+The Solar preset shows your PV system's forecast for the day, and the Energy preset what the house does with its power right now. Both are set up on the web page's Solar page, and their fields fit in any other layout too.
+
+<p><img src="images/panel/solar.png" width="400" alt="The Solar layout at 13:20: forecast today 27.4 kWh; now 4.06 kW, peak 4.12 kW at 12:45, 10.4 kWh still to come; the day's chart from 6 to 19 h, the morning's bars filled with what was produced, a line for the forecast, the afternoon outlined; Saturday 11.2 kWh cloudy, Sunday 21.4 kWh sunny"> <img src="images/panel/energy.png" width="400" alt="The Energy layout: SolaX at 13:17; solar 3.42 kW flowing to export 1.36 kW, the home 0.86 kW and the battery charging 1.20 kW at 64 %; today produced 16.2 kWh, 6.2 kWh to the grid, 0.6 kWh from it, 62 % own use"></p>
+
+<p><img src="images/panel/weather-solar.png" width="400" alt="The Weather layout with the solar chart of 27.4 kWh in its large slot, today's weather of 18° and 9° with 60 % rain, the energy flow as a row of icons, and below the panels' 3.42 kW and the battery at 64 % charging"></p>
+
+### The forecast
+
+Choose where the forecast comes from:
+
+| Source | Needs | What it gives |
+|---|---|---|
+| Open-Meteo | Nothing: no account. The default | The sun on your roof's tilt and direction, through the device's own PV model: your panels' kWp, the system's losses (14 % by default) and the inverter's limit. Three days, a quarter hour at a time |
+| [Forecast.Solar](https://forecast.solar) | Without a key: one plane. With a key: two | Its own forecast for your planes: hourly for today and tomorrow without a key; with one, finer steps and more days, as the account allows |
+| [Solcast](https://solcast.com) | A key and one or two rooftop sites, set up on solcast.com | Its forecast for the sites, which know your roof. A free hobbyist account has 10 calls a day, so the device asks at most every 3 hours with one site and every 6 with two, and keeps the forecast it has in between |
+
+A roof can have two planes, each with its own kWp, tilt and azimuth (0 is south, −90 east, 90 west). The Solar step runs with each sync: the forecast follows the weather's schedule, so the morning sync brings the day.
+
+### The house's energy
+
+The house's energy comes from [SolaX Cloud](https://www.solaxcloud.com), where SolaX inverters report about every 5 minutes. There are two ways in:
+
+- **SolaX Cloud, Developer API**: the Client ID and Client Secret of an application you create at [developer.solaxcloud.com](https://developer.solaxcloud.com), and the region your account is in (Europe, China or India). The device logs in with them and finds your plant and its inverter, battery and meter itself. Today's totals are SolaX's own.
+- **SolaX Cloud, Token ID**: for older accounts that have a Token ID on solaxcloud.com's API page, with the registration number on the dongle's label. SolaX sends the totals to and from the grid since installation here, so the device needs a reading within an hour of midnight to start each day's count. Sync mode Always on brings one, and so does a sync time such as 00:05. Without one, the day's totals to and from the grid stay dashes.
+
+A reading comes with each sync, and every 5 minutes in sync mode Always on. A reading counts as fresh for 15 minutes. If the house's reading fails, the Sync page and the Solar page say why, but the sync itself doesn't count as failed: the next reading soon replaces it.
+
+The home battery shows when you set it to show, or by itself when the inverter is a hybrid or a reading has a charge above 0 %. On the Energy layout, arrows show where at least 20 W flow and dotted lines where less does. Own use is the share of the day's output that the house used itself.
+
+### The Solar page
+
+<p><img src="images/web/solar.png" width="260" alt="The Solar page: the PV forecast from Open-Meteo through the device's own model, one roof of 7.2 kWp at 35° tilt and −15° azimuth, losses 14 % and an inverter limit of 6 kW"> <img src="images/web/solar-energy.png" width="260" alt="The house's energy card: SolaX Cloud, Developer API, with its Client ID and Client Secret set, the region Europe, and the home battery on automatic"></p>
+
+Keys, tokens, site ids, Client IDs and Secrets are write-only: the page only says whether each is set, and backups never include them. Check now runs the forecast and the house's reading at once and shows what they brought. The page also shows when the forecast and the reading came, and the SolaX plant the Developer API found.
+
+[Open-Meteo](https://open-meteo.com) is used under CC BY 4.0, Forecast.Solar's data under CC BY-SA 4.0, and Solcast's for personal use only, as its terms say.
+
 ## The menu
 
 Hold KEY to open the menu. KEY moves to the next item and, held, opens it; BOOT goes back. A value is changed with KEY (+) and BOOT (−), then saved by holding KEY.
@@ -197,7 +246,7 @@ Hold KEY to open the menu. KEY moves to the next item and, held, opens it; BOOT 
 |---|---|
 | Presets | The active preset, auto-cycle, its interval, the schedule on or off |
 | Wi-Fi | Wi-Fi setup, forget networks, reset the web password |
-| Sync | Sync now, the schedule, the interval, quiet hours on or off |
+| Sync | Sync now, the schedule, the interval, quiet hours on or off, the steps |
 | Time | Set the date and time, 24-hour clock, the time zone |
 | Display | How often the dashboard is redrawn (1–15 min), the panel's refresh rate (0.25–8 Hz) |
 | Sensors | Temperature and humidity offsets, °C or °F |
@@ -217,21 +266,22 @@ The web page runs on the device and works on a phone. It is up only while you ne
 | Status | What the screen shows now, the device, the time, battery and sensors, Wi-Fi, the last sync; the password, logging out, restart |
 | Wi-Fi | Saved networks; add one from a scan, tested before it is saved |
 | Location & time | A place search, the coordinates, the time zone, 12- or 24-hour clock, setting the clock from the phone |
-| Sync | The last sync step by step, Sync now, the schedule and quiet hours, the clock chip's trim |
+| Sync | The last sync step by step, Sync now, the schedule and quiet hours, the steps, the clock chip's trim |
 | Radar | Both radars' centre, zoom or range, and filters, with live previews |
+| Solar | The PV forecast's source and roof, the house's energy and its keys, Check now |
 | Device | Language, units, sensor offsets and interval, the redraw interval and refresh rate, the battery's calibration |
 | Presets | The presets, their editor with a live preview, the auto-cycle and the schedule |
 | Firmware | The running version, and updates |
 | Backup | Download and restore the settings; factory reset |
 
 <p><img src="images/web/status.png" width="260" alt="The Status page: the screen's image, then the device's name, firmware, uptime, free memory and preset"> <img src="images/web/wifi.png" width="260" alt="The Wi-Fi page: on Home as 192.168.1.57, the saved networks Home and Cottage, and networks in sight"> <img src="images/web/place.png" width="260" alt="The Location and time page: a place search, the name Brno with its latitude and longitude, and the time zone list"></p>
-<p><img src="images/web/sync.png" width="260" alt="The Sync page: the last sync at 05:30 with every step ok, the clock chip's trim, Sync now, and the schedule with its shortcuts"> <img src="images/web/radar.png" width="260" alt="The Radar page: the weather radar's preview, its source ČHMÚ, the newest frame at 20:40, and its centre"> <img src="images/web/device.png" width="260" alt="The Device page: language, temperature unit, sensor offsets and how often to measure"></p>
+<p><img src="images/web/sync.png" width="260" alt="The Sync page: the last sync at 05:30 with every step ok, the solar forecast and the house's energy included, the clock chip's trim, Sync now, and the schedule with its shortcuts"> <img src="images/web/radar.png" width="260" alt="The Radar page: the weather radar's preview, its source ČHMÚ, the newest frame at 20:40, and its centre"> <img src="images/web/device.png" width="260" alt="The Device page: language, temperature unit, sensor offsets and how often to measure"></p>
 
 The page asks for a password, chosen on the first visit from a phone on the device's own network. After five wrong passwords it waits a minute. Wi-Fi passwords and the web password are never shown again or included in backups. On your network the page answers only to its own name or address. If you forget the password, reset it in the menu: Wi-Fi ▸ Reset web password.
 
 ## Syncing
 
-A sync turns Wi-Fi on, sets the clock, fetches the forecast, the air quality and a radar frame, then turns Wi-Fi off again. The radio is on for at most 45 seconds; a typical sync takes 3 to 4. A failed sync is tried again after 15, 30 and 60 minutes, except on a low battery.
+A sync turns Wi-Fi on, sets the clock, fetches the forecast, the air quality, a radar frame, the solar forecast and the house's reading, then turns Wi-Fi off again. The radio is on for at most 45 seconds; a typical sync takes 3 to 4. A failed sync is tried again after 15, 30 and 60 minutes, except on a low battery. The house's reading failing alone fails no sync.
 
 | Mode | When |
 |---|---|
@@ -241,6 +291,10 @@ A sync turns Wi-Fi on, sets the clock, fetches the forecast, the air quality and
 | Only when asked | From the menu, the web page or the console |
 
 Quiet hours stop syncs from starting at night; a sync due then runs as they end. In Always on, Wi-Fi goes off for them. BOOT double on the dashboard switches Always on on and back to the mode before.
+
+Each step but the time can be switched off, on the Sync page or in the menu's Sync ▸ Steps: a step that is off makes no requests, and its data age out as usual. The time always runs, as the clock and its trim need it. The solar forecast and the house's energy also need their source set on the Solar page.
+
+<p><img src="images/web/sync-steps.png" width="260" alt="The Steps card on the Sync page: weather, air quality, radar, solar forecast and house energy, each with a checkbox, and Save steps"></p>
 
 Info in the menu shows the last sync's time and the first step that failed. The Sync page shows every step.
 
@@ -272,7 +326,7 @@ The device speaks English and Czech: the menu, the fields, weekdays, months and 
 ## Updates, backup and reset
 
 - **Firmware updates** go through the Firmware page: upload `reflbo.bin` from a build. The device checks the image, writes it beside the running one and restarts into it. If the new firmware doesn't run properly for its first minute, the device goes back to the previous one.
-- **Backup** downloads the settings and presets as one JSON file, without passwords. Restore checks every file before it replaces anything.
+- **Backup** downloads the settings and presets as one JSON file, without passwords or keys. Restore checks every file before it replaces anything. A second Forecast.Solar plane waits for its key, which a backup doesn't carry: the forecast uses the first plane until you set one.
 - **Factory reset**, in the menu or on the Backup page, erases the settings, presets, saved networks and the web password, then restarts with the first-run screen.
 
 ## For developers
@@ -288,7 +342,6 @@ tools/idf.sh exec python tools/devlog.py --cmd "field set env.temp -5.5" --cmd "
 
 ## Coming next
 
-- **Solar (M6d, designed).** A forecast of your PV system's output for the day, from Open-Meteo (no account), Forecast.Solar or Solcast, as a layout with a chart and as fields; the house's energy now from SolaX Cloud (solar output, grid import and export, consumption, a home battery if you have one) as a second layout and as fields; and a switch for each step of the sync, so services you don't use cost no requests.
 - **MQTT and Home Assistant (M7, designed).** The device's sensors and state in Home Assistant through MQTT discovery; its preset as a select; Sync now and Next preset as buttons; key presses as device triggers; a message from Home Assistant as a banner; and values from Home Assistant or other devices as fields on the dashboard.
 - **Audio (M8, planned).** Alarms that ring from sleep, with snooze; internet radio.
 - **microSD (M9, planned).** Uses to be agreed, such as history and graphs, sounds and station lists, or a detailed map.

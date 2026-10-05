@@ -181,6 +181,13 @@ target_include_directories(weather_logic PUBLIC ${REPO_ROOT}/components/weather/
 target_compile_options(weather_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(weather_logic PUBLIC datastore PRIVATE cjson util m)
 
+# solar: the PV forecast's requests, replies, model and local quarter hours (spec §11.5); pure C.
+add_library(solar_logic STATIC ${REPO_ROOT}/components/solar/solar.c ${REPO_ROOT}/components/solar/solar_url.c
+            ${REPO_ROOT}/components/solar/solar_parse.c)
+target_include_directories(solar_logic PUBLIC ${REPO_ROOT}/components/solar/include)
+target_compile_options(solar_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(solar_logic PUBLIC util PRIVATE cjson m)
+
 # ui: pure C on top of gfx, locale, the datastore and the scheduler's local-time rules.
 file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)
 add_library(ui STATIC ${UI_SOURCES})
@@ -247,6 +254,8 @@ reflbo_host_test(test_datastore_weather datastore)
 reflbo_host_test(test_weather weather_logic)
 reflbo_host_test(test_sync_ntp sync_logic)
 target_compile_definitions(test_weather PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/open-meteo")
+reflbo_host_test(test_solar solar_logic)
+target_compile_definitions(test_solar PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/solar")
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
 reflbo_host_test(test_ui_split ui)

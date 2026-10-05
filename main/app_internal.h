@@ -32,7 +32,7 @@ typedef struct {
     uint32_t last_at;           /* when the last sync started (UTC); 0 = none since the cold boot */
     uint8_t last_result[SYNC_STEP_COUNT]; /* sync_step_result_t */
     uint8_t last_failed_step;   /* the first step that failed; SYNC_STEP_COUNT if none */
-    char last_detail[SYNC_DETAIL_LEN];
+    char last_detail[SYNC_STEP_COUNT][SYNC_DETAIL_LEN]; /* why each step failed, kept or was skipped */
 } app_sync_state_t;
 
 /* The PV forecast and the house's energy (main/app_solar.c, spec §11.5, §11.6): kept through deep sleep
@@ -150,13 +150,17 @@ void app_sync_schedule(void);    /* the next automatic sync, after a sync, a set
 time_t app_sync_due(void);       /* for the wake scheduler; 0 = none */
 void app_sync_tick(void);        /* starts a sync that is due; quiet hours in sync mode `always` */
 esp_err_t app_sync_now(void);    /* on demand: ESP_ERR_NOT_FOUND with no network saved */
+/* The Solar page's Check now (M6d): the Solar and Energy steps alone, outside the syncs' history and retries;
+ * ESP_ERR_NOT_FOUND with no network saved, ESP_ERR_INVALID_STATE while a sync runs or with only the device's own
+ * network. */
+esp_err_t app_sync_check(void);
 void app_sync_now_toast(void);   /* the same, with the menu's toast: Sync now, and BOOT on the Radar layout (D30) */
 /* BOOT double on the dashboard (spec §5.6, D31): sync mode `always` on, or back to the mode before,
  * saved and scheduled, with a toast; refused with no network saved ("No Wi-Fi network saved") and on a
  * critical battery. */
 void app_sync_toggle_always(void);
 bool app_sync_active(void);      /* a sync or a radar-only refresh runs */
-bool app_sync_refreshing(void);  /* what runs is a radar-only refresh (spec §9.3): not shown as a sync */
+bool app_sync_refreshing(void);  /* what runs is a refresh or a check (spec §9.3): not shown as a sync */
 bool app_sync_running(void);     /* a sync runs, or waits for a refresh to end: what the screens show */
 bool app_sync_failed(void);      /* the last sync failed a step */
 bool app_sync_holds_wifi(void);  /* sync mode `always` keeps Wi-Fi now */
@@ -181,6 +185,8 @@ void app_solar_budget_reset(void);
  * every 30 min. */
 void app_solar_reading_done(const energy_reading_t *r, const char *error);
 void app_solar_restore(void); /* a cold boot: solar.bin */
+/* The Solar and Energy steps' requests from the settings and the keys in NVS, which must be up. */
+void app_solar_request(sync_solar_req_t *solar, sync_energy_req_t *energy);
 void app_solar_demo(bool on); /* `solar demo on|off` */
 
 /* The keys in NVS `secrets` (main/app_secrets.c, spec §14.2): write-only from the web UI, never logged. */

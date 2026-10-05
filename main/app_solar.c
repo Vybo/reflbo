@@ -177,6 +177,34 @@ const ui_solar_t *app_solar_ui(void)
     return &view;
 }
 
+void app_solar_request(sync_solar_req_t *solar, sync_energy_req_t *energy)
+{
+    const settings_t *set = app_settings();
+    memset(solar, 0, sizeof(*solar));
+    solar->source = set->solar_source;
+    solar->plane_count = set->solar_plane_count;
+    for (int i = 0; i < set->solar_plane_count && i < SOLAR_PLANES_MAX; i++) {
+        const settings_plane_t *p = &set->solar_planes[i];
+        solar->planes[i] = (solar_plane_t){ .kwp = p->kwp_e2 / 100.0f, .tilt = p->tilt, .azimuth = p->azimuth };
+    }
+    solar->losses_pct = set->solar_losses_pct;
+    solar->inverter_w = set->solar_inverter_kw_e2 * 10.0f; /* hundredths of kW */
+    if (set->solar_source == SETTINGS_SOLAR_FORECAST_SOLAR) {
+        app_secret_get(SETTINGS_SECRET_FS_KEY, solar->key, sizeof(solar->key));
+    } else if (set->solar_source == SETTINGS_SOLAR_SOLCAST) {
+        app_secret_get(SETTINGS_SECRET_SOLCAST_KEY, solar->key, sizeof(solar->key));
+        app_secret_get(SETTINGS_SECRET_SOLCAST_SITE1, solar->sites[0], sizeof(solar->sites[0]));
+        app_secret_get(SETTINGS_SECRET_SOLCAST_SITE2, solar->sites[1], sizeof(solar->sites[1]));
+    }
+    solar->solcast_asked = st()->solcast_asked;
+    memset(energy, 0, sizeof(*energy));
+    energy->on = set->energy_source == SETTINGS_ENERGY_SOLAX;
+    if (energy->on) {
+        app_secret_get(SETTINGS_SECRET_SOLAX_TOKEN, energy->token, sizeof(energy->token));
+        app_secret_get(SETTINGS_SECRET_SOLAX_SN, energy->sn, sizeof(energy->sn));
+    }
+}
+
 const app_solar_state_t *app_solar_state(void)
 {
     return st();

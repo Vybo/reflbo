@@ -339,11 +339,11 @@ static int sync_body(int argc, char **argv)
         }
         print_time("last", st->last_at);
         if (st->last_at != 0) {
-            static const char *const k_results[] = { "skipped", "ok", "failed" };
+            static const char *const k_results[] = { "skipped", "ok", "failed", "kept" };
             for (int i = 0; i < SYNC_STEP_COUNT; i++) {
                 printf("  %-8s %s%s%s\n", sync_step_name((sync_step_t)i),
-                       k_results[st->last_result[i] <= SYNC_STEP_FAILED ? st->last_result[i] : 0],
-                       i == st->last_failed_step ? ": " : "", i == st->last_failed_step ? st->last_detail : "");
+                       k_results[st->last_result[i] <= SYNC_STEP_KEPT ? st->last_result[i] : 0],
+                       st->last_detail[i][0] != '\0' ? ": " : "", st->last_detail[i]);
             }
         }
         print_time(st->due.retry ? "next (a retry)" : "next", st->due.at);

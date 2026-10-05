@@ -125,6 +125,14 @@ sync_due_t sync_next_due(const sync_schedule_t *s, const sync_history_t *h, time
     return due;
 }
 
+sync_need_t sync_need(bool clock_valid, bool always_wifi_off, bool have_forecast, bool weather_on)
+{
+    return !clock_valid                   ? SYNC_NEED_TIME
+           : always_wifi_off              ? SYNC_NEED_WIFI
+           : !have_forecast && weather_on ? SYNC_NEED_FORECAST
+                                          : SYNC_NEED_NOTHING;
+}
+
 sync_due_t sync_next_due_needing(const sync_schedule_t *s, const sync_history_t *h, time_t now, bool low_battery,
                                  sync_need_t need)
 {
@@ -209,4 +217,24 @@ time_t sync_radar_next(time_t after, uint32_t step_s)
 {
     time_t t = after - SYNC_RADAR_DELAY_S;
     return t - t % (time_t)step_s + (time_t)step_s + SYNC_RADAR_DELAY_S;
+}
+
+bool sync_report_failed(const uint8_t result[SYNC_STEP_COUNT])
+{
+    for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+        if (result[i] == SYNC_STEP_FAILED && i != SYNC_STEP_ENERGY) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int sync_first_failed(const uint8_t result[SYNC_STEP_COUNT])
+{
+    for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+        if (result[i] == SYNC_STEP_FAILED) {
+            return i;
+        }
+    }
+    return SYNC_STEP_COUNT;
 }

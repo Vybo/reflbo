@@ -169,14 +169,20 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
         cJSON *last = cJSON_AddObjectToObject(sync, "last");
         cJSON_AddNumberToObject(last, "at", st->sync.last_at);
         cJSON *steps = cJSON_AddObjectToObject(last, "steps");
-        static const char *const k_results[] = { "skipped", "ok", "failed" };
+        static const char *const k_results[] = { "skipped", "ok", "failed", "kept" };
         for (int i = 0; i < SYNC_STEP_COUNT; i++) {
             uint8_t r = st->sync.last_result[i];
-            cJSON_AddStringToObject(steps, sync_step_name((sync_step_t)i), k_results[r <= SYNC_STEP_FAILED ? r : 0]);
+            cJSON_AddStringToObject(steps, sync_step_name((sync_step_t)i), k_results[r <= SYNC_STEP_KEPT ? r : 0]);
+        }
+        cJSON *details = cJSON_AddObjectToObject(last, "details"); /* why a step failed, kept or was skipped */
+        for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+            if (st->sync.last_detail[i][0] != '\0') {
+                cJSON_AddStringToObject(details, sync_step_name((sync_step_t)i), st->sync.last_detail[i]);
+            }
         }
         if (st->sync.last_failed_step < SYNC_STEP_COUNT) {
             cJSON_AddStringToObject(last, "failed", sync_step_name((sync_step_t)st->sync.last_failed_step));
-            cJSON_AddStringToObject(last, "detail", st->sync.last_detail);
+            cJSON_AddStringToObject(last, "detail", st->sync.last_detail[st->sync.last_failed_step]);
         }
     }
     if (st->sync.due.at != 0) {

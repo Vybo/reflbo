@@ -188,6 +188,12 @@ target_include_directories(solar_logic PUBLIC ${REPO_ROOT}/components/solar/incl
 target_compile_options(solar_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(solar_logic PUBLIC util timekeeping_logic PRIVATE cjson m)
 
+# energy: SolaX Cloud's reply, the signs, the battery's rule and the day's totals (spec §11.6); pure C.
+add_library(energy_logic STATIC ${REPO_ROOT}/components/energy/energy.c)
+target_include_directories(energy_logic PUBLIC ${REPO_ROOT}/components/energy/include)
+target_compile_options(energy_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(energy_logic PUBLIC util timekeeping_logic PRIVATE cjson m)
+
 # ui: pure C on top of gfx, locale, the datastore and the scheduler's local-time rules.
 file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)
 add_library(ui STATIC ${UI_SOURCES})
@@ -256,6 +262,8 @@ reflbo_host_test(test_sync_ntp sync_logic)
 target_compile_definitions(test_weather PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/open-meteo")
 reflbo_host_test(test_solar solar_logic)
 target_compile_definitions(test_solar PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/solar")
+reflbo_host_test(test_energy energy_logic)
+target_compile_definitions(test_energy PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/energy")
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
 reflbo_host_test(test_ui_split ui)

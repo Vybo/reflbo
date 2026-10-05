@@ -13,7 +13,7 @@
 static const char *const k_policies[] = { [UI_STALE_STALE] = "stale", [UI_STALE_PLACEHOLDER] = "placeholder",
                                           [UI_STALE_HIDE] = "hide" };
 static const char *const k_battery_parts[] = { "percent", "voltage", "days" }; /* UI_STATUS_BAT_* bit order */
-static const char *const k_offered_ids[] = { "rain", "flights" };              /* UI_OFFERED_* bit order */
+static const char *const k_offered_ids[] = { "rain", "flights", "solar", "energy" }; /* UI_OFFERED_* bit order */
 
 static bool fail(char *err, size_t size, const char *fmt, ...)
 {

@@ -19,9 +19,9 @@ void setUp(void)
 
 void tearDown(void) {}
 
-static void test_defaults_are_the_six_built_ins(void)
+static void test_defaults_are_the_eight_built_ins(void)
 {
-    TEST_ASSERT_EQUAL_INT(6, s_p.count);
+    TEST_ASSERT_EQUAL_INT(8, s_p.count);
     TEST_ASSERT_EQUAL_STRING("home", s_p.presets[s_p.active].id);
     TEST_ASSERT_EQUAL(UI_LAYOUT_CLASSIC, s_p.presets[0].layout);
     TEST_ASSERT_EQUAL(UI_FIELD_TIME_CLOCK, s_p.presets[0].slots[0]);
@@ -35,6 +35,14 @@ static void test_defaults_are_the_six_built_ins(void)
     TEST_ASSERT_EQUAL(UI_LAYOUT_FLIGHTS, s_p.presets[5].layout);
     TEST_ASSERT_TRUE(s_p.presets[5].in_cycle);
     TEST_ASSERT_TRUE(s_p.presets[4].status_clock && s_p.presets[5].status_clock); /* a map fills the screen */
+    TEST_ASSERT_EQUAL_INT(6, ui_presets_find(&s_p, "solar")); /* M6d (D35, D36) */
+    TEST_ASSERT_EQUAL(UI_LAYOUT_SOLAR, s_p.presets[6].layout);
+    TEST_ASSERT_EQUAL_STRING("Solar", s_p.presets[6].name);
+    TEST_ASSERT_EQUAL_INT(7, ui_presets_find(&s_p, "energy"));
+    TEST_ASSERT_EQUAL(UI_LAYOUT_ENERGY, s_p.presets[7].layout);
+    TEST_ASSERT_EQUAL_STRING("Energy", s_p.presets[7].name);
+    TEST_ASSERT_FALSE(s_p.presets[6].in_cycle || s_p.presets[7].in_cycle); /* outside the cycle */
+    TEST_ASSERT_TRUE(s_p.presets[6].status_clock && s_p.presets[7].status_clock);
     TEST_ASSERT_EQUAL_UINT8(UI_OFFERED_ALL, s_p.offered); /* nothing left to add */
     TEST_ASSERT_EQUAL_INT(-1, ui_presets_find(&s_p, "nope"));
 }
@@ -78,19 +86,46 @@ static void test_a_file_from_before_m6_gains_the_radars_once(void)
     TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(k_m5_file, &s_p, s_err, sizeof(s_err)), s_err);
     TEST_ASSERT_EQUAL_UINT8(0, s_p.offered);
     TEST_ASSERT_TRUE(ui_presets_offer_builtins(&s_p)); /* changed: save it */
-    TEST_ASSERT_EQUAL_INT(6, s_p.count);
+    TEST_ASSERT_EQUAL_INT(8, s_p.count);
     TEST_ASSERT_EQUAL_INT(4, ui_presets_find(&s_p, "rain"));
     TEST_ASSERT_EQUAL_INT(5, ui_presets_find(&s_p, "flights"));
+    TEST_ASSERT_EQUAL_INT(6, ui_presets_find(&s_p, "solar")); /* and M6d's */
     TEST_ASSERT_EQUAL_STRING("weather", s_p.presets[s_p.active].id); /* the active one stays */
     TEST_ASSERT_FALSE(ui_presets_offer_builtins(&s_p));
 
     TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
-    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"offered\":[\"rain\",\"flights\"]"));
-    s_p.count = 5; /* the owner deletes Flights */
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"offered\":[\"rain\",\"flights\",\"solar\",\"energy\"]"));
+    memmove(&s_p.presets[5], &s_p.presets[6], 2 * sizeof(s_p.presets[0])); /* the owner deletes Flights */
+    s_p.count = 7;
     TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
     TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &s_p, s_err, sizeof(s_err)), s_err);
     TEST_ASSERT_FALSE(ui_presets_offer_builtins(&s_p)); /* and it stays deleted */
     TEST_ASSERT_EQUAL_INT(-1, ui_presets_find(&s_p, "flights"));
+}
+
+/* A presets.json saved by M6c: the radars offered, its own presets, the Weather preset active. */
+static const char k_m6c_file[] =
+    "{\"schema\":1,\"active\":\"weather\",\"offered\":[\"rain\",\"flights\"],\"presets\":["
+    "{\"id\":\"home\",\"layout\":\"classic\"},{\"id\":\"weather\",\"layout\":\"weather\"},"
+    "{\"id\":\"rain\",\"layout\":\"radar\"}]}";
+
+static void test_a_file_from_m6c_gains_solar_and_energy_once(void)
+{
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(k_m6c_file, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(UI_OFFERED_RAIN | UI_OFFERED_FLIGHTS, s_p.offered);
+    TEST_ASSERT_TRUE(ui_presets_offer_builtins(&s_p));
+    TEST_ASSERT_EQUAL_INT(5, s_p.count); /* Flights was deleted under M6c: it stays deleted */
+    TEST_ASSERT_EQUAL_INT(-1, ui_presets_find(&s_p, "flights"));
+    TEST_ASSERT_EQUAL_INT(3, ui_presets_find(&s_p, "solar"));
+    TEST_ASSERT_EQUAL_INT(4, ui_presets_find(&s_p, "energy"));
+    TEST_ASSERT_FALSE(s_p.presets[3].in_cycle || s_p.presets[4].in_cycle);
+    TEST_ASSERT_EQUAL_STRING("weather", s_p.presets[s_p.active].id);
+    TEST_ASSERT_FALSE(ui_presets_offer_builtins(&s_p));
+    s_p.count = 4; /* the owner deletes Energy */
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_FALSE(ui_presets_offer_builtins(&s_p)); /* and it stays deleted */
+    TEST_ASSERT_EQUAL_INT(-1, ui_presets_find(&s_p, "energy"));
 }
 
 static void test_the_radars_need_room_and_a_free_id(void)
@@ -109,9 +144,24 @@ static void test_the_radars_need_room_and_a_free_id(void)
     s_p.presets[0].layout = UI_LAYOUT_GRID;
     s_p.count = 1;
     TEST_ASSERT_TRUE(ui_presets_offer_builtins(&s_p));
-    TEST_ASSERT_EQUAL_INT(2, s_p.count); /* Flights only */
+    TEST_ASSERT_EQUAL_INT(4, s_p.count); /* Flights, Solar and Energy */
     TEST_ASSERT_EQUAL(UI_LAYOUT_GRID, s_p.presets[0].layout);
     TEST_ASSERT_EQUAL_STRING("flights", s_p.presets[1].id);
+    TEST_ASSERT_EQUAL_STRING("energy", s_p.presets[3].id);
+}
+
+static void test_the_solar_layouts_have_no_slots(void)
+{
+    static const char k_ok[] = "{\"schema\":1,\"presets\":[{\"id\":\"s\",\"layout\":\"solar\"},"
+                               "{\"id\":\"e\",\"layout\":\"energy\",\"slots\":{}}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(k_ok, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL(UI_LAYOUT_SOLAR, s_p.presets[0].layout);
+    TEST_ASSERT_EQUAL(UI_LAYOUT_ENERGY, s_p.presets[1].layout);
+    TEST_ASSERT_EQUAL_INT(0, ui_preset_slots(&s_p.presets[0]));
+    static const char k_slot[] =
+        "{\"schema\":1,\"presets\":[{\"id\":\"e\",\"layout\":\"energy\",\"slots\":{\"flow\":\"energy.flow\"}}]}";
+    TEST_ASSERT_FALSE(ui_presets_from_json(k_slot, &s_p, s_err, sizeof(s_err)));
+    TEST_ASSERT_NOT_NULL(strstr(s_err, "has no slot"));
 }
 
 static void test_the_radar_layouts_have_no_slots_and_the_rain_map_needs_room(void)
@@ -575,11 +625,13 @@ static void test_a_preset_counts_the_slots_its_layout_uses(void)
 int main(void)
 {
     UNITY_BEGIN();
-    RUN_TEST(test_defaults_are_the_six_built_ins);
+    RUN_TEST(test_defaults_are_the_eight_built_ins);
     RUN_TEST(test_next_follows_cycle_order_and_skips_presets_out_of_it);
     RUN_TEST(test_the_cycle_visits_flights_only_in_sync_mode_always);
     RUN_TEST(test_a_file_from_before_m6_gains_the_radars_once);
+    RUN_TEST(test_a_file_from_m6c_gains_solar_and_energy_once);
     RUN_TEST(test_the_radars_need_room_and_a_free_id);
+    RUN_TEST(test_the_solar_layouts_have_no_slots);
     RUN_TEST(test_the_radar_layouts_have_no_slots_and_the_rain_map_needs_room);
     RUN_TEST(test_defaults_survive_a_json_round_trip);
     RUN_TEST(test_the_spec_example_parses);

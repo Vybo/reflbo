@@ -40,17 +40,21 @@ void ui_presets_defaults(ui_presets_t *p)
     p->active = 0;
     p->cycle_enabled = false;
     p->cycle_interval_s = 60;
-    ui_presets_offer_builtins(p); /* the radars (M6) */
+    ui_presets_offer_builtins(p); /* the radars (M6), Solar and Energy (M6d) */
 }
 
-/* The built-ins added after M5: the two radars (D28), whose layouts have no slots. */
+/* The built-ins added after M5, whose layouts have no slots: the two radars (D28) in the cycle, Solar and Energy
+ * (D35, D36) outside it. */
 static const struct {
     uint8_t bit;
     const char *id, *name;
     ui_layout_id_t layout;
+    bool in_cycle;
 } k_offered[] = {
-    { UI_OFFERED_RAIN, "rain", "Rain radar", UI_LAYOUT_RADAR },
-    { UI_OFFERED_FLIGHTS, "flights", "Flights", UI_LAYOUT_FLIGHTS },
+    { UI_OFFERED_RAIN, "rain", "Rain radar", UI_LAYOUT_RADAR, true },
+    { UI_OFFERED_FLIGHTS, "flights", "Flights", UI_LAYOUT_FLIGHTS, true },
+    { UI_OFFERED_SOLAR, "solar", "Solar", UI_LAYOUT_SOLAR, false },
+    { UI_OFFERED_ENERGY, "energy", "Energy", UI_LAYOUT_ENERGY, false },
 };
 
 bool ui_presets_offer_builtins(ui_presets_t *p)
@@ -62,9 +66,9 @@ bool ui_presets_offer_builtins(ui_presets_t *p)
         }
         if (ui_presets_find(p, k_offered[i].id) < 0 && p->count < UI_PRESET_MAX) {
             ui_preset_t *added = &p->presets[p->count++];
-            *added = make(k_offered[i].id, k_offered[i].name, k_offered[i].layout, true,
+            *added = make(k_offered[i].id, k_offered[i].name, k_offered[i].layout, k_offered[i].in_cycle,
                           (ui_field_id_t[UI_SLOT_MAX]){ UI_FIELD_NONE });
-            added->status_clock = true; /* a map fills the screen: the time goes to the status bar */
+            added->status_clock = true; /* the view fills the screen: the time goes to the status bar */
         }
         p->offered |= k_offered[i].bit;
         changed = true;

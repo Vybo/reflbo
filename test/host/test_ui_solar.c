@@ -5,6 +5,7 @@
 
 #include "dashboard_fixtures.h"
 #include "gfx.h"
+#include "gfx_fonts.h"
 #include "gfx_icons.h"
 #include "ui_split.h"
 #include "unity.h"
@@ -160,6 +161,112 @@ static void test_without_data_the_chart_and_the_flow_are_missing(void)
     TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state);
 }
 
+/* Whether glyph `cp` of `f` is drawn somewhere in `area`, a blank pixel all round it. */
+static bool has_glyph(gfx_rect_t area, const gfx_font_t *f, uint32_t cp)
+{
+    const gfx_glyph_t *g = gfx_font_glyph(f, cp);
+    int rb = (g->width + 7) / 8;
+    for (int y0 = area.y + 1; y0 + g->height < area.y + area.h; y0++) {
+        for (int x0 = area.x + 1; x0 + g->width < area.x + area.w; x0++) {
+            bool same = true;
+            for (int y = -1; same && y <= g->height; y++) {
+                for (int x = -1; same && x <= g->width; x++) {
+                    bool want = x >= 0 && y >= 0 && x < g->width && y < g->height &&
+                                ((f->bitmap[g->offset + y * rb + x / 8] >> (7 - x % 8)) & 1);
+                    same = gfx_get_pixel(&s_fb, x0 + x, y0 + y) == want;
+                }
+            }
+            if (same) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void draw_preset(const char *fixture)
+{
+    ui_preset_t preset;
+    ui_context_t ctx;
+    TEST_ASSERT_TRUE(fixture_dashboard(fixture, &ctx, &preset));
+    s_ctx = ctx;
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    ui_draw_dashboard(&s_fb, &s_ctx, &preset);
+}
+
+static void redraw(const char *preset_id)
+{
+    ui_preset_t preset = fixture_preset(preset_id);
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    ui_draw_dashboard(&s_fb, &s_ctx, &preset);
+}
+
+#define EM_DASH 0x2014
+
+/* A day the forecast has no total for shows a dash in the Solar layout's footer (Forecast.Solar's free tier
+ * has two days). */
+static void test_the_solar_layout_marks_a_day_without_a_total_with_a_dash(void)
+{
+    gfx_rect_t after = { 200, 266, 200, 34 }; /* the day after tomorrow, bottom right */
+    draw_preset("solar");
+    TEST_ASSERT_FALSE(has_glyph(after, &gfx_font_sans_bold_20, EM_DASH));
+    s_fix_forecast.wh[2] = SOLAR_WH_NONE;
+    redraw("solar");
+    TEST_ASSERT_TRUE(has_glyph(after, &gfx_font_sans_bold_20, EM_DASH));
+}
+
+/* Old data raises the status bar's stale warning on both layouts, as a stale slot does (spec §5.2). */
+static void test_stale_data_raises_the_status_bars_warning(void)
+{
+    gfx_rect_t bar = { 0, 0, 400, UI_STATUS_H };
+    int x, y;
+    draw_preset("solar_actual");
+    TEST_ASSERT_FALSE(find_icon(bar, &gfx_icon_stale_16, &x, &y));
+    s_fix_forecast.fetched = (uint32_t)(s_ctx.now - 27 * 3600); /* past its wait */
+    redraw("solar");
+    TEST_ASSERT_TRUE(find_icon(bar, &gfx_icon_stale_16, &x, &y));
+    draw_preset("energy");
+    TEST_ASSERT_FALSE(find_icon(bar, &gfx_icon_stale_16, &x, &y));
+    s_fix_reading.at = (uint32_t)(s_ctx.now - 16 * 60); /* older than 15 min */
+    redraw("energy");
+    TEST_ASSERT_TRUE(find_icon(bar, &gfx_icon_stale_16, &x, &y));
+}
+
+/* Without a reading near midnight the day's totals to and from the grid and the own use are dashes; what was
+ * produced still shows, as the inverter counts it. */
+static void test_the_energy_totals_without_a_midnight_reading_are_dashes(void)
+{
+    gfx_rect_t totals = { 0, 200, 400, 100 };
+    draw_preset("energy");
+    TEST_ASSERT_FALSE(has_glyph(totals, &gfx_font_sans_bold_20, EM_DASH));
+    s_fix_energy_day.base_at = 0;
+    redraw("energy");
+    TEST_ASSERT_TRUE(has_glyph(totals, &gfx_font_sans_bold_20, EM_DASH));
+}
+
+/* The largest values keep the layouts' numbers apart (Review Focus): today's total in the Solar layout ends before
+ * the column beside it, whose labels and values keep apart too, and each of the Energy layout's totals in a row with
+ * a battery ends before the next one's number. */
+static void test_the_largest_totals_keep_to_their_places(void)
+{
+    int top = UI_STATUS_H + 1;
+    draw_preset("solar");
+    fixture_solar_largest(s_ctx.now);
+    redraw("solar");
+    TEST_ASSERT_TRUE_MESSAGE(has_glyph((gfx_rect_t){ 0, (int16_t)top, 196, 84 }, &gfx_font_sans_bold_20, 'h'),
+                             "today's kWh");
+    TEST_ASSERT_TRUE_MESSAGE(has_glyph((gfx_rect_t){ 196, (int16_t)(top + 56), 194, 20 }, &gfx_font_sans_16, 'e'),
+                             "the column's \"Still to come\" beside its value");
+    draw_preset("energy_battery");
+    fixture_solar_largest(s_ctx.now);
+    redraw("energy");
+    for (int i = 0; i < 3; i++) { /* produced, to the grid, from it (the own use is a share): before the next number */
+        TEST_ASSERT_TRUE_MESSAGE(has_glyph((gfx_rect_t){ (int16_t)(i * 100), (int16_t)(top + 222), 120, 48 },
+                                           &gfx_font_sans_16, 'h'),
+                                 "a total's kWh");
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -168,5 +275,9 @@ int main(void)
     RUN_TEST(test_the_battery_joins_the_flow_where_it_has_room);
     RUN_TEST(test_a_flow_under_20_watts_has_no_arrow);
     RUN_TEST(test_without_data_the_chart_and_the_flow_are_missing);
+    RUN_TEST(test_the_solar_layout_marks_a_day_without_a_total_with_a_dash);
+    RUN_TEST(test_stale_data_raises_the_status_bars_warning);
+    RUN_TEST(test_the_energy_totals_without_a_midnight_reading_are_dashes);
+    RUN_TEST(test_the_largest_totals_keep_to_their_places);
     return UNITY_END();
 }

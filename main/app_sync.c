@@ -201,6 +201,7 @@ static void apply_solar(const sync_report_t *r)
                                 r->solcast_sites);
     }
     if (energy != SYNC_STEP_NOT_RUN) {
+        app_solar_dev_keep(r);
         app_solar_reading_done(energy == SYNC_STEP_OK ? &r->energy : NULL,
                                energy == SYNC_STEP_FAILED ? r->detail[SYNC_STEP_ENERGY] : NULL);
     }
@@ -461,7 +462,7 @@ static void refresh_tick(time_t now)
     }
     const settings_t *set = app_settings();
     bool radar = (set->sync_steps & SETTINGS_STEP_RADAR) && now >= s_radar_next;
-    bool energy = (set->sync_steps & SETTINGS_STEP_ENERGY) && set->energy_source == SETTINGS_ENERGY_SOLAX &&
+    bool energy = (set->sync_steps & SETTINGS_STEP_ENERGY) && set->energy_source != SETTINGS_ENERGY_OFF &&
                   now >= s_energy_next;
     if (s_active || (!radar && !energy)) {
         return;

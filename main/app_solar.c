@@ -18,7 +18,7 @@
 
 #define SOLAR_PATH "/fs/state/solar.bin"
 #define SOLAR_MAGIC 0x7266736cu /* "rfsl" */
-#define SOLAR_FILE_VERSION 1
+#define SOLAR_FILE_VERSION 2 /* 2: the Developer API's plant (D37) */
 #define READINGS_SAVE_S (30 * 60) /* spec §11.6: the readings go to the file at most every 30 min */
 
 static const char *TAG = "app_solar";
@@ -30,7 +30,12 @@ typedef struct {
     uint8_t solcast_sites; /* its wait, so a two-site forecast stays fresh 6 h after a cold boot */
     energy_reading_t reading;
     energy_day_t day;
+    energy_dev_site_t site;
 } solar_file_t;
+
+/* The Developer API's access token (D37): RAM only, so a deep-sleep wake or a reboot logs in again. */
+EXT_RAM_BSS_ATTR static char s_access[ENERGY_DEV_TOKEN_MAX];
+static uint32_t s_access_until;
 
 static app_solar_state_t *st(void)
 {
@@ -51,6 +56,7 @@ static void save(void)
     f.solcast_sites = s->solcast_sites;
     f.reading = s->reading;
     f.day = s->day;
+    f.site = s->site;
     util_snapshot_seal(&f, sizeof(f), SOLAR_MAGIC, SOLAR_FILE_VERSION);
     esp_err_t err = storage_write_atomic(SOLAR_PATH, (const char *)&f, sizeof(f));
     if (err != ESP_OK) {
@@ -82,6 +88,7 @@ void app_solar_restore(void)
     s->solcast_sites = f.solcast_sites;
     s->reading = f.reading;
     s->day = f.day;
+    s->site = f.site;
     s->saved_at = (uint32_t)time(NULL);
     ESP_LOGI(TAG, "forecast from %lu and reading from %lu restored", (unsigned long)f.forecast.fetched,
              (unsigned long)f.reading.at);
@@ -130,6 +137,38 @@ void app_solar_reading_done(const energy_reading_t *r, const char *error)
     s->reading = *r;
     energy_day_add(&s->day, r);
     if (s->saved_at == 0 || now < s->saved_at || now - s->saved_at >= READINGS_SAVE_S) {
+        save();
+    }
+}
+
+void app_solar_dev_keep(const sync_report_t *r)
+{
+    app_solar_state_t *s = st();
+    if (r->energy_access[0] != '\0') {
+        snprintf(s_access, sizeof(s_access), "%s", r->energy_access);
+        s_access_until = r->energy_access_until;
+    } else if (r->energy_access_dropped) {
+        s_access[0] = '\0';
+        s_access_until = 0;
+    }
+    if (r->energy_site.plant_id[0] != '\0' && memcmp(&s->site, &r->energy_site, sizeof(s->site)) != 0) {
+        s->site = r->energy_site;
+        save();
+    }
+}
+
+uint32_t app_solar_dev_token_until(void)
+{
+    return s_access[0] != '\0' ? s_access_until : 0;
+}
+
+void app_solar_dev_reset(void)
+{
+    app_solar_state_t *s = st();
+    s_access[0] = '\0';
+    s_access_until = 0;
+    if (s->site.plant_id[0] != '\0') {
+        memset(&s->site, 0, sizeof(s->site));
         save();
     }
 }
@@ -198,10 +237,17 @@ void app_solar_request(sync_solar_req_t *solar, sync_energy_req_t *energy)
     }
     solar->solcast_asked = st()->solcast_asked;
     memset(energy, 0, sizeof(*energy));
-    energy->on = set->energy_source == SETTINGS_ENERGY_SOLAX;
-    if (energy->on) {
+    energy->source = set->energy_source;
+    if (energy->source == SETTINGS_ENERGY_SOLAX) {
         app_secret_get(SETTINGS_SECRET_SOLAX_TOKEN, energy->token, sizeof(energy->token));
         app_secret_get(SETTINGS_SECRET_SOLAX_SN, energy->sn, sizeof(energy->sn));
+    } else if (energy->source == SETTINGS_ENERGY_SOLAX_DEV) {
+        energy->region = set->energy_region; /* a token or a plant of another region is refused, and found again */
+        app_secret_get(SETTINGS_SECRET_SOLAX_CLIENT_ID, energy->client_id, sizeof(energy->client_id));
+        app_secret_get(SETTINGS_SECRET_SOLAX_CLIENT_SECRET, energy->client_secret, sizeof(energy->client_secret));
+        snprintf(energy->access, sizeof(energy->access), "%s", s_access);
+        energy->access_until = s_access_until;
+        energy->site = st()->site;
     }
 }
 

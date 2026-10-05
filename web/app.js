@@ -785,11 +785,13 @@ async function radarPage() {
 
 /* ---- Device: the settings the menu also has (spec §5.7, D19) ---- */
 
-/* ---- Solar (spec §11.5, §11.6, D35, D36) ---- */
+/* ---- Solar (spec §11.5, §11.6, D35, D36, D37) ---- */
 
 const SOLAR_SOURCES = [['off', 'Off'], ['open-meteo', 'Open-Meteo, through the device\'s own model'],
                        ['forecast-solar', 'Forecast.Solar'], ['solcast', 'Solcast']];
-const ENERGY_SOURCES = [['off', 'Off'], ['solax', 'SolaX Cloud']];
+const ENERGY_SOURCES = [['off', 'Off'], ['solax-dev', 'SolaX Cloud, Developer API'],
+                        ['solax', 'SolaX Cloud, Token ID']];
+const SOLAX_REGIONS = [['eu', 'Europe'], ['cn', 'China'], ['in', 'India']];
 const BATTERY_MODES = [['auto', 'Automatic: a hybrid inverter, or a charge above 0 %'], ['on', 'Shown'],
                        ['off', 'Hidden']];
 
@@ -861,11 +863,19 @@ async function solarPage() {
   show();
 
   const esource = choose(ENERGY_SOURCES, energy.source || 'off');
-  const token = secretInput('Token', !!ekeys.solax_token, 'From the API page of solaxcloud.com.');
+  const region = choose(SOLAX_REGIONS, energy.region || 'eu');
+  const clientId = secretInput('Client ID', !!ekeys.solax_client_id);
+  const secret = secretInput('Client Secret', !!ekeys.solax_client_secret);
+  const devBox = h('div', {}, h('p', { class: 'muted small', text: 'From developer.solaxcloud.com: the Client ID and ' +
+    'Client Secret of the application you created there. The device logs in with them and finds the plant and its ' +
+    'inverter, battery and meter itself; today\'s totals are SolaX\'s own.' }), clientId.el, secret.el,
+  field('Region', region, 'Where the SolaX account is.'));
+  const token = secretInput('Token ID', !!ekeys.solax_token, 'From the API page of solaxcloud.com, for accounts ' +
+    'that have one.');
   const sn = secretInput('Registration number', !!ekeys.solax_sn, 'The dongle\'s, on its label.');
   const battery = choose(BATTERY_MODES, energy.battery || 'auto');
   const solaxBox = h('div', {}, token.el, sn.el);
-  const eshow = () => { solaxBox.hidden = esource.value !== 'solax'; };
+  const eshow = () => { solaxBox.hidden = esource.value !== 'solax'; devBox.hidden = esource.value !== 'solax-dev'; };
   esource.addEventListener('change', eshow);
   eshow();
 
@@ -878,13 +888,15 @@ async function solarPage() {
     const out = { solar: { source: source.value, planes: planes.map((q) => ({ kwp: Number(q.kwp), tilt: Number(q.tilt),
                                                                              azimuth: Number(q.azimuth) })),
                            losses_pct: Number(model.losses), inverter_kw: Number(model.inverter) },
-                  energy: { source: esource.value, battery: battery.value } };
+                  energy: { source: esource.value, region: region.value, battery: battery.value } };
     const put = (obj, key, v) => { if (v !== undefined) obj[key] = v; };
     put(out.solar, 'fs_key', fsKey.value());
     put(out.solar, 'solcast_key', scKey.value());
     if (touched) out.solar.solcast_sites = sites.map((x) => x.value() || '').filter(Boolean);
     put(out.energy, 'solax_token', token.value());
     put(out.energy, 'solax_sn', sn.value());
+    put(out.energy, 'solax_client_id', clientId.value());
+    put(out.energy, 'solax_client_secret', secret.value());
     await api('PATCH', '/api/settings', out);
     note.className = 'good';
     note.textContent = 'Saved.';
@@ -900,6 +912,7 @@ async function solarPage() {
         `is asked again from ${f.next_at ? when(f.next_at) : 'its next sync'}, within its 10 calls a day`] : null,
       f.error ? ['Its last call', `failed: ${f.error}`] : null,
       ['House reading', e.reading_at ? `from ${when(e.reading_at)}` : 'none yet'],
+      e.source === 'solax-dev' ? ['SolaX plant', e.plant || 'not found yet'] : null,
       e.error ? ['Its last step', `failed: ${e.error}`] : null,
     ]));
   };
@@ -926,7 +939,7 @@ async function solarPage() {
 
   main.replaceChildren(h('h1', { text: 'Solar' }),
     card('PV forecast', field('Source', source), planeBox, modelBox, fsBox, scBox),
-    card('The house\'s energy', field('Source', esource), solaxBox, field('Home battery', battery)),
+    card('The house\'s energy', field('Source', esource), devBox, solaxBox, field('Home battery', battery)),
     save, nowCard,
     card('Credits', h('p', { class: 'muted small', text: 'Forecasts: Open-Meteo (CC BY 4.0), Forecast.Solar (CC BY-SA ' +
       '4.0), Solcast (for personal use only, as its terms say). The house\'s readings: SolaX Cloud.' })));

@@ -5,6 +5,7 @@
 
 #include "datastore.h"
 #include "energy.h"
+#include "energy_dev.h"
 #include "esp_err.h"
 #include "radar_fetch.h"
 #include "settings.h"
@@ -41,11 +42,18 @@ typedef struct {
     uint32_t solcast_asked;        /* when Solcast was last asked (UTC): its budget */
 } sync_solar_req_t;
 
-/* The Energy step's request (spec §11.6). */
+/* The Energy step's request (spec §11.6): SolaX Cloud by its Token ID, or by its Developer API (D37). Keys and the
+ * access token stay in it, never in a log. */
 typedef struct {
-    bool on; /* energy.source is SolaX Cloud */
-    char token[ENERGY_KEY_MAX];
-    char sn[ENERGY_KEY_MAX];
+    uint8_t source;                    /* settings_energy_source_t; SETTINGS_ENERGY_OFF: the step is skipped */
+    char token[ENERGY_KEY_MAX];        /* the Token ID */
+    char sn[ENERGY_KEY_MAX];           /* the dongle's registration number */
+    uint8_t region;                    /* energy_dev_region_t */
+    char client_id[ENERGY_KEY_MAX];    /* the Developer API's application */
+    char client_secret[ENERGY_KEY_MAX];
+    char access[ENERGY_DEV_TOKEN_MAX]; /* the access token the app keeps; "" for none */
+    uint32_t access_until;             /* when it ends (UTC) */
+    energy_dev_site_t site;            /* the plant and its devices found before; plant_id "" for none yet */
 } sync_energy_req_t;
 
 typedef struct {
@@ -75,6 +83,10 @@ typedef struct {
     uint32_t solcast_asked;     /* when the step asked Solcast (UTC); 0: it didn't */
     uint8_t solcast_sites;      /* Solcast's sites, for the forecast's freshness */
     energy_reading_t energy;    /* SYNC_STEP_ENERGY ok: the reading */
+    char energy_access[ENERGY_DEV_TOKEN_MAX]; /* the Developer API's new access token, for the app to keep; "" if none */
+    uint32_t energy_access_until;
+    bool energy_access_dropped;    /* the kept token was refused and no new one came: the app forgets it */
+    energy_dev_site_t energy_site; /* the plant and its devices when the step found them anew; plant_id "" otherwise */
 } sync_report_t;
 
 /* Starts a sync; `done` runs on the sync task when it ends, and must hand the report to the app task
@@ -85,3 +97,7 @@ bool sync_running(void);
 /* The step running now, for the progress the web UI shows; SYNC_STEP_COUNT when none runs. */
 sync_step_t sync_step(void);
 const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air", "radar", "solar", "energy" */
+/* The Developer API's last data replies, for `energy raw` (D37): the inverter's, the battery's and the meter's
+ * real-time data and the month's statistics; "" for none. Never the token's. Read them while no sync runs. */
+#define SYNC_ENERGY_RAW_COUNT 4
+const char *sync_energy_raw(int which);

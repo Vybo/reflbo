@@ -449,7 +449,8 @@ static int solar_body(int argc, char **argv)
         print_time("  Solcast asked", (time_t)s->solcast_asked);
         printf("  its sites: %u\n", s->solcast_sites);
     }
-    printf("energy: %s, battery %s\n", set->energy_source == SETTINGS_ENERGY_SOLAX ? "solax" : "off",
+    static const char *const k_energy[] = { "off", "solax", "solax-dev" };
+    printf("energy: %s, battery %s\n", k_energy[set->energy_source <= SETTINGS_ENERGY_SOLAX_DEV ? set->energy_source : 0],
            set->energy_battery == SETTINGS_BATTERY_ON ? "on" : set->energy_battery == SETTINGS_BATTERY_OFF ? "off"
                                                                                                           : "auto");
     const energy_reading_t *r = &s->reading;
@@ -464,7 +465,22 @@ static int solar_body(int argc, char **argv)
         print_wh("to the grid", out == ENERGY_WH_NONE ? SOLAR_WH_NONE : out);
         print_wh("from it", in == ENERGY_WH_NONE ? SOLAR_WH_NONE : in);
         printf("\n");
-        print_time("  midnight's reading", (time_t)s->day.base_at);
+        if (r->today) {
+            printf("  its day's totals: SolaX's own\n");
+        } else {
+            print_time("  midnight's reading", (time_t)s->day.base_at);
+        }
+    }
+    if (set->energy_source == SETTINGS_ENERGY_SOLAX_DEV) {
+        const energy_dev_site_t *site = &s->site;
+        if (site->plant_id[0] != '\0') {
+            printf("  plant %s (%s): inverter %s, battery %s, meter %s\n", site->plant_id,
+                   site->business == 4 ? "commercial" : "residential", site->sn[0][0] ? site->sn[0] : "none",
+                   site->sn[1][0] ? site->sn[1] : "none", site->sn[2][0] ? site->sn[2] : "none");
+        } else {
+            printf("  plant: not found yet\n");
+        }
+        print_time("  token until", (time_t)app_solar_dev_token_until()); /* never the token */
     }
     print_time("  last step", (time_t)s->energy_tried);
     if (s->energy_error[0] != '\0') {
@@ -476,6 +492,29 @@ static int solar_body(int argc, char **argv)
 static int cmd_solar(int argc, char **argv)
 {
     return diag_on_owner(solar_body, argc, argv);
+}
+
+/* `energy raw` (D37): the Developer API's last data replies, to check its fields and signs; never the token's. */
+static int energy_body(int argc, char **argv)
+{
+    static const char *const k_names[SYNC_ENERGY_RAW_COUNT] = { "inverter", "battery", "meter", "statistics" };
+    if (argc != 2 || strcmp(argv[1], "raw") != 0) {
+        return usage("energy raw");
+    }
+    if (sync_running()) {
+        printf("energy: a sync is running; ask again after it\n");
+        return 1;
+    }
+    for (int i = 0; i < SYNC_ENERGY_RAW_COUNT; i++) {
+        const char *raw = sync_energy_raw(i);
+        printf("%s: %s\n", k_names[i], raw[0] != '\0' ? raw : "-");
+    }
+    return 0;
+}
+
+static int cmd_energy(int argc, char **argv)
+{
+    return diag_on_owner(energy_body, argc, argv);
 }
 
 void app_register_commands(void)
@@ -490,6 +529,7 @@ void app_register_commands(void)
         { .command = "sync", .help = "sync now | status (spec §9.3)", .func = &cmd_sync },
         { .command = "radar", .help = "radar status | loop (spec §11.2, §11.3)", .func = &cmd_radar },
         { .command = "solar", .help = "solar status | demo on | demo off (spec §11.5, §11.6)", .func = &cmd_solar },
+        { .command = "energy", .help = "energy raw: SolaX's last replies (D37)", .func = &cmd_energy },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_err_t err = esp_console_cmd_register(&cmds[i]);

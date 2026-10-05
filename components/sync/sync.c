@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
+#include "energy_dev.h"
 #include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -131,6 +133,18 @@ static void step_time(void)
 
 /* One GET into s_body within its share of the radio's 45 s, with `bearer` for Solcast; false with the reason in
  * `detail` ("HTTP 401", "timeout") and the status in `*status` (0 when no reply came). */
+/* Why a request failed, for its step's detail. */
+static void http_detail(esp_err_t err, int status, char detail[SYNC_DETAIL_LEN])
+{
+    if (status != 0 && status != 200) {
+        snprintf(detail, SYNC_DETAIL_LEN, "HTTP %d", status);
+    } else {
+        snprintf(detail, SYNC_DETAIL_LEN, "%s", err == ESP_ERR_TIMEOUT        ? "timeout"
+                                                : err == ESP_ERR_INVALID_SIZE ? "too big"
+                                                                              : esp_err_to_name(err));
+    }
+}
+
 static bool get(const char *url, const char *bearer, int *status, char detail[SYNC_DETAIL_LEN])
 {
     size_t len;
@@ -146,13 +160,7 @@ static bool get(const char *url, const char *bearer, int *status, char detail[SY
     if (err == ESP_OK) {
         return true;
     }
-    if (*status != 0 && *status != 200) {
-        snprintf(detail, SYNC_DETAIL_LEN, "HTTP %d", *status);
-    } else {
-        snprintf(detail, SYNC_DETAIL_LEN, "%s", err == ESP_ERR_TIMEOUT        ? "timeout"
-                                                : err == ESP_ERR_INVALID_SIZE ? "too big"
-                                                                              : esp_err_to_name(err));
-    }
+    http_detail(err, *status, detail);
     return false;
 }
 
@@ -332,17 +340,10 @@ static void step_solar(void)
     s_report.result[SYNC_STEP_SOLAR] = SYNC_STEP_OK;
 }
 
-/* The house's energy (spec §11.6): one SolaX Cloud reading; its failure shows but doesn't fail the sync. */
-static void step_energy(void)
+/* SolaX Cloud by its Token ID (spec §11.6). */
+static void step_energy_token(void)
 {
     const sync_energy_req_t *q = &s_req.energy;
-    if (!wanted(SYNC_STEP_ENERGY, SETTINGS_STEP_ENERGY)) {
-        return;
-    }
-    if (!q->on) {
-        skipped(SYNC_STEP_ENERGY, "no source");
-        return;
-    }
     if (q->token[0] == '\0' || q->sn[0] == '\0') {
         failed(SYNC_STEP_ENERGY, q->token[0] == '\0' ? "no token" : "no registration number");
         return;
@@ -363,6 +364,217 @@ static void step_energy(void)
         return;
     }
     s_report.result[SYNC_STEP_ENERGY] = SYNC_STEP_OK;
+}
+
+/* ---- SolaX Cloud's Developer API (D37) ---- */
+
+#define DEV_RAW_MAX 2048 /* each last data reply kept for `energy raw` */
+EXT_RAM_BSS_ATTR static char s_dev_raw[SYNC_ENERGY_RAW_COUNT][DEV_RAW_MAX];
+static fetch_session_t s_dev; /* one connection for the step's requests, all to one host */
+static int s_dev_status;      /* the last request's HTTP status; 0 without a reply */
+
+const char *sync_energy_raw(int which)
+{
+    return which >= 0 && which < SYNC_ENERGY_RAW_COUNT ? s_dev_raw[which] : "";
+}
+
+/* A request of the Developer API's: a GET of `path`, or with `body` a POST of it, JSON or the token's form; false
+ * with the detail. */
+static bool dev_request(const char *path, const char *body, bool json, const char *bearer,
+                        char detail[SYNC_DETAIL_LEN])
+{
+    char url[ENERGY_DEV_URL_MAX];
+    if (energy_dev_url(url, sizeof(url), (energy_dev_region_t)s_req.energy.region, path) == 0) {
+        snprintf(detail, SYNC_DETAIL_LEN, "bad region");
+        return false;
+    }
+    int budget = sync_budget_ms(esp_timer_get_time(), s_deadline_us, HTTP_TIMEOUT_MS);
+    if (budget == 0) {
+        snprintf(detail, SYNC_DETAIL_LEN, "timeout");
+        return false;
+    }
+    size_t len;
+    int status = 0;
+    s_dev.bearer = bearer;
+    s_dev_status = 0;
+    esp_err_t err = body == NULL ? fetch_get(&s_dev, url, s_body, sizeof(s_body), &len, budget, &status)
+                                 : fetch_post(&s_dev, url, json ? "application/json" : "application/x-www-form-urlencoded",
+                                              body, s_body, sizeof(s_body), &len, budget, &status);
+    s_dev_status = status;
+    if (err != ESP_OK) {
+        http_detail(err, status, detail);
+    }
+    return err == ESP_OK;
+}
+
+/* The access token for the application's client credentials, into the request for this step and the report for the
+ * app to keep; never logged. */
+static bool dev_login(sync_energy_req_t *q, uint32_t now, char detail[SYNC_DETAIL_LEN])
+{
+    char body[ENERGY_DEV_BODY_MAX];
+    uint32_t life = 0;
+    if (energy_dev_token_body(body, sizeof(body), q->client_id, q->client_secret) == 0) {
+        snprintf(detail, SYNC_DETAIL_LEN, "bad client id");
+        return false;
+    }
+    bool ok = dev_request(ENERGY_DEV_TOKEN_PATH, body, false, NULL, detail) &&
+              energy_dev_parse_token(s_body, strlen(s_body), q->access, sizeof(q->access), &life, detail,
+                                     SYNC_DETAIL_LEN);
+    if (!ok) {
+        q->access[0] = '\0';
+        return false;
+    }
+    q->access_until = now != 0 ? now + life : 0;
+    snprintf(s_report.energy_access, sizeof(s_report.energy_access), "%s", q->access);
+    s_report.energy_access_until = q->access_until;
+    return true;
+}
+
+/* The plant, the first residential one or else the first commercial one, and its inverter, battery and meter. */
+static bool dev_find(sync_energy_req_t *q, char detail[SYNC_DETAIL_LEN])
+{
+    energy_dev_site_t site;
+    memset(&site, 0, sizeof(site));
+    char path[ENERGY_DEV_URL_MAX];
+    for (int business = 1; business <= 4 && site.plant_id[0] == '\0'; business += 3) {
+        site.business = (uint8_t)business;
+        energy_dev_plants_path(path, sizeof(path), business);
+        if (!dev_request(path, NULL, false, q->access, detail) ||
+            !energy_dev_parse_plant(s_body, strlen(s_body), &site, detail, SYNC_DETAIL_LEN)) {
+            return false;
+        }
+    }
+    if (site.plant_id[0] == '\0') {
+        snprintf(detail, SYNC_DETAIL_LEN, "no plant");
+        return false;
+    }
+    for (int d = ENERGY_DEV_INVERTER; d <= ENERGY_DEV_METER; d++) {
+        if (energy_dev_devices_path(path, sizeof(path), &site, (energy_dev_device_t)d) == 0 ||
+            !dev_request(path, NULL, false, q->access, detail) ||
+            !energy_dev_parse_device(s_body, strlen(s_body), (energy_dev_device_t)d, &site, detail,
+                                     SYNC_DETAIL_LEN)) {
+            return false;
+        }
+    }
+    if (site.sn[0][0] == '\0') {
+        snprintf(detail, SYNC_DETAIL_LEN, "no inverter");
+        return false;
+    }
+    ESP_LOGI(TAG, "SolaX plant %s: inverter %s, battery %s, meter %s", site.plant_id, site.sn[0],
+             site.sn[1][0] ? site.sn[1] : "none", site.sn[2][0] ? site.sn[2] : "none");
+    q->site = site;
+    s_report.energy_site = site;
+    return true;
+}
+
+/* The devices' real-time values and today's row of the month's statistics, into the report's reading. Only the
+ * inverter's failure fails it: without the battery's or the meter's values, or today's totals, the reading stands
+ * with what came. */
+static bool dev_read(sync_energy_req_t *q, uint32_t now, char detail[SYNC_DETAIL_LEN])
+{
+    static const char *const k_names[] = { "inverter", "battery", "meter" };
+    energy_dev_now_t vals;
+    memset(&vals, 0, sizeof(vals));
+    char path[ENERGY_DEV_URL_MAX], why[SYNC_DETAIL_LEN];
+    for (int d = ENERGY_DEV_INVERTER; d <= ENERGY_DEV_METER; d++) {
+        char *err = d == ENERGY_DEV_INVERTER ? detail : why;
+        if (q->site.sn[d - 1][0] == '\0') {
+            continue;
+        }
+        bool ok = energy_dev_realtime_path(path, sizeof(path), &q->site, (energy_dev_device_t)d) > 0 &&
+                  dev_request(path, NULL, false, q->access, err);
+        if (ok) {
+            util_json_text(s_dev_raw[d - 1], DEV_RAW_MAX, s_body);
+            ok = energy_dev_parse_realtime(s_body, strlen(s_body), (energy_dev_device_t)d, q->site.business, &vals,
+                                           err, SYNC_DETAIL_LEN);
+        }
+        if (!ok && d == ENERGY_DEV_INVERTER) {
+            return false;
+        }
+        if (!ok) {
+            ESP_LOGW(TAG, "energy: the %s: %s", k_names[d - 1], why);
+        }
+    }
+    energy_dev_today_t today = { 0 };
+    char body[ENERGY_DEV_BODY_MAX];
+    time_t t = now;
+    struct tm lt;
+    if (now != 0 && localtime_r(&t, &lt) != NULL &&
+        energy_dev_stats_body(body, sizeof(body), &q->site, lt.tm_year + 1900, lt.tm_mon + 1) > 0 &&
+        dev_request(ENERGY_DEV_STATS_PATH, body, true, q->access, why)) {
+        util_json_text(s_dev_raw[3], DEV_RAW_MAX, s_body);
+        if (!energy_dev_parse_today(s_body, strlen(s_body), lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, &today,
+                                    why, sizeof(why))) {
+            ESP_LOGW(TAG, "energy: today's totals: %s", why);
+        }
+    }
+    if (!energy_dev_reading(&vals, &today, now, &s_report.energy)) {
+        snprintf(detail, SYNC_DETAIL_LEN, "no data");
+        return false;
+    }
+    return true;
+}
+
+/* A token kept from before and a plant found before are used as they are. When SolaX refuses what follows (an
+ * answer, not a timeout), a kept token is renewed and the plant found again, once. */
+static bool dev_steps(sync_energy_req_t *q, uint32_t now, char detail[SYNC_DETAIL_LEN])
+{
+    bool kept = q->access[0] != '\0' && energy_dev_token_fresh(q->access_until, now);
+    bool found = q->site.plant_id[0] != '\0';
+    if (!kept && !dev_login(q, now, detail)) {
+        return false;
+    }
+    if ((found || dev_find(q, detail)) && dev_read(q, now, detail)) {
+        return true;
+    }
+    if (!(kept || found) || s_dev_status == 0) {
+        return false;
+    }
+    if (kept) {
+        s_report.energy_access_dropped = true;
+        if (!dev_login(q, now, detail)) {
+            return false;
+        }
+    }
+    q->site.plant_id[0] = '\0';
+    return dev_find(q, detail) && dev_read(q, now, detail);
+}
+
+/* SolaX Cloud by its Developer API (D37). */
+static void step_energy_dev(void)
+{
+    sync_energy_req_t *q = &s_req.energy;
+    char detail[SYNC_DETAIL_LEN] = "";
+    uint32_t now = sync_now();
+    if (q->client_id[0] == '\0' || q->client_secret[0] == '\0') {
+        failed(SYNC_STEP_ENERGY, q->client_id[0] == '\0' ? "no client id" : "no client secret");
+        return;
+    }
+    memset(s_dev_raw, 0, sizeof(s_dev_raw));
+    bool ok = dev_steps(q, now, detail);
+    fetch_close(&s_dev);
+    if (!ok) {
+        failed(SYNC_STEP_ENERGY, detail);
+    } else if (energy_reading_ahead(&s_report.energy, now)) {
+        failed(SYNC_STEP_ENERGY, "upload time ahead");
+    } else {
+        s_report.result[SYNC_STEP_ENERGY] = SYNC_STEP_OK;
+    }
+}
+
+/* The house's energy (spec §11.6): one reading; its failure shows but doesn't fail the sync. */
+static void step_energy(void)
+{
+    if (!wanted(SYNC_STEP_ENERGY, SETTINGS_STEP_ENERGY)) {
+        return;
+    }
+    if (s_req.energy.source == SETTINGS_ENERGY_SOLAX) {
+        step_energy_token();
+    } else if (s_req.energy.source == SETTINGS_ENERGY_SOLAX_DEV) {
+        step_energy_dev();
+    } else {
+        skipped(SYNC_STEP_ENERGY, "no source");
+    }
 }
 
 /* Sync mode `always`: the radar, the house's reading or both, on the network Wi-Fi is on already (D23: never
@@ -425,7 +637,7 @@ static void sync_task(void *arg)
             if (s_req.solar.source != SOLAR_OFF) {
                 failed(SYNC_STEP_SOLAR, why);
             }
-            if (s_req.energy.on) {
+            if (s_req.energy.source != SETTINGS_ENERGY_OFF) {
                 failed(SYNC_STEP_ENERGY, why);
             }
         }

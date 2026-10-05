@@ -580,11 +580,55 @@ static void test_the_solar_settings_parse_clamp_and_round_trip(void)
     TEST_ASSERT_EQUAL_UINT8(1, s_out.solar_plane_count);
 }
 
+/* SolaX's Developer API (D37): its source and region round-trip; an unknown region is the default, the EU. */
+static void test_the_solax_developer_api_and_its_region(void)
+{
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_REGION_EU, s_defaults.energy_region);
+    const char *json = "{\"schema\":1,\"energy\":{\"source\":\"solax-dev\",\"region\":\"cn\",\"battery\":\"auto\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_ENERGY_SOLAX_DEV, s_out.energy_source);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_REGION_CN, s_out.energy_region);
+    TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"source\":\t\"solax-dev\""));
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"region\":\t\"cn\""));
+    settings_t again;
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &again, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_out, &again, sizeof(again));
+    json = "{\"schema\":1,\"energy\":{\"region\":\"mars\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_REGION_EU, s_out.energy_region);
+}
+
+/* The application's client id and secret are keys like the others: taken out of a PATCH, letters, digits, - and _,
+ * 63 at most; setting or clearing one makes the device log in afresh. */
+static void test_the_developer_apis_client_id_and_secret_are_keys(void)
+{
+    settings_secrets_t secrets;
+    char clean[256];
+    const char *patch = "{\"energy\":{\"source\":\"solax-dev\",\"solax_client_id\":\"c5257b5a04074131a37dd\","
+                        "\"solax_client_secret\":\"Ab-U741ebBrQar41aTupqdH29Rq94Il_JDg\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_take_secrets(patch, clean, sizeof(clean), &secrets, s_err, sizeof(s_err)) > 0,
+                             s_err);
+    TEST_ASSERT_NULL(strstr(clean, "solax_client"));
+    TEST_ASSERT_EQUAL_STRING("c5257b5a04074131a37dd", secrets.value[SETTINGS_SECRET_SOLAX_CLIENT_ID]);
+    TEST_ASSERT_EQUAL_STRING("Ab-U741ebBrQar41aTupqdH29Rq94Il_JDg", secrets.value[SETTINGS_SECRET_SOLAX_CLIENT_SECRET]);
+    TEST_ASSERT_EQUAL_STRING("solax_client_id", settings_secret_key(SETTINGS_SECRET_SOLAX_CLIENT_ID));
+    TEST_ASSERT_EQUAL_STRING("solax_secret", settings_secret_key(SETTINGS_SECRET_SOLAX_CLIENT_SECRET));
+    TEST_ASSERT_TRUE(settings_secrets_solax_dev(&secrets));
+    settings_secrets_t other = { 0 };
+    other.given[SETTINGS_SECRET_SOLAX_TOKEN] = true;
+    TEST_ASSERT_FALSE(settings_secrets_solax_dev(&other));
+    patch = "{\"energy\":{\"solax_client_secret\":\"a+b\"}}";
+    TEST_ASSERT_EQUAL_UINT(0, settings_take_secrets(patch, clean, sizeof(clean), &secrets, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_STRING("energy.solax_client_secret: letters, digits, - and _ only", s_err);
+}
+
 static void test_secrets_never_reach_the_file(void)
 {
     const char *patch = "{\"solar\":{\"source\":\"solcast\",\"solcast_key\":\"Kk_1-2\","
                         "\"solcast_sites\":[\"ab12-cd34\",\"ef56\"],\"fs_key\":\"AbC123\"},"
-                        "\"energy\":{\"solax_token\":\"20200722\",\"solax_sn\":\"SXA1B2C3D4\",\"battery\":\"off\"}}";
+                        "\"energy\":{\"solax_token\":\"20200722\",\"solax_sn\":\"SXA1B2C3D4\",\"battery\":\"off\","
+                        "\"solax_client_id\":\"Cid-1\",\"solax_client_secret\":\"Sec_2\"}}";
     settings_secrets_t secrets;
     char clean[512];
     TEST_ASSERT_TRUE_MESSAGE(settings_take_secrets(patch, clean, sizeof(clean), &secrets, s_err, sizeof(s_err)) > 0,
@@ -763,6 +807,8 @@ int main(void)
     RUN_TEST(test_the_solar_defaults_are_the_specs);
     RUN_TEST(test_the_sync_steps_parse_and_round_trip);
     RUN_TEST(test_the_solar_settings_parse_clamp_and_round_trip);
+    RUN_TEST(test_the_solax_developer_api_and_its_region);
+    RUN_TEST(test_the_developer_apis_client_id_and_secret_are_keys);
     RUN_TEST(test_secrets_never_reach_the_file);
     RUN_TEST(test_a_secret_is_cleared_with_null_or_nothing);
     RUN_TEST(test_no_key_stays_behind);

@@ -867,12 +867,46 @@ test('the house\'s energy takes SolaX Cloud\'s token and registration number, an
   const { ctx, main } = await load(solarDevice(patches));
   await ctx.solarPage();
   await type(inputNamed(main, 'Source', 1), 'solax');
-  await type(inputNamed(main, 'Token'), '20200722');
+  await type(inputNamed(main, 'Token ID'), '20200722');
   await type(inputNamed(main, 'Registration number'), 'SXA1B2C3D4');
   await type(inputNamed(main, 'Home battery'), 'on');
   await buttonNamed(main, 'Save').click();
-  assert.deepEqual(patches.at(-1).energy, { source: 'solax', battery: 'on', solax_token: '20200722',
+  assert.deepEqual(patches.at(-1).energy, { source: 'solax', region: 'eu', battery: 'on', solax_token: '20200722',
                                             solax_sn: 'SXA1B2C3D4' });
+});
+
+test('the Developer API takes an application\'s Client ID and Client Secret and SolaX\'s region (D37)', async () => {
+  const patches = [];
+  const { ctx, main } = await load(solarDevice(patches));
+  await ctx.solarPage();
+  await type(inputNamed(main, 'Source', 1), 'solax-dev');
+  assert.ok(hiddenAbove(main, inputNamed(main, 'Token ID')), 'the Token ID shows with the Developer API');
+  assert.ok(!hiddenAbove(main, inputNamed(main, 'Client ID')), 'no Client ID');
+  await type(inputNamed(main, 'Client ID'), 'a1b2-c3');
+  await type(inputNamed(main, 'Client Secret'), 'S3cr_et');
+  await type(inputNamed(main, 'Region'), 'cn');
+  await buttonNamed(main, 'Save').click();
+  assert.deepEqual(patches.at(-1).energy, { source: 'solax-dev', region: 'cn', battery: 'auto',
+                                            solax_client_id: 'a1b2-c3', solax_client_secret: 'S3cr_et' });
+  assert.match(text(main), /developer\.solaxcloud\.com/);
+});
+
+test('the Developer API is the first SolaX source, and Europe its region by default', async () => {
+  const { ctx, main } = await load(solarDevice([]));
+  await ctx.solarPage();
+  const source = inputNamed(main, 'Source', 1);
+  assert.deepEqual(source.children.filter((c) => c instanceof FakeElement).map((o) => o.value),
+                   ['off', 'solax-dev', 'solax']);
+  assert.equal(inputNamed(main, 'Region').value, 'eu');
+  assert.ok(hiddenAbove(main, inputNamed(main, 'Client ID')), 'its keys show with the source off');
+});
+
+test('the Solar page names the plant the Developer API found', async () => {
+  const { ctx, main } = await load(solarDevice([], SOLAR_SETTINGS, {
+    'GET /api/status': () => reply(200, solarStatus({}, { source: 'solax-dev', plant: '1234567890123456789' })),
+  }));
+  await ctx.solarPage();
+  assert.match(text(main), /SolaX plant1234567890123456789/);
 });
 
 test('Check now runs the two steps and shows what they brought', async () => {

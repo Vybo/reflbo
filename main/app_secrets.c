@@ -63,8 +63,13 @@ esp_err_t app_secrets_apply(const settings_secrets_t *secrets)
     nvs_close(nvs);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "write: %s", esp_err_to_name(err));
-    } else if (settings_secrets_solcast(secrets)) {
-        app_solar_budget_reset(); /* a new key or site: the next step or check asks at once (spec §11.5) */
+    } else {
+        if (settings_secrets_solcast(secrets)) {
+            app_solar_budget_reset(); /* a new key or site: the next step or check asks at once (spec §11.5) */
+        }
+        if (settings_secrets_solax_dev(secrets)) {
+            app_solar_dev_reset(); /* another application, maybe another account: log in and look again (D37) */
+        }
     }
     return err;
 }

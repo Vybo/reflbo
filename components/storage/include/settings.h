@@ -58,8 +58,11 @@ typedef enum {
     SETTINGS_SOLAR_SOLCAST,
 } settings_solar_source_t;
 
-/* energy.source and energy.battery (spec §11.6); the battery's values match energy_battery_t. */
-typedef enum { SETTINGS_ENERGY_OFF, SETTINGS_ENERGY_SOLAX } settings_energy_source_t;
+/* energy.source, energy.region and energy.battery (spec §11.6): SolaX Cloud by its Token ID ("solax") or by its
+ * Developer API ("solax-dev", D37) in one of SolaX's regions. The regions' and the battery's values match
+ * energy_dev_region_t and energy_battery_t. */
+typedef enum { SETTINGS_ENERGY_OFF, SETTINGS_ENERGY_SOLAX, SETTINGS_ENERGY_SOLAX_DEV } settings_energy_source_t;
+typedef enum { SETTINGS_REGION_EU, SETTINGS_REGION_CN, SETTINGS_REGION_IN } settings_energy_region_t;
 typedef enum { SETTINGS_BATTERY_AUTO, SETTINGS_BATTERY_ON, SETTINGS_BATTERY_OFF } settings_energy_battery_t;
 
 #define SETTINGS_PLANES_MAX 2
@@ -113,6 +116,7 @@ typedef struct {
     uint16_t solar_inverter_kw_e2; /* 0..10000: the inverter's limit in hundredths of kW, 0 for none */
     uint8_t energy_source;         /* settings_energy_source_t */
     uint8_t energy_battery;        /* settings_energy_battery_t */
+    uint8_t energy_region;         /* settings_energy_region_t: the Developer API's */
 } settings_t;
 
 /* The sync's and the NTP servers' defaults (spec §14.3): times mode at 05:30, a 60 min interval,
@@ -151,6 +155,8 @@ typedef enum {
     SETTINGS_SECRET_SOLCAST_SITE2, /* solar.solcast_sites[1] */
     SETTINGS_SECRET_SOLAX_TOKEN,   /* energy.solax_token */
     SETTINGS_SECRET_SOLAX_SN,      /* energy.solax_sn */
+    SETTINGS_SECRET_SOLAX_CLIENT_ID,     /* energy.solax_client_id: the Developer API's application (D37) */
+    SETTINGS_SECRET_SOLAX_CLIENT_SECRET, /* energy.solax_client_secret */
     SETTINGS_SECRET_COUNT,
 } settings_secret_t;
 #define SETTINGS_SECRET_LEN 64
@@ -169,6 +175,9 @@ size_t settings_take_secrets(const char *patch, char *out, size_t size, settings
                              size_t err_size);
 /* Whether `secrets` sets or clears Solcast's key or a site: its budget then starts over (spec §11.5). */
 bool settings_secrets_solcast(const settings_secrets_t *secrets);
+/* Whether `secrets` sets or clears the Developer API's client id or secret: the device then logs in afresh and finds
+ * its plant again (D37). */
+bool settings_secrets_solax_dev(const settings_secrets_t *secrets);
 
 /* Fails only if the text is not a JSON object with "schema": 1. */
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size);

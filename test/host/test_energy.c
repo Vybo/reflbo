@@ -317,6 +317,38 @@ static void test_own_use_is_the_share_the_house_kept(void)
     TEST_ASSERT_EQUAL_INT(0, energy_self_pct(&d, &r, today));
 }
 
+/* A reading that carries today's totals itself (the Developer API's statistics, D37) needs no reading near midnight:
+ * its totals are today's as they are, and of no other day. */
+static void test_a_reading_with_todays_totals_needs_no_midnight(void)
+{
+    energy_day_t d;
+    energy_day_init(&d);
+    energy_reading_t r = reading(local(2026, 10, 5, 13, 17), 3000, 4.9, 0.6, 9.4);
+    r.today = true;
+    energy_day_add(&d, &r);
+    int32_t today = day_of(2026, 10, 5);
+    TEST_ASSERT_EQUAL_UINT32(4900, energy_to_grid_wh(&d, &r, today));
+    TEST_ASSERT_EQUAL_UINT32(600, energy_from_grid_wh(&d, &r, today));
+    TEST_ASSERT_EQUAL_INT(48, energy_self_pct(&d, &r, today));
+    TEST_ASSERT_EQUAL_UINT32(ENERGY_WH_NONE, energy_to_grid_wh(&d, &r, today + 1)); /* tomorrow has none yet */
+    r.today = false; /* totals since installation want their midnight */
+    TEST_ASSERT_EQUAL_UINT32(ENERGY_WH_NONE, energy_to_grid_wh(&d, &r, today));
+}
+
+static void test_a_reading_with_todays_totals_is_no_midnight_base(void)
+{
+    energy_day_t d;
+    energy_day_init(&d);
+    energy_reading_t dev = reading(local(2026, 10, 5, 0, 2), 0, 0.0, 0.1, 0.0); /* the Developer API's, today's */
+    dev.today = true;
+    energy_day_add(&d, &dev);
+    TEST_ASSERT_EQUAL_UINT32(0, d.base_at); /* a switch to the Token ID source the same day finds no base */
+    energy_reading_t late = reading(local(2026, 10, 5, 23, 55), 0, 4.9, 0.6, 0.0);
+    late.today = true;
+    energy_day_add(&d, &late);
+    TEST_ASSERT_EQUAL_UINT32(0, d.next_at); /* nor tomorrow's */
+}
+
 static void test_a_reading_is_fresh_for_15_minutes(void)
 {
     energy_reading_t r = reading(local(2026, 10, 5, 13, 0), 0, 0, 0, 0);
@@ -361,6 +393,8 @@ int main(void)
     RUN_TEST(test_quarter_hours_average_their_readings);
     RUN_TEST(test_a_new_day_starts_afresh);
     RUN_TEST(test_own_use_is_the_share_the_house_kept);
+    RUN_TEST(test_a_reading_with_todays_totals_needs_no_midnight);
+    RUN_TEST(test_a_reading_with_todays_totals_is_no_midnight_base);
     RUN_TEST(test_a_reading_is_fresh_for_15_minutes);
     RUN_TEST(test_a_reading_from_the_future_is_refused);
     return UNITY_END();

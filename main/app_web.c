@@ -270,7 +270,9 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
         cJSON_AddBoolToObject(solar, "demo", true);
     }
     cJSON *energy = cJSON_AddObjectToObject(o, "energy");
-    cJSON_AddStringToObject(energy, "source", st->settings.energy_source == SETTINGS_ENERGY_SOLAX ? "solax" : "off");
+    static const char *const k_energy[] = { "off", "solax", "solax-dev" };
+    uint8_t esrc = st->settings.energy_source;
+    cJSON_AddStringToObject(energy, "source", k_energy[esrc <= SETTINGS_ENERGY_SOLAX_DEV ? esrc : 0]);
     if (ss->reading.at != 0) {
         cJSON_AddNumberToObject(energy, "reading_at", ss->reading.at);
     }
@@ -279,6 +281,9 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
     }
     if (ss->energy_error[0] != '\0') {
         cJSON_AddStringToObject(energy, "error", ss->energy_error);
+    }
+    if (esrc == SETTINGS_ENERGY_SOLAX_DEV && ss->site.plant_id[0] != '\0') {
+        cJSON_AddStringToObject(energy, "plant", ss->site.plant_id); /* the Developer API's, found once (D37) */
     }
 
     const ui_preset_t *active = &st->presets.presets[st->presets.active];
@@ -450,6 +455,8 @@ static void get_settings(uint8_t *out, size_t size, webui_reply_t *reply)
     keys = cJSON_AddObjectToObject(cJSON_GetObjectItemCaseSensitive(o, "energy"), "keys");
     cJSON_AddBoolToObject(keys, "solax_token", app_secret_set(SETTINGS_SECRET_SOLAX_TOKEN));
     cJSON_AddBoolToObject(keys, "solax_sn", app_secret_set(SETTINGS_SECRET_SOLAX_SN));
+    cJSON_AddBoolToObject(keys, "solax_client_id", app_secret_set(SETTINGS_SECRET_SOLAX_CLIENT_ID));
+    cJSON_AddBoolToObject(keys, "solax_client_secret", app_secret_set(SETTINGS_SECRET_SOLAX_CLIENT_SECRET));
     reply_cjson(reply, out, size, o);
 }
 

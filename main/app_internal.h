@@ -48,6 +48,7 @@ typedef struct {
     energy_day_t day;                     /* today's totals and quarter hours */
     uint32_t energy_tried;                /* when the last Energy step ran (UTC) */
     char energy_error[SYNC_DETAIL_LEN];
+    energy_dev_site_t site;               /* the Developer API's plant and devices, found once (D37); "" before */
     uint32_t saved_at;                    /* when solar.bin last took the readings (UTC) */
     bool demo;                            /* `solar demo on`: the sample day (spec §15) */
 } app_solar_state_t;
@@ -183,6 +184,11 @@ void app_solar_budget_reset(void);
 /* An Energy step or refresh that ran: the reading, or NULL and why. Into today's totals, and solar.bin at most
  * every 30 min. */
 void app_solar_reading_done(const energy_reading_t *r, const char *error);
+/* The Developer API's access token and plant that an Energy step brought or dropped (D37): the token kept in RAM
+ * only, the plant with the state; reset when its client id or secret changes. */
+void app_solar_dev_keep(const sync_report_t *r);
+void app_solar_dev_reset(void);
+uint32_t app_solar_dev_token_until(void); /* when the kept token runs out (UTC); 0 for none */
 void app_solar_restore(void); /* a cold boot: solar.bin */
 /* The Solar and Energy steps' requests from the settings and the keys in NVS, which must be up. */
 void app_solar_request(sync_solar_req_t *solar, sync_energy_req_t *energy);

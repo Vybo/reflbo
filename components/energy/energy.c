@@ -220,12 +220,12 @@ void energy_day_add(energy_day_t *d, const energy_reading_t *r)
     uint32_t base_away = d->base_at == 0                     ? UINT32_MAX
                          : d->base_at < (uint32_t)midnight ? (uint32_t)midnight - d->base_at
                                                              : d->base_at - (uint32_t)midnight;
-    if (t - midnight <= ENERGY_MIDNIGHT_S && (uint32_t)(t - midnight) < base_away) {
+    if (!r->today && t - midnight <= ENERGY_MIDNIGHT_S && (uint32_t)(t - midnight) < base_away) {
         d->base_at = r->at;
         d->base_to_wh = r->to_grid_wh;
         d->base_from_wh = r->from_grid_wh;
     }
-    if (next - t <= ENERGY_MIDNIGHT_S) {
+    if (!r->today && next - t <= ENERGY_MIDNIGHT_S) { /* today's totals start again at 0: no base */
         d->next_at = r->at;
         d->next_to_wh = r->to_grid_wh;
         d->next_from_wh = r->from_grid_wh;
@@ -247,10 +247,13 @@ const uint16_t *energy_day_q(const energy_day_t *d, int32_t day)
     return d != NULL && d->day != 0 && d->day == day ? d->q : NULL;
 }
 
-/* `total` less its value at day `day`'s midnight. */
+/* `total` less its value at day `day`'s midnight; a reading with today's totals has them as they are. */
 static uint32_t since_midnight(const energy_day_t *d, const energy_reading_t *r, int32_t day, uint32_t total,
                                uint32_t base)
 {
+    if (r != NULL && r->today) {
+        return energy_reading_day(r) == day ? total : ENERGY_WH_NONE;
+    }
     if (d == NULL || r == NULL || d->day != day || d->base_at == 0 || energy_reading_day(r) != day) {
         return ENERGY_WH_NONE;
     }

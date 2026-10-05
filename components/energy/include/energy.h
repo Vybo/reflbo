@@ -33,8 +33,9 @@ typedef struct {
     int16_t soc;          /* the battery's charge, %; -1 when the reply has none */
     uint8_t inverter;     /* SolaX's inverter type, 0 when unknown */
     uint32_t yield_wh;    /* produced today, as the inverter counts it */
-    uint32_t to_grid_wh;  /* the totals since installation */
+    uint32_t to_grid_wh;  /* the totals since installation, or today's with `today` */
     uint32_t from_grid_wh;
+    bool today;           /* the totals are today's (the Developer API's statistics, D37): no midnight reading needed */
 } energy_reading_t;
 
 /* A local day from the readings: its midnight totals and each quarter hour's mean output. */

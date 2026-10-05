@@ -229,7 +229,10 @@ static const char *const k_steps[] = { "weather", "air", "radar", "solar", "ener
 static const char *const k_solar_sources[] = { [SETTINGS_SOLAR_OFF] = "off", [SETTINGS_SOLAR_OPEN_METEO] = "open-meteo",
                                                [SETTINGS_SOLAR_FORECAST_SOLAR] = "forecast-solar",
                                                [SETTINGS_SOLAR_SOLCAST] = "solcast" };
-static const char *const k_energy_sources[] = { [SETTINGS_ENERGY_OFF] = "off", [SETTINGS_ENERGY_SOLAX] = "solax" };
+static const char *const k_energy_sources[] = { [SETTINGS_ENERGY_OFF] = "off", [SETTINGS_ENERGY_SOLAX] = "solax",
+                                                [SETTINGS_ENERGY_SOLAX_DEV] = "solax-dev" };
+static const char *const k_regions[] = { [SETTINGS_REGION_EU] = "eu", [SETTINGS_REGION_CN] = "cn",
+                                         [SETTINGS_REGION_IN] = "in" };
 static const char *const k_batteries[] = { [SETTINGS_BATTERY_AUTO] = "auto", [SETTINGS_BATTERY_ON] = "on",
                                            [SETTINGS_BATTERY_OFF] = "off" };
 
@@ -283,6 +286,8 @@ static void read_solar(const cJSON *solar, const cJSON *energy, settings_t *out)
                                 sizeof(k_energy_sources) / sizeof(k_energy_sources[0]), out->energy_source);
     out->energy_battery = choice(child(energy, "battery"), k_batteries, sizeof(k_batteries) / sizeof(k_batteries[0]),
                                  out->energy_battery);
+    out->energy_region = choice(child(energy, "region"), k_regions, sizeof(k_regions) / sizeof(k_regions[0]),
+                                SETTINGS_REGION_EU);
 }
 
 void settings_solar_defaults(settings_t *out)
@@ -296,6 +301,7 @@ void settings_solar_defaults(settings_t *out)
     out->solar_inverter_kw_e2 = 0;
     out->energy_source = SETTINGS_ENERGY_OFF;
     out->energy_battery = SETTINGS_BATTERY_AUTO;
+    out->energy_region = SETTINGS_REGION_EU;
 }
 
 const char *settings_step_name(settings_step_t step)
@@ -563,10 +569,12 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     put(solar, "losses_pct", cJSON_CreateNumber(s->solar_losses_pct));
     put(solar, "inverter_kw", cJSON_CreateNumber(s->solar_inverter_kw_e2 / 100.0));
     cJSON *energy = object_at(root, "energy");
-    uint8_t energy_source = s->energy_source <= SETTINGS_ENERGY_SOLAX ? s->energy_source : 0;
+    uint8_t energy_source = s->energy_source <= SETTINGS_ENERGY_SOLAX_DEV ? s->energy_source : 0;
     uint8_t energy_battery = s->energy_battery <= SETTINGS_BATTERY_OFF ? s->energy_battery : 0;
+    uint8_t energy_region = s->energy_region <= SETTINGS_REGION_IN ? s->energy_region : 0;
     put(energy, "source", cJSON_CreateString(k_energy_sources[energy_source]));
     put(energy, "battery", cJSON_CreateString(k_batteries[energy_battery]));
+    put(energy, "region", cJSON_CreateString(k_regions[energy_region]));
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;
@@ -621,6 +629,7 @@ size_t settings_patch(const char *base_json, const char *patch, char *out, size_
 
 static const char *const k_secret_keys[SETTINGS_SECRET_COUNT] = {
     "fs_key", "solcast_key", "solcast_site1", "solcast_site2", "solax_token", "solax_sn",
+    "solax_client_id", "solax_secret", /* NVS keys have 15 characters at most */
 };
 
 const char *settings_secret_key(settings_secret_t secret)
@@ -694,6 +703,7 @@ static bool take_sites(cJSON *solar, settings_secrets_t *secrets, char *err, siz
 static bool take_all(cJSON *root, settings_secrets_t *secrets, char *err, size_t err_size)
 {
     static const char k_alnum[] = "letters and digits only";
+    static const char k_dashes[] = "letters, digits, - and _ only";
     bool ok = true;
     for (cJSON *c = root->child; ok && c != NULL; c = c->next) {
         bool solar = c->string != NULL && strcmp(c->string, "solar") == 0;
@@ -711,9 +721,18 @@ static bool take_all(cJSON *root, settings_secrets_t *secrets, char *err, size_t
                    : take(c, "solax_token", "energy.solax_token", "", k_alnum, secrets, SETTINGS_SECRET_SOLAX_TOKEN,
                           err, err_size) &&
                          take(c, "solax_sn", "energy.solax_sn", "", k_alnum, secrets, SETTINGS_SECRET_SOLAX_SN, err,
-                              err_size);
+                              err_size) &&
+                         take(c, "solax_client_id", "energy.solax_client_id", "-_", k_dashes, secrets,
+                              SETTINGS_SECRET_SOLAX_CLIENT_ID, err, err_size) &&
+                         take(c, "solax_client_secret", "energy.solax_client_secret", "-_", k_dashes, secrets,
+                              SETTINGS_SECRET_SOLAX_CLIENT_SECRET, err, err_size);
     }
     return ok;
+}
+
+bool settings_secrets_solax_dev(const settings_secrets_t *secrets)
+{
+    return secrets->given[SETTINGS_SECRET_SOLAX_CLIENT_ID] || secrets->given[SETTINGS_SECRET_SOLAX_CLIENT_SECRET];
 }
 
 bool settings_secrets_solcast(const settings_secrets_t *secrets)

@@ -282,7 +282,8 @@ static int labels_left(gfx_rect_t r, const uint16_t *fq, const uint16_t *aq, con
 
 /* The day's forecast as bars from the first hour with any to the last: a bar a quarter hour, or an hour where a
  * quarter's would be under 3 px; the past solid, the rest outlined. With readings, the past's bars are what was
- * produced and a line over them is what was forecast. With `labels`, kW on the left and every third hour below. */
+ * produced, a quarter hour without a reading what was forecast (spec §11.6), and a line over them is what was
+ * forecast. With `labels`, kW on the left and every third hour below. */
 static void draw_chart(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, const lang_t *lang, bool labels)
 {
     const uint16_t *fq = v->chart_q, *aq = v->chart_read;
@@ -311,8 +312,9 @@ static void draw_chart(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, const la
         uint32_t f = 0, a = 0;
         for (int k = 0; k < per; k++) {
             int st = first + i * per + k;
-            f += fq[st] * (uint32_t)SOLAR_UNIT_W;
-            a += actual && aq[st] != ENERGY_NONE ? aq[st] * (uint32_t)ENERGY_UNIT_W : 0;
+            uint32_t forecast = fq[st] * (uint32_t)SOLAR_UNIT_W;
+            f += forecast;
+            a += actual && aq[st] != ENERGY_NONE ? aq[st] * (uint32_t)ENERGY_UNIT_W : forecast;
         }
         fw[i] = f / (uint32_t)per, aw[i] = a / (uint32_t)per;
         top_w = fw[i] > top_w ? fw[i] : top_w;

@@ -162,6 +162,36 @@ static void test_without_data_the_chart_and_the_flow_are_missing(void)
 }
 
 /* Whether glyph `cp` of `f` is drawn somewhere in `area`, a blank pixel all round it. */
+/* A quarter hour without a reading shows the forecast (spec §11.6), whether the bars are quarter hours or hours: readings
+ * every fourth quarter (an hourly sync), or once at 05:30 (the default daily one), draw as readings in every quarter
+ * would, the readings being the forecast. */
+static void test_a_quarter_hour_without_a_reading_shows_the_forecast(void)
+{
+    static uint8_t every[400 * 300], sparse[400 * 300];
+    static const gfx_rect_t k_cells[] = { { 0, 21, 400, 279 }, { 0, 21, 130, 80 } }; /* quarter bars, hour bars */
+    int now_q = s_ctx.local.tm_hour * 4 + s_ctx.local.tm_min / 15;
+    for (size_t c = 0; c < sizeof(k_cells) / sizeof(k_cells[0]); c++) {
+        gfx_rect_t r = k_cells[c];
+        for (int i = 0; i < ENERGY_STEPS; i++) {
+            s_fix_energy_day.q[i] = i < now_q ? s_fix_forecast.q[0][i] : ENERGY_NONE;
+        }
+        draw(r, UI_FIELD_PV_CHART);
+        snapshot(r, every);
+        for (int i = 0; i < ENERGY_STEPS; i++) {
+            s_fix_energy_day.q[i] = i % 4 == 0 ? s_fix_energy_day.q[i] : ENERGY_NONE;
+        }
+        draw(r, UI_FIELD_PV_CHART);
+        snapshot(r, sparse);
+        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(every, sparse, (size_t)r.w * r.h, "a reading every fourth quarter");
+        for (int i = 0; i < ENERGY_STEPS; i++) {
+            s_fix_energy_day.q[i] = i == 22 ? s_fix_forecast.q[0][22] : ENERGY_NONE;
+        }
+        draw(r, UI_FIELD_PV_CHART);
+        snapshot(r, sparse);
+        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(every, sparse, (size_t)r.w * r.h, "one reading, at 05:30");
+    }
+}
+
 static bool has_glyph(gfx_rect_t area, const gfx_font_t *f, uint32_t cp)
 {
     const gfx_glyph_t *g = gfx_font_glyph(f, cp);
@@ -279,5 +309,6 @@ int main(void)
     RUN_TEST(test_stale_data_raises_the_status_bars_warning);
     RUN_TEST(test_the_energy_totals_without_a_midnight_reading_are_dashes);
     RUN_TEST(test_the_largest_totals_keep_to_their_places);
+    RUN_TEST(test_a_quarter_hour_without_a_reading_shows_the_forecast);
     return UNITY_END();
 }

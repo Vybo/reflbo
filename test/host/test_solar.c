@@ -11,8 +11,10 @@
 #include "util_time.h"
 
 /* The PV forecast (spec §11.5, D35): our model, the local quarter hours and the replies. The
- * Open-Meteo fixture was fetched on 2026-10-05 for Brno (49.1951, 16.6068), a plane tilted 35°
- * facing south. */
+ * Open-Meteo and Forecast.Solar fixtures were fetched on 2026-10-05 for Brno (49.1951, 16.6068), a
+ * plane of 5 kWp tilted 35° facing south (Forecast.Solar's free tier; its rate limit's address is
+ * replaced). Forecast.Solar with a key and Solcast are built in their documented formats, as there
+ * is no account to record them with. */
 
 #define TZ_PRAGUE "CET-1CEST,M3.5.0,M10.5.0/3"
 
@@ -415,6 +417,158 @@ static void test_open_meteo_refusals(void)
     }
 }
 
+/* --- Forecast.Solar --- */
+
+static void test_forecast_solar_asks_without_a_key(void)
+{
+    char url[SOLAR_URL_MAX];
+    TEST_ASSERT_TRUE(solar_forecast_solar_url(url, sizeof(url), 491951, 166068, &k_south, 1, "") > 0);
+    TEST_ASSERT_EQUAL_STRING("https://api.forecast.solar/estimate/watts/49.1951/16.6068/35/0/5?time=utc", url);
+}
+
+static void test_forecast_solar_with_a_key_names_both_planes(void)
+{
+    const solar_plane_t planes[2] = { { .kwp = 5.2f, .tilt = 35, .azimuth = 0 },
+                                      { .kwp = 2.45f, .tilt = 20, .azimuth = -90 } };
+    char url[SOLAR_URL_MAX];
+    TEST_ASSERT_TRUE(solar_forecast_solar_url(url, sizeof(url), 491951, 166068, planes, 2, "AbC123xyz") > 0);
+    TEST_ASSERT_EQUAL_STRING("https://api.forecast.solar/AbC123xyz/estimate/watts/49.1951/16.6068/35/0/5.2"
+                             "/20/-90/2.45?time=utc",
+                             url);
+    TEST_ASSERT_TRUE(solar_forecast_solar_url(url, sizeof(url), 491951, 166068, planes, 2, "") > 0);
+    TEST_ASSERT_EQUAL_STRING("https://api.forecast.solar/estimate/watts/49.1951/16.6068/35/0/5.2?time=utc",
+                             url); /* without a key, the first plane alone: a free account takes one */
+    TEST_ASSERT_EQUAL(0, solar_forecast_solar_url(url, sizeof(url), 491951, 166068, planes, 1, "ab/c"));
+    TEST_ASSERT_EQUAL_STRING("", url); /* a key goes into the path as it is */
+}
+
+static void test_forecast_solar_follows_the_line_between_its_points(void)
+{
+    const char *json = fixture("forecast-solar-brno.json");
+    solar_acc_t acc;
+    solar_acc_init(&acc, local(2026, 10, 5, 11, 28));
+    TEST_ASSERT_TRUE_MESSAGE(solar_parse_forecast_solar(json, s_len, &acc, s_err, sizeof(s_err)), s_err);
+    solar_forecast_t f;
+    solar_acc_finish(&acc, NULL, 0, &f);
+    TEST_ASSERT_UINT32_WITHIN(30, 15025, f.wh[0]); /* its own watt_hours_day for the same request */
+    TEST_ASSERT_UINT32_WITHIN(30, 17343, f.wh[1]);
+    TEST_ASSERT_EQUAL_UINT32(SOLAR_WH_NONE, f.wh[2]); /* the free tier has two days */
+    TEST_ASSERT_EQUAL_UINT16(14, f.q[0][28]); /* 07:00-07:15: from 110 W at 07:00 towards 352 W at 08:00 */
+    TEST_ASSERT_EQUAL_UINT16(0, f.q[0][20]);  /* before sunrise */
+}
+
+static void test_forecast_solar_with_a_key_has_a_third_day(void)
+{
+    const char *json = fixture("forecast-solar-key.json"); /* 15-minute points for three days */
+    solar_acc_t acc;
+    solar_acc_init(&acc, local(2026, 10, 5, 11, 28));
+    TEST_ASSERT_TRUE_MESSAGE(solar_parse_forecast_solar(json, s_len, &acc, s_err, sizeof(s_err)), s_err);
+    solar_forecast_t f;
+    solar_acc_finish(&acc, NULL, 0, &f);
+    TEST_ASSERT_UINT32_WITHIN(30, 24703, f.wh[0]);
+    TEST_ASSERT_UINT32_WITHIN(30, 26622, f.wh[1]);
+    TEST_ASSERT_UINT32_WITHIN(30, 14260, f.wh[2]);
+}
+
+static void test_forecast_solar_refusals(void)
+{
+    solar_acc_t acc;
+    solar_acc_init(&acc, local(2026, 10, 5, 11, 28));
+    static const struct {
+        const char *json, *why;
+    } k_cases[] = {
+        { "not json", "not a JSON object" },
+        { "{\"result\":null,\"message\":{\"code\":429,\"type\":\"error\",\"text\":\"Rate limit for API calls "
+          "reached.\"}}",
+          "Rate limit for API call" },
+        { "{\"result\":{},\"message\":{\"code\":0,\"type\":\"success\"}}", "no data" },
+        { "{\"result\":{\"2026-10-05T05:00:00+00:00\":110}}", "no data" }, /* a point is no line */
+        { "{\"result\":{\"yesterday\":1,\"today\":2}}", "no data" },
+        { "{\"result\":{\"a\":[[[[1]]]]}}", "nested too deeply" },
+    };
+    for (size_t i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
+        TEST_ASSERT_FALSE(solar_parse_forecast_solar(k_cases[i].json, strlen(k_cases[i].json), &acc, s_err, 24));
+        TEST_ASSERT_EQUAL_STRING(k_cases[i].why, s_err);
+    }
+}
+
+/* --- Solcast --- */
+
+static void test_solcast_asks_for_a_site(void)
+{
+    char url[SOLAR_URL_MAX];
+    TEST_ASSERT_TRUE(solar_solcast_url(url, sizeof(url), "ab12-cd34-ef56-7890") > 0);
+    TEST_ASSERT_EQUAL_STRING("https://api.solcast.com.au/rooftop_sites/ab12-cd34-ef56-7890/forecasts"
+                             "?format=json&hours=72",
+                             url);
+    TEST_ASSERT_EQUAL(0, solar_solcast_url(url, sizeof(url), "ab12/../x"));
+    TEST_ASSERT_EQUAL(0, solar_solcast_url(url, sizeof(url), ""));
+}
+
+static void test_solcast_fills_half_hours_from_now(void)
+{
+    const char *json = fixture("solcast-brno.json"); /* 72 h from 11:00 */
+    solar_acc_t acc;
+    solar_acc_init(&acc, local(2026, 10, 5, 11, 16));
+    TEST_ASSERT_TRUE_MESSAGE(solar_parse_solcast(json, s_len, &acc, s_err, sizeof(s_err)), s_err);
+    solar_forecast_t f;
+    solar_acc_finish(&acc, NULL, 0, &f);
+    TEST_ASSERT_EQUAL_UINT16(359, f.q[0][44]); /* 3.5904 kW from 11:00 to 11:30 */
+    TEST_ASSERT_EQUAL_UINT16(359, f.q[0][45]);
+    TEST_ASSERT_EQUAL_UINT16(0, f.q[0][43]); /* the morning is past: not in the reply */
+    TEST_ASSERT_UINT32_WITHIN(30, 20040, f.wh[0]);
+    TEST_ASSERT_UINT32_WITHIN(30, 29295, f.wh[1]);
+    TEST_ASSERT_UINT32_WITHIN(30, 15689, f.wh[2]);
+}
+
+static void test_two_solcast_sites_add_up(void)
+{
+    const char *json = fixture("solcast-brno.json");
+    solar_acc_t acc;
+    solar_acc_init(&acc, local(2026, 10, 5, 11, 16));
+    TEST_ASSERT_TRUE(solar_parse_solcast(json, s_len, &acc, s_err, sizeof(s_err)));
+    TEST_ASSERT_TRUE(solar_parse_solcast(json, s_len, &acc, s_err, sizeof(s_err)));
+    solar_forecast_t f;
+    solar_acc_finish(&acc, NULL, 0, &f);
+    TEST_ASSERT_EQUAL_UINT16(718, f.q[0][44]);
+}
+
+static void test_solcast_refusals(void)
+{
+    solar_acc_t acc;
+    solar_acc_init(&acc, local(2026, 10, 5, 11, 16));
+    static const struct {
+        const char *json, *why;
+    } k_cases[] = {
+        { "not json", "not a JSON object" },
+        { "{\"response_status\":{\"error_code\":\"TooManyRequests\",\"message\":\"You have exceeded your free "
+          "daily limit.\",\"errors\":[]}}",
+          "You have exceeded your " },
+        { "{\"forecasts\":[]}", "no data" },
+        { "{\"forecasts\":[{\"pv_estimate\":1.0,\"period_end\":\"soon\",\"period\":\"PT30M\"},"
+          "{\"pv_estimate\":1.0,\"period_end\":\"2026-10-05T10:00:00.0000000Z\",\"period\":\"P1D\"}]}",
+          "no data" },
+        { "{\"forecasts\":[[[[1]]]]}", "nested too deeply" },
+    };
+    for (size_t i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
+        TEST_ASSERT_FALSE(solar_parse_solcast(k_cases[i].json, strlen(k_cases[i].json), &acc, s_err, 24));
+        TEST_ASSERT_EQUAL_STRING(k_cases[i].why, s_err);
+    }
+}
+
+static void test_solcast_keeps_within_its_ten_calls_a_day(void)
+{
+    const uint32_t at = 1791195300;
+    TEST_ASSERT_TRUE(solar_solcast_due(0, 1, at)); /* never asked */
+    TEST_ASSERT_FALSE(solar_solcast_due(at, 1, at + 2 * 3600 + 3599));
+    TEST_ASSERT_TRUE(solar_solcast_due(at, 1, at + 3 * 3600)); /* 8 a day with one site */
+    TEST_ASSERT_FALSE(solar_solcast_due(at, 2, at + 5 * 3600));
+    TEST_ASSERT_TRUE(solar_solcast_due(at, 2, at + 6 * 3600)); /* 4 a day, two calls each */
+    TEST_ASSERT_TRUE(solar_solcast_due(at, 1, at - 60));       /* the clock went back: don't wait for it */
+    TEST_ASSERT_EQUAL_UINT32(3 * 3600, solar_solcast_wait_s(1));
+    TEST_ASSERT_EQUAL_UINT32(6 * 3600, solar_solcast_wait_s(2));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -440,5 +594,15 @@ int main(void)
     RUN_TEST(test_two_planes_add_up);
     RUN_TEST(test_open_meteo_leaves_out_what_it_has_no_value_for);
     RUN_TEST(test_open_meteo_refusals);
+    RUN_TEST(test_forecast_solar_asks_without_a_key);
+    RUN_TEST(test_forecast_solar_with_a_key_names_both_planes);
+    RUN_TEST(test_forecast_solar_follows_the_line_between_its_points);
+    RUN_TEST(test_forecast_solar_with_a_key_has_a_third_day);
+    RUN_TEST(test_forecast_solar_refusals);
+    RUN_TEST(test_solcast_asks_for_a_site);
+    RUN_TEST(test_solcast_fills_half_hours_from_now);
+    RUN_TEST(test_two_solcast_sites_add_up);
+    RUN_TEST(test_solcast_refusals);
+    RUN_TEST(test_solcast_keeps_within_its_ten_calls_a_day);
     return UNITY_END();
 }

@@ -186,7 +186,7 @@ add_library(solar_logic STATIC ${REPO_ROOT}/components/solar/solar.c ${REPO_ROOT
             ${REPO_ROOT}/components/solar/solar_parse.c)
 target_include_directories(solar_logic PUBLIC ${REPO_ROOT}/components/solar/include)
 target_compile_options(solar_logic PRIVATE ${REFLBO_WARNINGS})
-target_link_libraries(solar_logic PUBLIC util PRIVATE cjson m)
+target_link_libraries(solar_logic PUBLIC util timekeeping_logic PRIVATE cjson m)
 
 # ui: pure C on top of gfx, locale, the datastore and the scheduler's local-time rules.
 file(GLOB UI_SOURCES CONFIGURE_DEPENDS ${REPO_ROOT}/components/ui/*.c)

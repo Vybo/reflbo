@@ -17,6 +17,7 @@
 #define SOLAR_WH_NONE UINT32_MAX /* a day the source sent nothing for */
 #define SOLAR_PLANES_MAX 2
 #define SOLAR_URL_MAX 320
+#define SOLAR_KEY_MAX 64 /* a key or a site id, NUL included */
 
 /* A roof plane (spec §11.5): azimuth 0 south, -90 east, 90 west. */
 typedef struct {
@@ -76,3 +77,20 @@ size_t solar_open_meteo_url(char *out, size_t size, int32_t lat_e4, int32_t lon_
 /* Open-Meteo's reply for `plane` through our model, added to `acc`; false with the reason in `err`. */
 bool solar_parse_open_meteo(const char *json, size_t len, const solar_plane_t *plane, int losses_pct,
                             solar_acc_t *acc, char *err, size_t err_size);
+
+/* Forecast.Solar's power at points (spec §11.5): every plane with a key, the first alone without one
+ * (`key` ""). A key of other characters than letters and digits makes no URL (0 and ""). */
+size_t solar_forecast_solar_url(char *out, size_t size, int32_t lat_e4, int32_t lon_e4, const solar_plane_t *planes,
+                                int count, const char *key);
+/* Its reply, `watts` at each point, in W; the line between the points, added to `acc`. */
+bool solar_parse_forecast_solar(const char *json, size_t len, solar_acc_t *acc, char *err, size_t err_size);
+
+/* Solcast's forecast for one rooftop site (spec §11.5), asked with "Authorization: Bearer <key>";
+ * a site id of other characters than letters, digits and '-' makes no URL. */
+size_t solar_solcast_url(char *out, size_t size, const char *site);
+/* Its reply, `pv_estimate` in kW for each period ending at `period_end`, added to `acc`. */
+bool solar_parse_solcast(const char *json, size_t len, solar_acc_t *acc, char *err, size_t err_size);
+/* Solcast's 10 calls a UTC day: at most one a site every 3 h with one site, every 6 h with two. */
+uint32_t solar_solcast_wait_s(int sites);
+/* Whether a sync may ask now, given when it last asked (0 for never; failed calls count). */
+bool solar_solcast_due(uint32_t last_asked, int sites, uint32_t now);

@@ -299,9 +299,9 @@ static void test_the_sync_section_offers_its_mode_and_quiet_hours(void)
     s_model.hidden[UI_MI_SYNC_INTERVAL] = true; /* the app hides it outside interval mode */
     open_item(UI_MI_SYNC);
     ui_menu_item_t items[UI_MI_COUNT];
-    const ui_menu_item_t expected[] = { UI_MI_SYNC_NOW, UI_MI_SYNC_MODE, UI_MI_QUIET_HOURS };
-    TEST_ASSERT_EQUAL_INT(3, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
-    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 3);
+    const ui_menu_item_t expected[] = { UI_MI_SYNC_NOW, UI_MI_SYNC_MODE, UI_MI_QUIET_HOURS, UI_MI_SYNC_STEPS };
+    TEST_ASSERT_EQUAL_INT(4, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 4);
     ui_menu_intent_t in = open_item(UI_MI_SYNC_NOW);
     TEST_ASSERT_EQUAL(UI_MENU_ACTION, in.kind); /* no question: a sync loses nothing */
     TEST_ASSERT_EQUAL_INT(UI_MI_SYNC_NOW, in.item);
@@ -311,10 +311,40 @@ static void test_the_sync_section_offers_its_mode_and_quiet_hours(void)
     TEST_ASSERT_EQUAL_INT(1, in.value);
 }
 
+/* Sync ▸ Steps (M6d, D35): a switch for each data step; the time has none, as it always runs (spec §9.3). */
+static void test_the_sync_steps_switch_on_and_off(void)
+{
+    open_item(UI_MI_SYNC);
+    open_item(UI_MI_SYNC_STEPS);
+    ui_menu_item_t items[UI_MI_COUNT];
+    const ui_menu_item_t expected[] = { UI_MI_STEP_WEATHER, UI_MI_STEP_AIR, UI_MI_STEP_RADAR, UI_MI_STEP_SOLAR,
+                                        UI_MI_STEP_ENERGY };
+    TEST_ASSERT_EQUAL_INT(5, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 5);
+    const lang_t *en = lang_get("en"), *cs = lang_get("cs");
+    TEST_ASSERT_EQUAL_STRING("Steps", ui_menu_label(UI_MI_SYNC_STEPS, en));
+    TEST_ASSERT_EQUAL_STRING("Air quality", ui_menu_label(UI_MI_STEP_AIR, en));
+    TEST_ASSERT_EQUAL_STRING("Solar forecast", ui_menu_label(UI_MI_STEP_SOLAR, en));
+    TEST_ASSERT_EQUAL_STRING("House energy", ui_menu_label(UI_MI_STEP_ENERGY, en));
+    TEST_ASSERT_EQUAL_STRING("Kroky", ui_menu_label(UI_MI_SYNC_STEPS, cs));
+    TEST_ASSERT_EQUAL_STRING("Energie domu", ui_menu_label(UI_MI_STEP_ENERGY, cs));
+    s_model.value[UI_MI_STEP_SOLAR] = 1;
+    ui_menu_intent_t in = open_item(UI_MI_STEP_SOLAR);
+    TEST_ASSERT_EQUAL(UI_MENU_SET, in.kind); /* a switch flips at once */
+    TEST_ASSERT_EQUAL_INT(UI_MI_STEP_SOLAR, in.item);
+    TEST_ASSERT_EQUAL_INT(0, in.value);
+    char text[16];
+    ui_menu_value_text(UI_MI_STEP_SOLAR, 0, &s_model, en, text, sizeof(text));
+    TEST_ASSERT_EQUAL_STRING("Off", text);
+    press(UI_MENU_KEY_BACK);
+    TEST_ASSERT_EQUAL_INT(UI_MI_SYNC_STEPS, ui_menu_current(&s_m, &s_model)); /* back where it was */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_the_sync_section_offers_its_mode_and_quiet_hours);
+    RUN_TEST(test_the_sync_steps_switch_on_and_off);
     RUN_TEST(test_the_root_lists_the_sections_in_order);
     RUN_TEST(test_next_wraps_select_enters_and_back_returns_to_the_section);
     RUN_TEST(test_back_at_the_root_and_exit_anywhere_close_the_menu);

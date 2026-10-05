@@ -162,6 +162,8 @@ typedef enum {
     LS_SYNC_STEP_WEATHER,
     LS_SYNC_STEP_AIR,
     LS_SYNC_STEP_RADAR,
+    LS_SYNC_STEP_SOLAR,  /* M6d (D35, D36) */
+    LS_SYNC_STEP_ENERGY,
     LS_SYNC_NEVER,
     LS_SYNC_RUNNING,
     LS_T_SYNC_STARTED,
@@ -224,6 +226,7 @@ typedef enum {
     LS_EN_IMPORTED,
     LS_NO_SOLAR,
     LS_NO_ENERGY,
+    LS_M_SYNC_STEPS, /* Sync ▸ Steps (M6d, D35) */
     LS_COUNT,
 } lang_str_t;
 

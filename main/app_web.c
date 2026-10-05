@@ -508,10 +508,9 @@ static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *
     EXT_RAM_BSS_ATTR static settings_secrets_t dropped;
     EXT_RAM_BSS_ATTR static settings_t next;
     bool settings_ok = true;
-    if (settings != NULL) { /* a key a bundle carries never reaches the file (spec §14.4); a second plane needs one */
+    if (settings != NULL) { /* a key a bundle carries never reaches the file (spec §14.4) */
         settings_ok = settings_take_secrets(settings, clean, sizeof(clean), &dropped, why, sizeof(why)) > 0 &&
-                      settings_from_json(clean, app_settings(), &next, why, sizeof(why)) &&
-                      settings_check_solar(&next, app_secret_set(SETTINGS_SECRET_FS_KEY), why, sizeof(why));
+                      settings_from_json(clean, app_settings(), &next, why, sizeof(why));
         memset(&dropped, 0, sizeof(dropped));
         settings = clean;
     }
@@ -540,6 +539,12 @@ static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *
     cJSON *o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "ok", true);
     cJSON_AddItemToObject(o, "skipped", skipped);
+    cJSON *notes = cJSON_AddArrayToObject(o, "notes"); /* what waits: keys never come with a bundle (spec §14.4) */
+    if (settings != NULL && !settings_check_solar(&next, app_secret_set(SETTINGS_SECRET_FS_KEY), why, sizeof(why))) {
+        char note[sizeof(why) + 56]; /* the reason and the 52 characters after it */
+        snprintf(note, sizeof(note), "%s: the forecast uses the first plane until one is set", why);
+        cJSON_AddItemToArray(notes, cJSON_CreateString(note));
+    }
     reply_cjson(reply, out, size, o);
 }
 

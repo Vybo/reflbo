@@ -141,6 +141,20 @@ test('Download backup saves the backup as a JSON file', async () => {
   assert.deepEqual(JSON.parse(await blobs[0].text()), backup);
 });
 
+test('a restore says what waits for a key', async () => {
+  const note = 'a second plane needs a Forecast.Solar key: the forecast uses the first plane until one is set';
+  const { ctx, calls, main } = await load({
+    'POST /api/restore': () => reply(200, { ok: true, skipped: [], notes: [note] }),
+  });
+  await ctx.backupPage();
+  const file = below(main).find((e) => e.tag === 'input');
+  file.files = [{ text: async () => JSON.stringify({ reflbo_backup: 1, files: { 'settings.json': { schema: 1 } } }) }];
+  await buttonNamed(main, 'Restore').click();
+  await settle();
+  assert.ok(calls.some((c) => c.path === '/api/restore' && c.init.method === 'POST'));
+  assert.match(text(main), /Restored\. A second plane needs a Forecast\.Solar key: the forecast uses the first plane until one is set\./);
+});
+
 test('Factory reset erases and says so', async () => {
   const { ctx, calls, main } = await load({ 'POST /api/factory-reset': () => reply(200, { ok: true }) });
   await ctx.backupPage();

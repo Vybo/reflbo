@@ -1450,7 +1450,8 @@ async function backupPage() {
     try { bundle = JSON.parse(await f.text()); } catch (e) { throw new ApiError('That file is not JSON.'); }
     const r = await api('POST', '/api/restore', bundle);
     note.className = 'good';
-    note.textContent = 'Restored.' + (r.skipped.length ? ` Left out, for a later firmware: ${r.skipped.join(', ')}.` : '');
+    note.textContent = 'Restored.' + (r.skipped.length ? ` Left out, for a later firmware: ${r.skipped.join(', ')}.` : '') +
+      (r.notes || []).map((n) => ` ${n[0].toUpperCase()}${n.slice(1)}.`).join('');
   }))));
   const resetCard = card('Factory reset', h('p', { class: 'muted small', text: 'Erases the settings, presets, saved ' +
     'Wi-Fi networks and the web password, then restarts. The device then starts like new.' }),

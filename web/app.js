@@ -807,7 +807,9 @@ function numberInput(obj, key, min, max, step) {
 
 /* A write-only key (spec §10.3): empty, it says whether one is set; what you type is sent; Clear sends null. */
 function secretInput(label, isSet, hint) {
-  const input = h('input', { type: 'password', autocomplete: 'off', placeholder: isSet ? 'set: type to replace it' : '' });
+  /* new-password: a password manager never fills the device's web password into a key, which the requests send on */
+  const input = h('input', { type: 'password', autocomplete: 'new-password', 'data-1p-ignore': '', 'data-lpignore': 'true',
+                             placeholder: isSet ? 'set: type to replace it' : '' });
   const note = h('p', { class: 'muted small', text: isSet ? 'A key is set.' : 'None is set.' });
   const s = { input, isSet, cleared: false };
   s.value = () => (input.value ? input.value : s.cleared ? null : undefined);

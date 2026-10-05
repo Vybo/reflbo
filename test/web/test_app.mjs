@@ -810,6 +810,7 @@ test('keys are write-only: the page says which are set and sends only what you t
   const key = inputNamed(main, 'Forecast.Solar key (optional)');
   assert.equal(key.value, '');
   assert.equal(key.attrs.type, 'password');
+  assert.equal(key.attrs.autocomplete, 'new-password'); /* never the web password a password manager keeps */
   assert.match(text(main), /A key is set/);
   await buttonNamed(main, 'Save').click();
   assert.equal(patches.at(-1).solar.fs_key, undefined); /* nothing typed: the key stays as it is */

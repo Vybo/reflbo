@@ -30,6 +30,12 @@ typedef enum {
     UI_MI_SYNC_MODE,     /* choice: times, interval, always, manual (spec §9.3) */
     UI_MI_SYNC_INTERVAL, /* choice: interval labels; shown in interval mode */
     UI_MI_QUIET_HOURS,   /* toggle (D25) */
+    UI_MI_SYNC_STEPS,    /* section (M6d, D35): a switch for each data step (spec §9.3) */
+    UI_MI_STEP_WEATHER,  /* toggles, in settings_step_t order */
+    UI_MI_STEP_AIR,
+    UI_MI_STEP_RADAR,
+    UI_MI_STEP_SOLAR,
+    UI_MI_STEP_ENERGY,
     UI_MI_TIME,
     UI_MI_SET_DATETIME, /* the date-time editor */
     UI_MI_CLOCK_24H,    /* toggle */

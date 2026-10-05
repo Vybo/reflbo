@@ -214,6 +214,8 @@ typedef enum {
     LS_EN_SELF,
     LS_EN_EXPORTING, /* energy.grid's label in M and up while power goes out, and in */
     LS_EN_IMPORTING,
+    LS_PV_CHART, /* pv.chart and energy.flow (spec §5.3) */
+    LS_EN_FLOW,
     LS_COUNT,
 } lang_str_t;
 

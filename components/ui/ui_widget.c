@@ -103,6 +103,7 @@ static const gfx_bitmap_t *field_icon(ui_field_id_t field, int size)
     case UI_FIELD_PV_LEFT:
     case UI_FIELD_PV_TOMORROW:
     case UI_FIELD_PV_PEAK:
+    case UI_FIELD_PV_CHART:
         s16 = &gfx_icon_forecast_16, s24 = &gfx_icon_forecast_24, s48 = &gfx_icon_forecast_48;
         break;
     case UI_FIELD_EN_PV:
@@ -110,6 +111,7 @@ static const gfx_bitmap_t *field_icon(ui_field_id_t field, int size)
         s16 = &gfx_icon_solar_16, s24 = &gfx_icon_solar_24, s48 = &gfx_icon_solar_48;
         break;
     case UI_FIELD_EN_LOAD:
+    case UI_FIELD_EN_FLOW:
         s16 = &gfx_icon_house_16, s24 = &gfx_icon_house_24, s48 = &gfx_icon_house_48;
         break;
     case UI_FIELD_EN_GRID:
@@ -935,6 +937,8 @@ void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t
         /* the weather, air quality, pollen and sun widgets (ui_forecast.c) */
     } else if (ui_radar_widget(fb, r, size, &shown)) {
         /* rain.map (ui_radar.c) */
+    } else if (ui_solar_widget(fb, r, size, &shown, lang)) {
+        /* pv.chart and energy.flow (ui_solar.c) */
     } else if (size == UI_SIZE_XS) {
         draw_tiny(fb, r, &shown);
     } else if (size == UI_SIZE_S) {

@@ -225,6 +225,8 @@ const lang_t lang_en = {
         [LS_EN_SELF] = "Own use",
         [LS_EN_EXPORTING] = "Export",
         [LS_EN_IMPORTING] = "Import",
+        [LS_PV_CHART] = "Solar forecast",
+        [LS_EN_FLOW] = "Energy flow",
     },
     .weekdays = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" },
     .weekdays_short = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" },

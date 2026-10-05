@@ -4,6 +4,7 @@
 
 #include "context_fixtures.h"
 #include "radar_fixtures.h"
+#include "solar_fixtures.h"
 #include "ui_dashboard.h"
 
 /* The dashboard fixtures for the golden renders (test_ui_dashboard_golden.c, render_dashboard.c):
@@ -78,6 +79,23 @@ static const uint8_t k_fixture_small24[24] = {
     UI_FIELD_AQ_PM25,       UI_FIELD_AQ_PM10,      UI_FIELD_ENV_TEMP_MIN,  UI_FIELD_ENV_TEMP_MAX, UI_FIELD_POLLEN_GRASS,
     UI_FIELD_POLLEN_BIRCH,  UI_FIELD_POLLEN_ALDER, UI_FIELD_POLLEN_MUGWORT, UI_FIELD_POLLEN_RAGWEED,
 };
+
+/* M6d: 13:20 CEST on the fixture's day, the sun out, the sample day of ui_solar_demo(). */
+static inline void fixture_solar_ctx(ui_context_t *ctx, bool live, bool battery)
+{
+    ctx->now = FIX_SOLAR_NOW;
+    ctx->local = fixture_local(13, 20, 0);
+    fixture_fill(&s_fix_ds, ctx->now);
+    fixture_forecast(&s_fix_ds, ctx->now - 3600);
+    static ds_weather_t w;
+    w = *ds_weather(&s_fix_ds);
+    w.now_is_day = 1;
+    w.now_code = 1;
+    w.now_time = (uint32_t)(ctx->now - 20 * 60);
+    w.now_temp_c10 = 196;
+    ds_set_weather(&s_fix_ds, &w);
+    ctx->solar = fixture_solar(ctx->now, live, battery);
+}
 
 /* Each fixture: a context and a preset. */
 static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_preset_t *preset)
@@ -349,6 +367,30 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
         ctx->clock_24h = false;
         ctx->local = fixture_local(12, 58, 0);
+    } else if (strcmp(name, "home_energy") == 0) { /* M6d: Classic's small slots, the house now */
+        *preset = fixture_preset("home");
+        preset->slots[2] = UI_FIELD_EN_PV;
+        preset->slots[3] = UI_FIELD_EN_GRID;
+        preset->slots[4] = UI_FIELD_EN_LOAD;
+        preset->slots[5] = UI_FIELD_PV_TODAY;
+        fixture_solar_ctx(ctx, true, false);
+    } else if (strcmp(name, "grid_solar") == 0) { /* Grid's medium cells: the chart, the flow, the numbers */
+        *preset = fixture_preset("indoor");
+        static const uint8_t k_slots[6] = { UI_FIELD_PV_CHART, UI_FIELD_EN_FLOW, UI_FIELD_PV_LEFT,
+                                            UI_FIELD_EN_GRID,  UI_FIELD_EN_SELF, UI_FIELD_PV_TOMORROW };
+        memcpy(preset->slots, k_slots, sizeof(k_slots));
+        fixture_solar_ctx(ctx, true, false);
+    } else if (strcmp(name, "weather_solar") == 0) { /* the chart in Weather's large slot, the flow beside */
+        *preset = fixture_preset("weather");
+        static const uint8_t k_slots[5] = { UI_FIELD_PV_CHART, UI_FIELD_WX_TODAY, UI_FIELD_EN_FLOW, UI_FIELD_EN_PV,
+                                            UI_FIELD_EN_BATTERY };
+        memcpy(preset->slots, k_slots, sizeof(k_slots));
+        fixture_solar_ctx(ctx, true, true);
+    } else if (strcmp(name, "focus_solar") == 0) { /* the clock, with the chart and the flow under it */
+        *preset = fixture_preset("focus");
+        preset->slots[1] = UI_FIELD_PV_CHART;
+        preset->slots[2] = UI_FIELD_EN_FLOW;
+        fixture_solar_ctx(ctx, true, false);
     } else {
         return false;
     }
@@ -373,4 +415,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "split_eight", "home_temp_main", "home_temp_main_cs",
                                                     "weather_frost_cs", "weather_hot_f", "split_compact",
                                                     "split_compact_cs", "split_xs_rows", "split_xs_grid",
-                                                    "split_xs_narrow" };
+                                                    "split_xs_narrow", "home_energy", "grid_solar",
+                                                    "weather_solar", "focus_solar" };

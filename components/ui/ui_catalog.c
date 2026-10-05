@@ -24,8 +24,10 @@ static const char *const k_kinds[UI_FK_COUNT] = {
     [UI_FK_LEVEL] = "level",
     [UI_FK_POLLEN] = "pollen",
     [UI_FK_RAIN_MAP] = "rain_map",
+    [UI_FK_CHART] = "chart",
+    [UI_FK_FLOW] = "flow",
 };
-_Static_assert(UI_FK_COUNT == 13, "every kind has a name in the catalogue");
+_Static_assert(UI_FK_COUNT == 15, "every kind has a name in the catalogue");
 static const char *const k_sizes[] = { [UI_SIZE_XS] = "XS", [UI_SIZE_S] = "S", [UI_SIZE_M] = "M",
                                        [UI_SIZE_L] = "L", [UI_SIZE_XL] = "XL" };
 

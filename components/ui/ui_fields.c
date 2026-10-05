@@ -53,6 +53,8 @@ static const ui_field_info_t k_fields[UI_FIELD_COUNT] = {
     [UI_FIELD_EN_EXPORT] = { "energy.export", UI_FK_NUMBER, LS_EN_EXPORT, -1 },
     [UI_FIELD_EN_IMPORT] = { "energy.import", UI_FK_NUMBER, LS_EN_IMPORT, -1 },
     [UI_FIELD_EN_SELF] = { "energy.self", UI_FK_NUMBER, LS_EN_SELF, -1 },
+    [UI_FIELD_PV_CHART] = { "pv.chart", UI_FK_CHART, LS_PV_CHART, -1 },
+    [UI_FIELD_EN_FLOW] = { "energy.flow", UI_FK_FLOW, LS_EN_FLOW, -1 },
 };
 
 const ui_field_info_t *ui_field_info(ui_field_id_t field)

@@ -224,7 +224,7 @@ document.getElementById('done').onclick = async () => {
 /* ---- pages ---- */
 
 const pages = { status: statusPage, wifi: wifiPage, place: placePage, sync: syncPage, radar: radarPage,
-                device: devicePage, presets: presetsPage, firmware: firmwarePage, backup: backupPage };
+                solar: solarPage, device: devicePage, presets: presetsPage, firmware: firmwarePage, backup: backupPage };
 
 function route() {
   const name = location.hash.slice(1) || 'status';
@@ -307,7 +307,9 @@ async function statusPage() {
 /* ---- Sync (spec §9.3, D25) ---- */
 
 const SYNC_STEPS = [['wifi', 'Wi-Fi'], ['time', 'Time'], ['weather', 'Weather'], ['air', 'Air quality'],
-                    ['radar', 'Radar']];
+                    ['radar', 'Radar'], ['solar', 'Solar forecast'], ['energy', 'House energy']];
+/* The data steps a sync can leave out (D35): the time always runs, as the clock and its trim need it. */
+const STEP_SWITCHES = SYNC_STEPS.slice(2);
 const SYNC_INTERVALS = [15, 30, 60, 120, 180, 360, 720, 1440];
 const intervalLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} h`);
 
@@ -339,9 +341,11 @@ async function syncPage() {
   const steps = h('dl', { class: 'facts' });
   const showSteps = (status) => {
     const last = status.sync.last;
+    const detail = (k) => (last.details || {})[k] || (last.failed === k ? last.detail : '');
     steps.replaceChildren(...SYNC_STEPS.flatMap(([k, name]) => [h('dt', { text: name }),
       h('dd', { class: !last ? '' : last.steps[k] === 'ok' ? 'good' : last.steps[k] === 'failed' ? 'bad' : 'muted',
-                text: !last ? '—' : last.steps[k] === 'failed' && last.failed === k ? `failed: ${last.detail}` : last.steps[k] })]));
+                text: !last ? '—' : last.steps[k] && last.steps[k] !== 'ok' && detail(k) ? `${last.steps[k]}: ${detail(k)}`
+                  : last.steps[k] || '—' })]));
   };
   const summary = h('div');
   const rtc = h('p', { class: 'muted small' });
@@ -439,7 +443,22 @@ async function syncPage() {
       note.textContent = moved.length ? `Saved. ${moved.join(', ')} falls in the quiet hours: it runs at ${to.value}.` : 'Saved.';
       toast('Saved');
     }), 'primary')));
-  main.replaceChildren(h('h1', { text: 'Sync' }), nowCard, schedCard);
+  const on = new Set(Array.isArray(sync.steps) ? sync.steps : STEP_SWITCHES.map(([k]) => k));
+  const switches = STEP_SWITCHES.map(([k, name]) => h('label', { class: 'check' },
+    h('input', { type: 'checkbox', checked: on.has(k) }), name));
+  const stepsNote = h('p');
+  const stepsCard = card('Steps',
+    h('p', { class: 'muted small', text: 'A step that is off makes no requests, and its data age out as usual. The time ' +
+      'always runs: the clock and its trim need it.' }),
+    ...switches, stepsNote,
+    actions(button('Save steps', () => busy(stepsCard, stepsNote, async () => {
+      const list = STEP_SWITCHES.filter((_, i) => switches[i].children[0].checked).map(([k]) => k);
+      await api('PATCH', '/api/settings', { sync: { steps: list } });
+      stepsNote.className = 'good';
+      stepsNote.textContent = 'Saved.';
+      toast('Saved');
+    }), 'primary')));
+  main.replaceChildren(h('h1', { text: 'Sync' }), nowCard, schedCard, stepsCard);
 }
 
 /* ---- Wi-Fi (spec §10.1, §10.2) ---- */
@@ -764,6 +783,151 @@ async function radarPage() {
 
 /* ---- Device: the settings the menu also has (spec §5.7, D19) ---- */
 
+/* ---- Solar (spec §11.5, §11.6, D35, D36) ---- */
+
+const SOLAR_SOURCES = [['off', 'Off'], ['open-meteo', 'Open-Meteo, through the device\'s own model'],
+                       ['forecast-solar', 'Forecast.Solar'], ['solcast', 'Solcast']];
+const ENERGY_SOURCES = [['off', 'Off'], ['solax', 'SolaX Cloud']];
+const BATTERY_MODES = [['auto', 'Automatic: a hybrid inverter, or a charge above 0 %'], ['on', 'Shown'],
+                       ['off', 'Hidden']];
+
+function choose(options, value) {
+  const el = h('select', {}, options.map(([v, t]) => h('option', { value: v, selected: v === value }, t)));
+  el.value = value;
+  return el;
+}
+
+/* A number input bound to obj[key]. */
+function numberInput(obj, key, min, max, step) {
+  return h('input', { type: 'number', min: String(min), max: String(max), step: String(step), value: String(obj[key]),
+                      oninput: (ev) => { obj[key] = Number(ev.target.value); } });
+}
+
+/* A write-only key (spec §10.3): empty, it says whether one is set; what you type is sent; Clear sends null. */
+function secretInput(label, isSet, hint) {
+  const input = h('input', { type: 'password', autocomplete: 'off', placeholder: isSet ? 'set: type to replace it' : '' });
+  const note = h('p', { class: 'muted small', text: isSet ? 'A key is set.' : 'None is set.' });
+  const s = { input, isSet, cleared: false };
+  s.value = () => (input.value ? input.value : s.cleared ? null : undefined);
+  s.el = [field(label, input, hint), note,
+          isSet ? actions(button('Clear the key', () => { s.cleared = true; input.value = ''; note.textContent = 'It goes when you save.'; }))
+                : null];
+  return s;
+}
+
+async function solarPage() {
+  const [s, st] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status')]);
+  const solar = s.solar || {}, energy = s.energy || {}, keys = solar.keys || {}, ekeys = energy.keys || {};
+
+  const source = choose(SOLAR_SOURCES, solar.source || 'off');
+  const planes = (Array.isArray(solar.planes) && solar.planes.length ? solar.planes : [{ kwp: 5, tilt: 35, azimuth: 0 }])
+    .slice(0, 2).map((q) => ({ kwp: q.kwp, tilt: q.tilt, azimuth: q.azimuth }));
+  const planeBox = h('div');
+  const showPlanes = () => planeBox.replaceChildren(...[...planes.map((q, i) => h('div', {},
+    h('h3', { text: planes.length > 1 ? `Plane ${i + 1}` : 'The roof' }),
+    h('div', { class: 'row' }, h('div', {}, field('kWp', numberInput(q, 'kwp', 0.1, 100, 0.01))),
+      h('div', {}, field('Tilt (°)', numberInput(q, 'tilt', 0, 90, 1))),
+      h('div', {}, field('Azimuth (°)', numberInput(q, 'azimuth', -180, 180, 1)))),
+    planes.length > 1 ? actions(button('Remove this plane', () => { planes.splice(i, 1); showPlanes(); })) : null)),
+  h('p', { class: 'muted small', text: 'Azimuth 0 is south, -90 east, 90 west.' }),
+  planes.length < 2 ? actions(button('Add a second plane', () => { planes.push({ kwp: 2, tilt: 35, azimuth: -90 }); showPlanes(); }))
+    : null].filter(Boolean));
+  showPlanes();
+  const model = { losses: solar.losses_pct ?? 14, inverter: solar.inverter_kw ?? 0 };
+  const modelBox = h('div', { class: 'row' },
+    h('div', {}, field('Losses (%)', numberInput(model, 'losses', 0, 50, 1))),
+    h('div', {}, field('Inverter limit (kW)', numberInput(model, 'inverter', 0, 100, 0.01), '0 for none.')));
+  const fsKey = secretInput('Forecast.Solar key (optional)', !!keys.fs_key,
+    'Without one: one plane, hourly values, today and tomorrow. A second plane needs one.');
+  const scKey = secretInput('Solcast API key', !!keys.solcast_key);
+  const sites = [secretInput('First site id', (keys.solcast_sites || 0) >= 1),
+                 secretInput('Second site id (optional)', (keys.solcast_sites || 0) >= 2)];
+  const fsBox = h('div', {}, fsKey.el);
+  const scBox = h('div', {}, h('p', { class: 'muted small', text: 'Solcast knows the roof: its tilt, azimuth and kWp ' +
+    'are set on solcast.com. A hobbyist account has 10 calls a day: the device asks at most every 3 h with one site, ' +
+    'every 6 h with two, and keeps the forecast it has in between.' }), scKey.el, sites[0].el, sites[1].el);
+  const show = () => {
+    const v = source.value;
+    planeBox.hidden = v !== 'open-meteo' && v !== 'forecast-solar';
+    modelBox.hidden = v !== 'open-meteo';
+    fsBox.hidden = v !== 'forecast-solar';
+    scBox.hidden = v !== 'solcast';
+  };
+  source.addEventListener('change', show);
+  show();
+
+  const esource = choose(ENERGY_SOURCES, energy.source || 'off');
+  const token = secretInput('Token', !!ekeys.solax_token, 'From the API page of solaxcloud.com.');
+  const sn = secretInput('Registration number', !!ekeys.solax_sn, 'The dongle\'s, on its label.');
+  const battery = choose(BATTERY_MODES, energy.battery || 'auto');
+  const solaxBox = h('div', {}, token.el, sn.el);
+  const eshow = () => { solaxBox.hidden = esource.value !== 'solax'; };
+  esource.addEventListener('change', eshow);
+  eshow();
+
+  const note = h('p');
+  const save = card(null, note, actions(button('Save', () => busy(save, note, async () => {
+    const touched = sites.some((x) => x.value() !== undefined);
+    if (touched && sites.some((x) => x.isSet && x.value() === undefined)) {
+      throw new ApiError('Type both site ids, or clear the one you don\'t want.');
+    }
+    const out = { solar: { source: source.value, planes: planes.map((q) => ({ kwp: Number(q.kwp), tilt: Number(q.tilt),
+                                                                             azimuth: Number(q.azimuth) })),
+                           losses_pct: Number(model.losses), inverter_kw: Number(model.inverter) },
+                  energy: { source: esource.value, battery: battery.value } };
+    const put = (obj, key, v) => { if (v !== undefined) obj[key] = v; };
+    put(out.solar, 'fs_key', fsKey.value());
+    put(out.solar, 'solcast_key', scKey.value());
+    if (touched) out.solar.solcast_sites = sites.map((x) => x.value() || '').filter(Boolean);
+    put(out.energy, 'solax_token', token.value());
+    put(out.energy, 'solax_sn', sn.value());
+    await api('PATCH', '/api/settings', out);
+    note.className = 'good';
+    note.textContent = 'Saved.';
+    toast('Saved');
+  }), 'primary')));
+
+  const facts2 = h('div');
+  const showNow = (status) => {
+    const f = status.solar || {}, e = status.energy || {};
+    facts2.replaceChildren(facts([
+      ['Forecast', f.fetched_at ? `from ${when(f.fetched_at)}` : 'none yet'],
+      f.kept ? ['Its last step', f.kept !== 'kept' ? `kept the forecast (${f.kept})` : 'kept the forecast: Solcast ' +
+        `is asked again from ${f.next_at ? when(f.next_at) : 'its next sync'}, within its 10 calls a day`] : null,
+      f.error ? ['Its last call', `failed: ${f.error}`] : null,
+      ['House reading', e.reading_at ? `from ${when(e.reading_at)}` : 'none yet'],
+      e.error ? ['Its last step', `failed: ${e.error}`] : null,
+    ]));
+  };
+  showNow(st);
+  const checkNote = h('p');
+  const nowCard = card('Now', facts2, checkNote, actions(button('Check now', () => busy(nowCard, checkNote, async () => {
+    const before = await api('GET', '/api/status');
+    const tried = (x) => `${(x.solar || {}).tried_at}/${(x.energy || {}).tried_at}`;
+    await api('POST', '/api/solar/check');
+    checkNote.className = 'muted';
+    checkNote.textContent = 'Checking…';
+    for (let i = 0; i < 40; i++) { /* the two steps take some seconds, 45 s at most (spec §9.3) */
+      await sleep(1500);
+      const now = await api('GET', '/api/status');
+      if (tried(now) !== tried(before)) {
+        showNow(now);
+        checkNote.className = 'good';
+        checkNote.textContent = 'Checked.';
+        return;
+      }
+    }
+    checkNote.textContent = 'No result yet; see Sync.';
+  }))));
+
+  main.replaceChildren(h('h1', { text: 'Solar' }),
+    card('PV forecast', field('Source', source), planeBox, modelBox, fsBox, scBox),
+    card('The house\'s energy', field('Source', esource), solaxBox, field('Home battery', battery)),
+    save, nowCard,
+    card('Credits', h('p', { class: 'muted small', text: 'Forecasts: Open-Meteo (CC BY 4.0), Forecast.Solar (CC BY-SA ' +
+      '4.0), Solcast (for personal use only, as its terms say). The house\'s readings: SolaX Cloud.' })));
+}
+
 const LANGUAGES = [['en', 'English'], ['cs', 'Čeština']];
 const SENSOR_MIN = [1, 2, 5, 10, 15, 30];
 const RATES = [0.25, 0.5, 1, 2, 4, 8];
@@ -842,9 +1006,28 @@ async function devicePage() {
 /* ---- Presets (spec §5.4) ---- */
 
 const LAYOUT_NAMES = { classic: 'Classic', weather: 'Weather', grid: 'Grid', focus: 'Focus', radar: 'Radar',
-                       flights: 'Flights', split: 'Split' };
+                       flights: 'Flights', split: 'Split', solar: 'Solar', energy: 'Energy' };
 const NO_SLOTS = { radar: 'This layout draws the weather radar: its centre and zoom are on the Radar page.',
-                   flights: 'This layout draws the flight radar: its centre, range and filters are on the Radar page.' };
+                   flights: 'This layout draws the flight radar: its centre, range and filters are on the Radar page.',
+                   solar: 'This layout draws today\'s PV forecast: its source is on the Solar page.',
+                   energy: 'This layout draws the house\'s energy now: its source is on the Solar page.' };
+/* The sync step a field's data come from (spec §9.3, D35): a field whose step is off ages out. */
+const fieldStep = (id) => (/^(wx\.)/.test(id) ? 'weather' : /^(aq|pollen)\./.test(id) ? 'air' : id === 'rain.map' ? 'radar'
+  : id.startsWith('pv.') ? 'solar' : id.startsWith('energy.') ? 'energy' : null);
+const FIELD_GROUPS = [['solar', 'Solar forecast'], ['energy', 'House energy']];
+
+/* A slot's or a cell's choices: the fields `fits` allows, the Solar and Energy ones in their groups, each marked
+ * when its sync step is off. */
+function fieldOptions(ed, fits, selected) {
+  const option = (f) => h('option', { value: f.id, selected: selected === f.id },
+    `${f.label} — ${f.value || 'no data yet'}${ed.stepsOff.has(fieldStep(f.id)) ? ' (its sync step is off)' : ''}`);
+  const grouped = new Set(FIELD_GROUPS.map(([k]) => k));
+  return [h('option', { value: '' }, '(empty)'), fits.filter((f) => !grouped.has(fieldStep(f.id))).map(option),
+          FIELD_GROUPS.map(([k, label]) => {
+            const list = fits.filter((f) => fieldStep(f.id) === k);
+            return list.length ? h('optgroup', { label }, list.map(option)) : null;
+          })];
+}
 const CYCLE_S = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
 const cycleLabel = (s) => (s < 60 ? `${s} s` : s < 3600 ? `${s / 60} min` : `${s / 3600} h`);
 const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']; /* bit 0 is Monday */
@@ -860,9 +1043,12 @@ function uniqueId(doc, base) {
 
 async function presetsPage() {
   if (!catalogue) catalogue = await api('GET', '/api/layouts');
-  const [doc, fieldList] = await Promise.all([api('GET', '/api/presets'), api('GET', '/api/fields')]);
+  const [doc, fieldList, settings] = await Promise.all([api('GET', '/api/presets'), api('GET', '/api/fields'),
+    api('GET', '/api/settings').catch(() => ({}))]);
+  const steps = (settings.sync || {}).steps;
   const ed = {
     doc, fields: fieldList.fields, dirty: false,
+    stepsOff: new Set(Array.isArray(steps) ? STEP_SWITCHES.map(([k]) => k).filter((k) => !steps.includes(k)) : []),
     sel: Math.max(0, doc.presets.findIndex((p) => p.id === doc.active)),
     img: h('img', { class: 'screen', alt: 'Preview' }), previewNote: h('p', { class: 'small' }),
     timer: null, url: null, saveNote: h('p'),
@@ -951,8 +1137,7 @@ function splitEditor(ed, p) {
         if (ev.target.value) node.field = ev.target.value;
         else delete node.field;
         changed(ed, false);
-      } }, h('option', { value: '' }, '(empty)'), fits.map((f) => h('option',
-        { value: f.id, selected: node.field === f.id }, `${f.label} — ${f.value || 'no data yet'}`)));
+      } }, fieldOptions(ed, fits, node.field));
       const splitButton = (dir, text) => {
         const half = { split: dir, ratio: '1/2', line: true, a: {}, b: {} }; /* the field goes to the first part */
         const b = button(text, () => {
@@ -1076,9 +1261,7 @@ function renderPresets(ed) {
       if (ev.target.value) p.slots[slot.id] = ev.target.value;
       else delete p.slots[slot.id];
       changed(ed, false);
-    } }, h('option', { value: '' }, '(empty)'),
-    ed.fields.filter((f) => slot.kinds.includes(f.kind)).map((f) => h('option',
-      { value: f.id, selected: p.slots[slot.id] === f.id }, `${f.label} — ${f.value || 'no data yet'}`))))));
+    } }, fieldOptions(ed, ed.fields.filter((f) => slot.kinds.includes(f.kind)), p.slots[slot.id])))));
 
   const o = p.options;
   const check = (key, text) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!o[key],

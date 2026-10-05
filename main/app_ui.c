@@ -661,12 +661,6 @@ size_t app_ui_settings_json(char *out, size_t size)
     return settings_to_json(&s.settings, s_settings_base[0] ? s_settings_base : NULL, out, size);
 }
 
-bool app_ui_check_settings(const char *json, char *err, size_t err_size)
-{
-    static settings_t parsed;
-    return settings_from_json(json, &s.settings, &parsed, err, err_size);
-}
-
 /* The new settings take effect everywhere: time zone, offsets, panel rate, slots and the text. */
 static void settings_changed(void)
 {

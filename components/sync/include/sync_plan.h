@@ -13,6 +13,31 @@
 
 typedef enum { SYNC_MODE_TIMES, SYNC_MODE_INTERVAL, SYNC_MODE_ALWAYS, SYNC_MODE_MANUAL } sync_mode_t;
 
+/* A sync's steps (spec §9.3), in their order. */
+typedef enum {
+    SYNC_STEP_WIFI,
+    SYNC_STEP_TIME,
+    SYNC_STEP_WEATHER,
+    SYNC_STEP_AIR,
+    SYNC_STEP_RADAR,  /* M6 (spec §11.2) */
+    SYNC_STEP_SOLAR,  /* M6d (spec §11.5) */
+    SYNC_STEP_ENERGY, /* M6d (spec §11.6) */
+    SYNC_STEP_COUNT,
+} sync_step_t;
+
+typedef enum {
+    SYNC_STEP_NOT_RUN, /* skipped: switched off, without a source, or the sync never got there */
+    SYNC_STEP_OK,
+    SYNC_STEP_FAILED,
+    SYNC_STEP_KEPT, /* it ran and kept what it had: Solcast's budget ("kept"), a provider's 429 (M6d) */
+} sync_step_result_t;
+
+/* A sync fails when a step fails, except the Energy step (D36; from M7 the MQTT step's, D32): their failures show
+ * but start no retry. A step kept or not run is no failure. */
+bool sync_report_failed(const uint8_t result[SYNC_STEP_COUNT]);
+/* The first step that failed, whichever it is, for Info ▸ Last sync; SYNC_STEP_COUNT for none. */
+int sync_first_failed(const uint8_t result[SYNC_STEP_COUNT]);
+
 #define SYNC_TIMES_MAX 8
 #define SYNC_ALWAYS_REFRESH_MIN 60 /* weather and air quality in `always` mode */
 #define SYNC_RETRY_COUNT 3         /* retries 15, 30 and 60 min after each failure */
@@ -52,6 +77,10 @@ typedef enum {
     SYNC_NEED_WIFI,     /* sync mode `always` wants Wi-Fi, and it is off: a night or quiet hours ended */
     SYNC_NEED_TIME,     /* the clock is lost (D9) */
 } sync_need_t;
+/* What a device lacks that a sync brings, the most urgent first: the clock; the Wi-Fi that sync mode `always` wants
+ * while it is off (`always_wifi_off`); the first forecast, which only a sync with its Weather step on brings (D35),
+ * so with that step off the schedule decides. */
+sync_need_t sync_need(bool clock_valid, bool always_wifi_off, bool have_forecast, bool weather_on);
 
 /* sync_next_due() for a device that lacks what a sync brings. SYNC_NEED_TIME: at `now`, or after a
  * failure at the next retry, 15, 30 then 60 min on and every 60 min after the third, whatever the

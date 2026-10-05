@@ -405,6 +405,23 @@ static void test_no_forecast_yet_syncs_at_once_unless_a_sync_failed(void)
     TEST_ASSERT_EQUAL_INT64(oct2(5, 30), due.at);
 }
 
+/* The clock first, then `always` mode's Wi-Fi, then the first forecast, which only a sync with its Weather step on
+ * brings (D35): with that step off the schedule decides, or each successful sync would start the next at once. */
+static void test_only_the_weather_step_brings_the_first_forecast(void)
+{
+    TEST_ASSERT_EQUAL_INT(SYNC_NEED_TIME, sync_need(false, true, false, true));
+    TEST_ASSERT_EQUAL_INT(SYNC_NEED_TIME, sync_need(false, false, false, false)); /* the time step has no switch */
+    TEST_ASSERT_EQUAL_INT(SYNC_NEED_WIFI, sync_need(true, true, false, false));
+    TEST_ASSERT_EQUAL_INT(SYNC_NEED_FORECAST, sync_need(true, false, false, true));
+    TEST_ASSERT_EQUAL_INT(SYNC_NEED_NOTHING, sync_need(true, false, true, true));
+    TEST_ASSERT_EQUAL_INT(SYNC_NEED_NOTHING, sync_need(true, false, false, false));
+    sync_schedule_t s = at_times(1, k_half_past_five);
+    sync_history_t h = { 0 };
+    sync_history_record(&h, (sync_due_t){ .at = oct1(18, 40) }, true, oct1(18, 41)); /* it brought no forecast */
+    sync_due_t due = sync_next_due_needing(&s, &h, oct1(18, 41), false, sync_need(true, false, false, false));
+    TEST_ASSERT_EQUAL_INT64(oct2(5, 30), due.at);
+}
+
 static void test_always_brings_wifi_back_at_once_unless_a_sync_failed(void)
 {
     sync_schedule_t s = { .mode = SYNC_MODE_ALWAYS };
@@ -439,6 +456,29 @@ static void test_interval_slots_on_the_fall_back_day(void)
     TEST_ASSERT_EQUAL_UINT32(2 * 3600, sync_expected_interval_s(&s, utc(2026, 10, 25, 10, 0, 0)));
 }
 
+/* A sync fails when one of its steps fails, but not for the house's energy (D36): it shows, starts no retry. A step
+ * that kept what it had (Solcast's budget, a provider's 429) or didn't run (switched off) is no failure (D35). */
+static void test_a_sync_fails_on_any_step_but_the_energy(void)
+{
+    uint8_t r[SYNC_STEP_COUNT];
+    for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+        r[i] = SYNC_STEP_OK;
+    }
+    TEST_ASSERT_FALSE(sync_report_failed(r));
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_COUNT, sync_first_failed(r));
+    r[SYNC_STEP_ENERGY] = SYNC_STEP_FAILED;
+    TEST_ASSERT_FALSE(sync_report_failed(r));
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_ENERGY, sync_first_failed(r)); /* Info still names it */
+    r[SYNC_STEP_SOLAR] = SYNC_STEP_KEPT;
+    r[SYNC_STEP_RADAR] = SYNC_STEP_NOT_RUN;
+    TEST_ASSERT_FALSE(sync_report_failed(r));
+    r[SYNC_STEP_SOLAR] = SYNC_STEP_FAILED;
+    TEST_ASSERT_TRUE(sync_report_failed(r));
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_SOLAR, sync_first_failed(r));
+    r[SYNC_STEP_WIFI] = SYNC_STEP_FAILED;
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_WIFI, sync_first_failed(r));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -462,6 +502,7 @@ int main(void)
     RUN_TEST(test_an_overdue_retry_is_due_now);
     RUN_TEST(test_a_lost_clock_syncs_at_once_then_waits_between_tries);
     RUN_TEST(test_no_forecast_yet_syncs_at_once_unless_a_sync_failed);
+    RUN_TEST(test_only_the_weather_step_brings_the_first_forecast);
     RUN_TEST(test_always_brings_wifi_back_at_once_unless_a_sync_failed);
     RUN_TEST(test_a_step_gets_its_limit_or_what_is_left_of_the_sync);
     RUN_TEST(test_a_failure_after_now_counts_from_now);
@@ -473,6 +514,7 @@ int main(void)
     RUN_TEST(test_the_expected_interval_of_always_and_manual);
     RUN_TEST(test_wifi_is_wanted_in_always_mode_outside_quiet_hours);
     RUN_TEST(test_radar_refreshes_follow_the_frames);
+    RUN_TEST(test_a_sync_fails_on_any_step_but_the_energy);
     RUN_TEST(test_hhmm_text);
     RUN_TEST(test_a_time_in_the_spring_forward_gap_runs_after_it);
     RUN_TEST(test_a_time_in_the_repeated_hour_runs_once);

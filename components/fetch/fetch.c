@@ -8,6 +8,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "util_url.h"
 
 static const char *TAG = "fetch";
 
@@ -43,6 +44,13 @@ static esp_err_t get_once(fetch_session_t *s, const char *url, char *buf, size_t
     } else {
         err = esp_http_client_set_url(client, url); /* another host closes the old connection */
         esp_http_client_set_timeout_ms(client, timeout_ms);
+    }
+    if (err == ESP_OK && s->bearer != NULL) {
+        char auth[96];
+        snprintf(auth, sizeof(auth), "Bearer %s", s->bearer);
+        err = esp_http_client_set_header(client, "Authorization", auth);
+    } else if (err == ESP_OK) {
+        esp_http_client_delete_header(client, "Authorization");
     }
     if (err == ESP_OK) {
         err = esp_http_client_open(client, 0);
@@ -94,7 +102,9 @@ esp_err_t fetch_get(fetch_session_t *s, const char *url, void *buf, size_t size,
         err = get_once(s, url, buf, size, len, timeout_ms, status);
     }
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "GET %.48s...: %s, HTTP %d, %u bytes", url, esp_err_to_name(err), *status, (unsigned)*len);
+        char host[64];
+        util_url_host(url, host, sizeof(host)); /* never a key or a token */
+        ESP_LOGW(TAG, "GET %s: %s, HTTP %d, %u bytes", host, esp_err_to_name(err), *status, (unsigned)*len);
     }
     return err;
 }

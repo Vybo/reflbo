@@ -672,3 +672,250 @@ test('a cell says when its field draws at a smaller size than the cell\'s', asyn
   await ctx.presetsPage();
   assert.deepEqual(cellLabels(main), ['1 · 400×209 · XL (Next hours at M)', '2 · 400×69 · S']);
 });
+
+/* ---- M6d: the steps' switches, the Solar page, the editor's Solar and Energy fields ---- */
+
+const STEP_SETTINGS = { ...SYNC_SETTINGS, sync: { ...SYNC_SETTINGS.sync,
+                                                  steps: ['weather', 'air', 'radar', 'solar', 'energy'] } };
+
+test('the Sync page switches the data steps on and off, the time always on', async () => {
+  const patches = [];
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, STEP_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'times', running: false })),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, STEP_SETTINGS); },
+  });
+  await ctx.syncPage();
+  const box = (name) => below(main).find((e) => e.tag === 'label' && text(e) === name).children[0];
+  assert.equal(box('Radar').checked, true);
+  box('Radar').checked = false;
+  box('House energy').checked = false;
+  await buttonNamed(main, 'Save steps').click();
+  assert.deepEqual(patches.at(-1), { sync: { steps: ['weather', 'air', 'solar'] } });
+  assert.match(text(main), /The time always runs/);
+});
+
+test('the Sync page shows the Solar and Energy steps, a kept one as kept', async () => {
+  const last = { at: 1790880000, failed: 'energy', detail: 'tokenId is invalid',
+                 steps: { wifi: 'ok', time: 'ok', weather: 'ok', air: 'ok', radar: 'ok', solar: 'kept', energy: 'failed' } };
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, STEP_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'times', running: false, last })),
+  });
+  await ctx.syncPage();
+  assert.match(text(main), /Solar forecastkept/);
+  assert.match(text(main), /House energyfailed: tokenId is invalid/);
+});
+
+test('the Sync page says why a step was kept or skipped', async () => {
+  const last = { at: 1790880000, steps: { wifi: 'ok', time: 'ok', weather: 'skipped', air: 'ok', radar: 'ok',
+                                          solar: 'kept', energy: 'skipped' },
+                 details: { weather: 'off', solar: 'HTTP 429', energy: 'no source' } };
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, STEP_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'times', running: false, last })),
+  });
+  await ctx.syncPage();
+  assert.match(text(main), /Weatherskipped: off/);
+  assert.match(text(main), /Solar forecastkept: HTTP 429/);
+  assert.match(text(main), /House energyskipped: no source/);
+});
+
+const SOLAR_SETTINGS = { schema: 1, location: { name: 'Brno', lat: 49.1951, lon: 16.6068 },
+                         sync: { steps: ['weather', 'air', 'radar', 'solar', 'energy'] },
+                         solar: { source: 'open-meteo', planes: [{ kwp: 5, tilt: 35, azimuth: 0 }], losses_pct: 14,
+                                  inverter_kw: 0, keys: { fs_key: false, solcast_key: false, solcast_sites: 0 } },
+                         energy: { source: 'off', battery: 'auto', keys: { solax_token: false, solax_sn: false } } };
+const solarStatus = (solar = {}, energy = {}) => ({ device: {}, time: { valid: true }, battery: {}, sensors: {},
+  preset: {}, wifi: { state: 'station', ap_on: false }, sync: { mode: 'times', running: false },
+  solar: { source: 'open-meteo', ...solar }, energy: { source: 'off', ...energy } });
+
+function solarDevice(patches, settings = SOLAR_SETTINGS, extra = {}) {
+  return {
+    'GET /api/settings': () => reply(200, JSON.parse(JSON.stringify(settings))),
+    'GET /api/status': () => reply(200, solarStatus()),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, settings); },
+    ...extra,
+  };
+}
+
+/* An input by its label's text, in the order the page shows them. */
+function inputNamed(root, name, n = 0) {
+  const labels = below(root).filter((e) => e.tag === 'label' && text(e) === name);
+  assert.ok(labels.length > n, `no field "${name}"`);
+  const all = below(root);
+  return all.slice(all.indexOf(labels[n]) + 1).find((e) => e.tag === 'input' || e.tag === 'select');
+}
+
+async function type(el, value) {
+  el.value = value;
+  await Promise.all([...(el.listeners.input || []), ...(el.listeners.change || [])].map((fn) => fn({ target: el })));
+}
+
+test('the Solar page saves our model\'s planes, losses and inverter limit', async () => {
+  const patches = [];
+  const { ctx, main } = await load(solarDevice(patches));
+  await ctx.solarPage();
+  await type(inputNamed(main, 'kWp'), '5.2');
+  await buttonNamed(main, 'Add a second plane').click();
+  await type(inputNamed(main, 'kWp', 1), '2.4');
+  await type(inputNamed(main, 'Tilt (°)', 1), '20');
+  await type(inputNamed(main, 'Azimuth (°)', 1), '-90');
+  await type(inputNamed(main, 'Losses (%)'), '10');
+  await type(inputNamed(main, 'Inverter limit (kW)'), '4.6');
+  await buttonNamed(main, 'Save').click();
+  assert.deepEqual(patches.at(-1).solar, { source: 'open-meteo', planes: [{ kwp: 5.2, tilt: 35, azimuth: 0 },
+                                                                        { kwp: 2.4, tilt: 20, azimuth: -90 }],
+                                           losses_pct: 10, inverter_kw: 4.6 });
+});
+
+test('keys are write-only: the page says which are set and sends only what you type', async () => {
+  const patches = [];
+  const settings = { ...SOLAR_SETTINGS, solar: { ...SOLAR_SETTINGS.solar, source: 'forecast-solar',
+                                                 keys: { fs_key: true, solcast_key: false, solcast_sites: 0 } } };
+  const { ctx, main } = await load(solarDevice(patches, settings));
+  await ctx.solarPage();
+  const key = inputNamed(main, 'Forecast.Solar key (optional)');
+  assert.equal(key.value, '');
+  assert.equal(key.attrs.type, 'password');
+  assert.match(text(main), /A key is set/);
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.at(-1).solar.fs_key, undefined); /* nothing typed: the key stays as it is */
+  await type(key, 'AbC123');
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.at(-1).solar.fs_key, 'AbC123');
+  await buttonNamed(main, 'Clear the key').click();
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.at(-1).solar.fs_key, null);
+});
+
+test('a refused save says why: a second plane needs a Forecast.Solar key', async () => {
+  const patches = [];
+  const settings = { ...SOLAR_SETTINGS, solar: { ...SOLAR_SETTINGS.solar, source: 'forecast-solar' } };
+  const { ctx, main } = await load(solarDevice(patches, settings, {
+    'PATCH /api/settings': () => reply(400, { error: 'a second plane needs a Forecast.Solar key' }),
+  }));
+  await ctx.solarPage();
+  await buttonNamed(main, 'Add a second plane').click();
+  await buttonNamed(main, 'Save').click();
+  assert.match(text(main), /A second plane needs a Forecast.Solar key/);
+});
+
+test('Solcast takes its key and two sites, and its planes are set on solcast.com', async () => {
+  const patches = [];
+  const settings = { ...SOLAR_SETTINGS, solar: { ...SOLAR_SETTINGS.solar, source: 'solcast' } };
+  const { ctx, main } = await load(solarDevice(patches, settings));
+  await ctx.solarPage();
+  assert.equal(below(main).some((e) => e.tag === 'label' && text(e) === 'kWp' && !hiddenAbove(main, e)), false);
+  await type(inputNamed(main, 'Solcast API key'), 'Kk_1-2');
+  await type(inputNamed(main, 'First site id'), 'ab12-cd34');
+  await type(inputNamed(main, 'Second site id (optional)'), 'ef56');
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.at(-1).solar.solcast_key, 'Kk_1-2');
+  assert.deepEqual(patches.at(-1).solar.solcast_sites, ['ab12-cd34', 'ef56']);
+  assert.match(text(main), /10 calls a day/);
+});
+
+/* Whether `el` sits in a part of the page that is hidden. */
+function hiddenAbove(root, el) {
+  const path = (node, target, trail = []) => {
+    if (node === target) return trail;
+    for (const k of node.children.filter((c) => c instanceof FakeElement)) {
+      const found = path(k, target, [...trail, node]);
+      if (found) return found;
+    }
+    return null;
+  };
+  return (path(root, el) || []).some((n) => n.hidden);
+}
+
+test('the house\'s energy takes SolaX Cloud\'s token and registration number, and the battery', async () => {
+  const patches = [];
+  const { ctx, main } = await load(solarDevice(patches));
+  await ctx.solarPage();
+  await type(inputNamed(main, 'Source', 1), 'solax');
+  await type(inputNamed(main, 'Token'), '20200722');
+  await type(inputNamed(main, 'Registration number'), 'SXA1B2C3D4');
+  await type(inputNamed(main, 'Home battery'), 'on');
+  await buttonNamed(main, 'Save').click();
+  assert.deepEqual(patches.at(-1).energy, { source: 'solax', battery: 'on', solax_token: '20200722',
+                                            solax_sn: 'SXA1B2C3D4' });
+});
+
+test('Check now runs the two steps and shows what they brought', async () => {
+  let polls = 0;
+  const { ctx, calls, main } = await load(solarDevice([], SOLAR_SETTINGS, {
+    'GET /api/status': () => reply(200, ++polls < 3 ? solarStatus({ tried_at: 100 }, { source: 'solax', tried_at: 100 })
+      : solarStatus({ tried_at: 200, fetched_at: 200, day: 20731 },
+                    { source: 'solax', tried_at: 200, error: 'tokenId is invalid' })),
+    'POST /api/solar/check': () => reply(202, { started: true }),
+  }));
+  ctx.setTimeout = (fn) => { fn(); return 0; };
+  await ctx.solarPage();
+  await buttonNamed(main, 'Check now').click();
+  await settle();
+  assert.ok(calls.some((c) => c.path === '/api/solar/check' && c.init.method === 'POST'));
+  assert.match(text(main), /tokenId is invalid/);
+  assert.match(text(main), /Checked/);
+});
+
+test('the Solar page says when Solcast is asked again, and why its last call failed', async () => {
+  const solcast = solarStatus({ source: 'solcast', fetched_at: 100, tried_at: 300, kept: 'kept', next_at: 1790890800,
+                                error: 'HTTP 401' });
+  const { ctx, main } = await load(solarDevice([], SOLAR_SETTINGS, { 'GET /api/status': () => reply(200, solcast) }));
+  await ctx.solarPage();
+  assert.match(text(main), /Its last stepkept the forecast: Solcast is asked again from /);
+  assert.match(text(main), /Its last callfailed: HTTP 401/);
+  const limited = solarStatus({ source: 'forecast-solar', fetched_at: 100, tried_at: 300, kept: 'HTTP 429' });
+  const page = await load(solarDevice([], SOLAR_SETTINGS, { 'GET /api/status': () => reply(200, limited) }));
+  await page.ctx.solarPage();
+  assert.match(text(page.main), /Its last stepkept the forecast \(HTTP 429\)/);
+  assert.doesNotMatch(text(page.main), /Its last call/);
+});
+
+test('the Solar page credits its sources', async () => {
+  const { ctx, main } = await load(solarDevice([]));
+  await ctx.solarPage();
+  const all = text(main);
+  for (const credit of ['Open-Meteo', 'Forecast.Solar', 'CC BY-SA 4.0', 'Solcast', 'personal use', 'SolaX Cloud']) {
+    assert.ok(all.includes(credit), credit);
+  }
+});
+
+test('a preset on the Solar or Energy layout has no slots to fill', async () => {
+  const catalogue = { ...CATALOGUE, layouts: [...CATALOGUE.layouts, { id: 'solar', slots: [] }, { id: 'energy', slots: [] }] };
+  const doc = { schema: 1, active: 'solar', presets: [{ id: 'solar', name: 'Solar', layout: 'solar', in_cycle: false,
+                                                          slots: {}, options: {} }],
+                cycle: { enabled: false, interval_s: 60 }, schedule: { enabled: false, entries: [] } };
+  const { ctx, main } = await load({
+    'GET /api/layouts': () => reply(200, catalogue), 'GET /api/presets': () => reply(200, doc),
+    'GET /api/fields': () => reply(200, FIELDS), 'POST /api/preview.bmp': () => reply(200, 'BM', 'image/bmp'),
+    'GET /api/settings': () => reply(200, STEP_SETTINGS),
+  });
+  await ctx.presetsPage();
+  assert.match(text(main), /today's PV forecast: its source is on the Solar page/);
+  assert.match(text(main), /Solar/);
+});
+
+test('the field lists group the Solar and Energy fields and mark those whose step is off', async () => {
+  const catalogue = { ...CATALOGUE, layouts: [{ id: 'classic', slots: [
+    { id: 's1', x: 0, y: 172, w: 200, h: 128, size: 'S', kinds: ['number'] }] }] };
+  const fields = { fields: [{ id: 'env.temp', kind: 'number', label: 'Temperature', value: '23.7 °C' },
+                            { id: 'pv.now', kind: 'number', label: 'Forecast now', value: '3.50 kW' },
+                            { id: 'energy.pv', kind: 'number', label: 'Solar', value: '3.42 kW' }] };
+  const doc = { schema: 1, active: 'home', presets: [{ id: 'home', name: 'Home', layout: 'classic', in_cycle: true,
+                                                         slots: {}, options: {} }],
+                cycle: { enabled: false, interval_s: 60 }, schedule: { enabled: false, entries: [] } };
+  const settings = { ...STEP_SETTINGS, sync: { ...STEP_SETTINGS.sync, steps: ['weather', 'air', 'radar', 'solar'] } };
+  const { ctx, main } = await load({
+    'GET /api/layouts': () => reply(200, catalogue), 'GET /api/presets': () => reply(200, doc),
+    'GET /api/fields': () => reply(200, fields), 'POST /api/preview.bmp': () => reply(200, 'BM', 'image/bmp'),
+    'GET /api/settings': () => reply(200, settings),
+  });
+  await ctx.presetsPage();
+  const groups = below(main).filter((e) => e.tag === 'optgroup').map((g) => g.attrs.label);
+  assert.ok(groups.includes('Solar forecast') && groups.includes('House energy'), groups.join());
+  const options = below(main).filter((e) => e.tag === 'option').map(text);
+  assert.ok(options.some((o) => /^Solar — 3.42 kW \(its sync step is off\)$/.test(o)), options.join(' | '));
+  assert.ok(options.some((o) => /^Forecast now — 3.50 kW$/.test(o)), options.join(' | '));
+});

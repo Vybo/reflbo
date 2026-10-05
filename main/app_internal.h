@@ -119,7 +119,6 @@ bool app_ui_first_run(void);
 void app_ui_end_first_run(void);
 /* settings.json as it would be saved now (GET /api/settings, the backup). */
 size_t app_ui_settings_json(char *out, size_t size);
-bool app_ui_check_settings(const char *json, char *err, size_t err_size);
 /* A whole new settings.json (a restore) or a merge patch (PATCH /api/settings): validated, saved
  * and applied at once. ESP_ERR_INVALID_ARG with the reason in `err` if it doesn't parse. */
 esp_err_t app_ui_replace_settings(const char *json, char *err, size_t err_size);

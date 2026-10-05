@@ -18,6 +18,7 @@
 #include "timekeeping.h"
 #include "ui_catalog.h"
 #include "ui_dashboard.h"
+#include "util_time.h"
 #include "webui.h"
 
 /* The web configurator's API (spec §10.3), apart from what webui answers itself (the password,
@@ -236,6 +237,49 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
         cJSON_AddNumberToObject(flights, "routes_paused_until", (double)fs.routes_paused_until);
     }
 
+    /* spec §10.3, M6d: the PV forecast and the house's energy, never a key */
+    const app_solar_state_t *ss = app_solar_state();
+    static const char *const k_solar[] = { "off", "open-meteo", "forecast-solar", "solcast" };
+    cJSON *solar = cJSON_AddObjectToObject(o, "solar");
+    uint8_t src = st->settings.solar_source;
+    cJSON_AddStringToObject(solar, "source", k_solar[src <= SETTINGS_SOLAR_SOLCAST ? src : 0]);
+    if (ss->forecast.fetched != 0) {
+        cJSON_AddNumberToObject(solar, "fetched_at", ss->forecast.fetched);
+    }
+    if (ss->forecast.day != 0) {
+        int y, m, d;
+        util_civil_from_days(ss->forecast.day, &y, &m, &d);
+        char day[16];
+        snprintf(day, sizeof(day), "%04d-%02d-%02d", y, m, d);
+        cJSON_AddStringToObject(solar, "day", day); /* the local day of its first quarter hours */
+    }
+    if (ss->forecast_tried != 0) {
+        cJSON_AddNumberToObject(solar, "tried_at", ss->forecast_tried);
+    }
+    if (ss->forecast_error[0] != '\0') {
+        cJSON_AddStringToObject(solar, "error", ss->forecast_error); /* the last call's */
+    }
+    if (ss->forecast_kept[0] != '\0') {
+        cJSON_AddStringToObject(solar, "kept", ss->forecast_kept);
+    }
+    if (src == SETTINGS_SOLAR_SOLCAST && ss->solcast_asked != 0) { /* when its budget lets the next step ask */
+        cJSON_AddNumberToObject(solar, "next_at", (double)ss->solcast_asked + solar_solcast_wait_s(ss->solcast_sites));
+    }
+    if (ss->demo) {
+        cJSON_AddBoolToObject(solar, "demo", true);
+    }
+    cJSON *energy = cJSON_AddObjectToObject(o, "energy");
+    cJSON_AddStringToObject(energy, "source", st->settings.energy_source == SETTINGS_ENERGY_SOLAX ? "solax" : "off");
+    if (ss->reading.at != 0) {
+        cJSON_AddNumberToObject(energy, "reading_at", ss->reading.at);
+    }
+    if (ss->energy_tried != 0) {
+        cJSON_AddNumberToObject(energy, "tried_at", ss->energy_tried);
+    }
+    if (ss->energy_error[0] != '\0') {
+        cJSON_AddStringToObject(energy, "error", ss->energy_error);
+    }
+
     const ui_preset_t *active = &st->presets.presets[st->presets.active];
     cJSON *preset = cJSON_AddObjectToObject(o, "preset");
     cJSON_AddStringToObject(preset, "active", active->id);
@@ -387,6 +431,54 @@ static void backup(uint8_t *out, size_t size, webui_reply_t *reply)
                backup_build(files, 2, net.host, esp_app_get_description()->version, (char *)out, size));
 }
 
+/* GET /api/settings (spec §10.3): the file's settings, and which keys are set, never the keys. */
+static void get_settings(uint8_t *out, size_t size, webui_reply_t *reply)
+{
+    EXT_RAM_BSS_ATTR static char text[SETTINGS_FILE_MAX];
+    cJSON *o = app_ui_settings_json(text, sizeof(text)) > 0 ? cJSON_Parse(text) : NULL;
+    if (!cJSON_IsObject(o)) {
+        cJSON_Delete(o);
+        reply_error(reply, out, size, 500, "the settings don't print");
+        return;
+    }
+    cJSON *keys = cJSON_AddObjectToObject(cJSON_GetObjectItemCaseSensitive(o, "solar"), "keys");
+    cJSON_AddBoolToObject(keys, "fs_key", app_secret_set(SETTINGS_SECRET_FS_KEY));
+    cJSON_AddBoolToObject(keys, "solcast_key", app_secret_set(SETTINGS_SECRET_SOLCAST_KEY));
+    cJSON_AddNumberToObject(keys, "solcast_sites", app_secret_set(SETTINGS_SECRET_SOLCAST_SITE1) +
+                                                       app_secret_set(SETTINGS_SECRET_SOLCAST_SITE2));
+    keys = cJSON_AddObjectToObject(cJSON_GetObjectItemCaseSensitive(o, "energy"), "keys");
+    cJSON_AddBoolToObject(keys, "solax_token", app_secret_set(SETTINGS_SECRET_SOLAX_TOKEN));
+    cJSON_AddBoolToObject(keys, "solax_sn", app_secret_set(SETTINGS_SECRET_SOLAX_SN));
+    reply_cjson(reply, out, size, o);
+}
+
+/* PATCH /api/settings (spec §10.3, §14.3): the keys to NVS `secrets`, the rest merged into the file; a second
+ * Forecast.Solar plane without a key is refused (spec §11.5). */
+static void patch_settings(const char *body, uint8_t *out, size_t size, webui_reply_t *reply)
+{
+    EXT_RAM_BSS_ATTR static char clean[SETTINGS_FILE_MAX], base[SETTINGS_FILE_MAX], merged[SETTINGS_FILE_MAX];
+    EXT_RAM_BSS_ATTR static settings_secrets_t secrets;
+    EXT_RAM_BSS_ATTR static settings_t next;
+    char err[112] = "the settings don't fit";
+    bool ok = settings_take_secrets(body, clean, sizeof(clean), &secrets, err, sizeof(err)) > 0 &&
+              app_ui_settings_json(base, sizeof(base)) > 0 &&
+              settings_patch(base, clean, merged, sizeof(merged), err, sizeof(err)) > 0 &&
+              settings_from_json(merged, app_settings(), &next, err, sizeof(err));
+    bool fs_key = secrets.given[SETTINGS_SECRET_FS_KEY] ? secrets.value[SETTINGS_SECRET_FS_KEY][0] != '\0'
+                                                         : app_secret_set(SETTINGS_SECRET_FS_KEY);
+    ok = ok && settings_check_solar(&next, fs_key, err, sizeof(err)) &&
+         app_ui_patch_settings(clean, err, sizeof(err)) == ESP_OK;
+    esp_err_t saved = ok ? app_secrets_apply(&secrets) : ESP_OK;
+    memset(&secrets, 0, sizeof(secrets)); /* the keys stay in NVS alone */
+    if (!ok) {
+        reply_error(reply, out, size, 400, err);
+    } else if (saved != ESP_OK) {
+        reply_error(reply, out, size, 500, "the keys weren't saved");
+    } else {
+        get_settings(out, size, reply);
+    }
+}
+
 /* POST /api/restore: every file is checked before any is replaced. */
 static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *reply)
 {
@@ -411,7 +503,18 @@ static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *
         }
     }
     char why[96];
-    if (settings != NULL && !app_ui_check_settings(settings, why, sizeof(why))) {
+    EXT_RAM_BSS_ATTR static char clean[SETTINGS_FILE_MAX];
+    EXT_RAM_BSS_ATTR static settings_secrets_t dropped;
+    EXT_RAM_BSS_ATTR static settings_t next;
+    bool settings_ok = true;
+    if (settings != NULL) { /* a key a bundle carries never reaches the file (spec §14.4); a second plane needs one */
+        settings_ok = settings_take_secrets(settings, clean, sizeof(clean), &dropped, why, sizeof(why)) > 0 &&
+                      settings_from_json(clean, app_settings(), &next, why, sizeof(why)) &&
+                      settings_check_solar(&next, app_secret_set(SETTINGS_SECRET_FS_KEY), why, sizeof(why));
+        memset(&dropped, 0, sizeof(dropped));
+        settings = clean;
+    }
+    if (!settings_ok) {
         snprintf(err, sizeof(err), "settings.json: %s", why);
     } else if (presets_text != NULL && !ui_presets_from_json(presets_text, &presets, why, sizeof(why))) {
         snprintf(err, sizeof(err), "presets.json: %s", why);
@@ -448,13 +551,9 @@ void app_web_api(const char *method, const char *path, const char *query, const 
     if (strcmp(path, "/api/status") == 0 && get) {
         get_status(out, size, reply);
     } else if (strcmp(path, "/api/settings") == 0 && get) {
-        reply_text(reply, out, size, app_ui_settings_json((char *)out, size));
+        get_settings(out, size, reply);
     } else if (strcmp(path, "/api/settings") == 0 && strcmp(method, "PATCH") == 0) {
-        if (app_ui_patch_settings(body, err, sizeof(err)) != ESP_OK) {
-            reply_error(reply, out, size, 400, err);
-        } else {
-            reply_text(reply, out, size, app_ui_settings_json((char *)out, size));
-        }
+        patch_settings(body, out, size, reply);
     } else if (strcmp(path, "/api/layouts") == 0 && get) {
         reply_text(reply, out, size, ui_catalog_layouts_json((char *)out, size));
     } else if (strcmp(path, "/api/fields") == 0 && get) {
@@ -490,6 +589,19 @@ void app_web_api(const char *method, const char *path, const char *query, const 
                         : e == ESP_ERR_INVALID_STATE ? "not now: a sync runs, the battery is critical, or the device "
                                                        "is on its own network only"
                                                      : "the sync didn't start");
+        }
+    } else if (strcmp(path, "/api/solar/check") == 0 && strcmp(method, "POST") == 0) { /* spec §10.3, M6d */
+        esp_err_t e = app_sync_check();
+        if (e == ESP_OK) {
+            reply_text(reply, out, size, (size_t)snprintf((char *)out, size, "{\"started\":true}"));
+            reply->status = 202; /* the page follows it in GET /api/status */
+        } else {
+            reply_error(reply, out, size, 409,
+                        e == ESP_ERR_NOT_FOUND       ? "no Wi-Fi network is saved"
+                        : e == ESP_ERR_INVALID_ARG   ? "nothing to check: the forecast and the house's energy are off"
+                        : e == ESP_ERR_INVALID_STATE ? "not now: a sync runs, the battery is critical, or the device "
+                                                       "is on its own network only"
+                                                     : "the check didn't start");
         }
     } else if (strcmp(path, "/api/backup") == 0 && get) {
         backup(out, size, reply);

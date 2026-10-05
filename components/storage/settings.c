@@ -225,6 +225,97 @@ static void read_radar(const cJSON *radar, settings_t *out)
     out->fl_max = (uint8_t)read_scaled(fl, "max", out->fl_max, 1, 1, 100);
 }
 
+static const char *const k_steps[] = { "weather", "air", "radar", "solar", "energy" };
+static const char *const k_solar_sources[] = { [SETTINGS_SOLAR_OFF] = "off", [SETTINGS_SOLAR_OPEN_METEO] = "open-meteo",
+                                               [SETTINGS_SOLAR_FORECAST_SOLAR] = "forecast-solar",
+                                               [SETTINGS_SOLAR_SOLCAST] = "solcast" };
+static const char *const k_energy_sources[] = { [SETTINGS_ENERGY_OFF] = "off", [SETTINGS_ENERGY_SOLAX] = "solax" };
+static const char *const k_batteries[] = { [SETTINGS_BATTERY_AUTO] = "auto", [SETTINGS_BATTERY_ON] = "on",
+                                           [SETTINGS_BATTERY_OFF] = "off" };
+
+/* The index of `item`'s string in `names`, or `fallback`. */
+static uint8_t choice(const cJSON *item, const char *const *names, size_t count, uint8_t fallback)
+{
+    for (size_t i = 0; cJSON_IsString(item) && i < count; i++) {
+        if (strcmp(item->valuestring, names[i]) == 0) {
+            return (uint8_t)i;
+        }
+    }
+    return fallback;
+}
+
+/* sync.steps: a missing list or one that isn't is all of them; an unknown name is left out. */
+static void read_steps(const cJSON *steps, settings_t *out)
+{
+    if (!cJSON_IsArray(steps)) {
+        return;
+    }
+    out->sync_steps = 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, steps)
+    {
+        uint8_t i = choice(item, k_steps, sizeof(k_steps) / sizeof(k_steps[0]), UINT8_MAX);
+        out->sync_steps |= i != UINT8_MAX ? (uint8_t)(1u << i) : 0;
+    }
+}
+
+static void read_solar(const cJSON *solar, const cJSON *energy, settings_t *out)
+{
+    out->solar_source = choice(child(solar, "source"), k_solar_sources,
+                               sizeof(k_solar_sources) / sizeof(k_solar_sources[0]), out->solar_source);
+    const cJSON *planes = child(solar, "planes");
+    int n = cJSON_IsArray(planes) ? cJSON_GetArraySize(planes) : 0;
+    if (n > 0) {
+        settings_plane_t fallback = out->solar_planes[0];
+        out->solar_plane_count = (uint8_t)(n < SETTINGS_PLANES_MAX ? n : SETTINGS_PLANES_MAX);
+        for (int i = 0; i < out->solar_plane_count; i++) {
+            const cJSON *p = cJSON_GetArrayItem(planes, i);
+            settings_plane_t *plane = &out->solar_planes[i];
+            *plane = i < 1 || plane->kwp_e2 == 0 ? fallback : *plane;
+            plane->kwp_e2 = (uint16_t)read_scaled(p, "kwp", plane->kwp_e2, 100, 10, 10000);
+            plane->tilt = (uint8_t)read_scaled(p, "tilt", plane->tilt, 1, 0, 90);
+            plane->azimuth = (int16_t)read_scaled(p, "azimuth", plane->azimuth, 1, -180, 180);
+        }
+    }
+    out->solar_losses_pct = (uint8_t)read_scaled(solar, "losses_pct", out->solar_losses_pct, 1, 0, 50);
+    out->solar_inverter_kw_e2 = (uint16_t)read_scaled(solar, "inverter_kw", out->solar_inverter_kw_e2, 100, 0, 10000);
+    out->energy_source = choice(child(energy, "source"), k_energy_sources,
+                                sizeof(k_energy_sources) / sizeof(k_energy_sources[0]), out->energy_source);
+    out->energy_battery = choice(child(energy, "battery"), k_batteries, sizeof(k_batteries) / sizeof(k_batteries[0]),
+                                 out->energy_battery);
+}
+
+void settings_solar_defaults(settings_t *out)
+{
+    out->sync_steps = SETTINGS_STEPS_ALL;
+    out->solar_source = SETTINGS_SOLAR_OFF;
+    out->solar_plane_count = 1;
+    memset(out->solar_planes, 0, sizeof(out->solar_planes));
+    out->solar_planes[0] = (settings_plane_t){ .kwp_e2 = 500, .tilt = 35, .azimuth = 0 };
+    out->solar_losses_pct = 14;
+    out->solar_inverter_kw_e2 = 0;
+    out->energy_source = SETTINGS_ENERGY_OFF;
+    out->energy_battery = SETTINGS_BATTERY_AUTO;
+}
+
+const char *settings_step_name(settings_step_t step)
+{
+    for (size_t i = 0; i < sizeof(k_steps) / sizeof(k_steps[0]); i++) {
+        if (step == (settings_step_t)(1u << i)) {
+            return k_steps[i];
+        }
+    }
+    return "";
+}
+
+bool settings_check_solar(const settings_t *s, bool fs_key_set, char *err, size_t err_size)
+{
+    if (s->solar_source == SETTINGS_SOLAR_FORECAST_SOLAR && s->solar_plane_count > 1 && !fs_key_set) {
+        return fail(err, err_size, "a second plane needs a Forecast.Solar key");
+    }
+    return true;
+}
+
 void settings_radar_defaults(settings_t *out)
 {
     out->wx_centre_set = false;
@@ -333,6 +424,8 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
     read_ntp(child(time, "ntp"), out);
     read_sync(child(root, "sync"), out);
     read_radar(child(root, "radar"), out); /* after the location, which its centres may follow */
+    read_steps(child(child(root, "sync"), "steps"), out);
+    read_solar(child(root, "solar"), child(root, "energy"), out);
     cJSON_Delete(root);
     return true;
 }
@@ -448,6 +541,32 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     put(fl, "min_alt_ft", cJSON_CreateNumber(s->fl_min_alt_ft));
     put(fl, "ground", cJSON_CreateBool(s->fl_ground));
     put(fl, "max", cJSON_CreateNumber(s->fl_max));
+    cJSON *steps = cJSON_CreateArray();
+    for (size_t i = 0; i < sizeof(k_steps) / sizeof(k_steps[0]); i++) {
+        if (s->sync_steps & (1u << i)) {
+            cJSON_AddItemToArray(steps, cJSON_CreateString(k_steps[i]));
+        }
+    }
+    put(sync, "steps", steps);
+    cJSON *solar = object_at(root, "solar");
+    put(solar, "source", cJSON_CreateString(k_solar_sources[s->solar_source <= SETTINGS_SOLAR_SOLCAST ? s->solar_source
+                                                                                                    : 0]));
+    cJSON *planes = cJSON_CreateArray();
+    for (int i = 0; i < s->solar_plane_count && i < SETTINGS_PLANES_MAX; i++) {
+        cJSON *plane = cJSON_CreateObject();
+        cJSON_AddNumberToObject(plane, "kwp", s->solar_planes[i].kwp_e2 / 100.0);
+        cJSON_AddNumberToObject(plane, "tilt", s->solar_planes[i].tilt);
+        cJSON_AddNumberToObject(plane, "azimuth", s->solar_planes[i].azimuth);
+        cJSON_AddItemToArray(planes, plane);
+    }
+    put(solar, "planes", planes);
+    put(solar, "losses_pct", cJSON_CreateNumber(s->solar_losses_pct));
+    put(solar, "inverter_kw", cJSON_CreateNumber(s->solar_inverter_kw_e2 / 100.0));
+    cJSON *energy = object_at(root, "energy");
+    uint8_t energy_source = s->energy_source <= SETTINGS_ENERGY_SOLAX ? s->energy_source : 0;
+    uint8_t energy_battery = s->energy_battery <= SETTINGS_BATTERY_OFF ? s->energy_battery : 0;
+    put(energy, "source", cJSON_CreateString(k_energy_sources[energy_source]));
+    put(energy, "battery", cJSON_CreateString(k_batteries[energy_battery]));
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;
@@ -498,4 +617,130 @@ size_t settings_patch(const char *base_json, const char *patch, char *out, size_
     }
     cJSON_Delete(root);
     return n;
+}
+
+static const char *const k_secret_keys[SETTINGS_SECRET_COUNT] = {
+    "fs_key", "solcast_key", "solcast_site1", "solcast_site2", "solax_token", "solax_sn",
+};
+
+const char *settings_secret_key(settings_secret_t secret)
+{
+    return (unsigned)secret < SETTINGS_SECRET_COUNT ? k_secret_keys[secret] : "";
+}
+
+/* Letters and digits, and those of `extra`. */
+static bool plain_text(const char *s, const char *extra)
+{
+    for (; *s != '\0'; s++) {
+        bool letter = (*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') || (*s >= '0' && *s <= '9');
+        if (!letter && strchr(extra, *s) == NULL) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* One secret's value (a string, "" or null) into `secrets`; false with the reason. */
+static bool take_one(const cJSON *item, const char *path, const char *extra, const char *rule,
+                     settings_secrets_t *secrets, settings_secret_t which, char *err, size_t err_size)
+{
+    if (item != NULL && !cJSON_IsNull(item) && !cJSON_IsString(item)) { /* NULL: past a list's end */
+        return fail(err, err_size, "%s: a string", path);
+    }
+    const char *v = cJSON_IsString(item) ? item->valuestring : "";
+    if (strlen(v) >= SETTINGS_SECRET_LEN) {
+        return fail(err, err_size, "%s: %d characters at most", path, SETTINGS_SECRET_LEN - 1);
+    }
+    if (!plain_text(v, extra)) {
+        return fail(err, err_size, "%s: %s", path, rule);
+    }
+    secrets->given[which] = true;
+    snprintf(secrets->value[which], SETTINGS_SECRET_LEN, "%s", v);
+    return true;
+}
+
+/* Every obj[key] taken out and parsed into `which`, the last counting, as in a merge. */
+static bool take(cJSON *obj, const char *key, const char *path, const char *extra, const char *rule,
+                 settings_secrets_t *secrets, settings_secret_t which, char *err, size_t err_size)
+{
+    bool ok = true;
+    for (cJSON *item; ok && (item = cJSON_DetachItemFromObjectCaseSensitive(obj, key)) != NULL;) {
+        ok = take_one(item, path, extra, rule, secrets, which, err, err_size);
+        cJSON_Delete(item);
+    }
+    return ok;
+}
+
+static bool take_sites(cJSON *solar, settings_secrets_t *secrets, char *err, size_t err_size)
+{
+    bool ok = true;
+    for (cJSON *sites; ok && (sites = cJSON_DetachItemFromObjectCaseSensitive(solar, "solcast_sites")) != NULL;) {
+        if (!cJSON_IsNull(sites) && !cJSON_IsArray(sites)) {
+            ok = fail(err, err_size, "solar.solcast_sites: a list");
+        } else if (cJSON_GetArraySize(sites) > 2) {
+            ok = fail(err, err_size, "solar.solcast_sites: two at most");
+        } else {
+            for (int i = 0; ok && i < 2; i++) {
+                ok = take_one(cJSON_GetArrayItem(sites, i), "solar.solcast_sites", "-", "letters, digits and - only",
+                              secrets, (settings_secret_t)(SETTINGS_SECRET_SOLCAST_SITE1 + i), err, err_size);
+            }
+        }
+        cJSON_Delete(sites);
+    }
+    return ok;
+}
+
+/* The keys of every "solar" and "energy" object, and the flags a GET adds ("keys"), out of `root`. */
+static bool take_all(cJSON *root, settings_secrets_t *secrets, char *err, size_t err_size)
+{
+    static const char k_alnum[] = "letters and digits only";
+    bool ok = true;
+    for (cJSON *c = root->child; ok && c != NULL; c = c->next) {
+        bool solar = c->string != NULL && strcmp(c->string, "solar") == 0;
+        bool energy = c->string != NULL && strcmp(c->string, "energy") == 0;
+        if (!cJSON_IsObject(c) || !(solar || energy)) {
+            continue;
+        }
+        for (cJSON *flags; (flags = cJSON_DetachItemFromObjectCaseSensitive(c, "keys")) != NULL;) {
+            cJSON_Delete(flags);
+        }
+        ok = solar ? take(c, "fs_key", "solar.fs_key", "", k_alnum, secrets, SETTINGS_SECRET_FS_KEY, err, err_size) &&
+                         take(c, "solcast_key", "solar.solcast_key", "-_", "letters, digits, - and _ only", secrets,
+                              SETTINGS_SECRET_SOLCAST_KEY, err, err_size) &&
+                         take_sites(c, secrets, err, err_size)
+                   : take(c, "solax_token", "energy.solax_token", "", k_alnum, secrets, SETTINGS_SECRET_SOLAX_TOKEN,
+                          err, err_size) &&
+                         take(c, "solax_sn", "energy.solax_sn", "", k_alnum, secrets, SETTINGS_SECRET_SOLAX_SN, err,
+                              err_size);
+    }
+    return ok;
+}
+
+bool settings_secrets_solcast(const settings_secrets_t *secrets)
+{
+    return secrets->given[SETTINGS_SECRET_SOLCAST_KEY] || secrets->given[SETTINGS_SECRET_SOLCAST_SITE1] ||
+           secrets->given[SETTINGS_SECRET_SOLCAST_SITE2];
+}
+
+size_t settings_take_secrets(const char *patch, char *out, size_t size, settings_secrets_t *secrets, char *err,
+                             size_t err_size)
+{
+    memset(secrets, 0, sizeof(*secrets));
+    if (util_json_depth(patch) > SETTINGS_JSON_MAX_DEPTH) {
+        fail(err, err_size, "nested more than %d levels", SETTINGS_JSON_MAX_DEPTH);
+        return 0;
+    }
+    cJSON *root = patch != NULL ? cJSON_Parse(patch) : NULL;
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        fail(err, err_size, "not a JSON object");
+        return 0;
+    }
+    bool ok = take_all(root, secrets, err, err_size);
+    bool printed = ok && size > 0 && cJSON_PrintPreallocated(root, out, (int)size, false);
+    cJSON_Delete(root);
+    if (ok && !printed) {
+        fail(err, err_size, "too large");
+    }
+    return printed ? strlen(out) : 0;
 }

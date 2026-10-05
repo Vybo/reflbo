@@ -27,7 +27,7 @@ static const char *TAG = "app_ui";
 static app_ui_state_t s;
 /* The config files' text: scratch buffers in PSRAM (AGENTS.md §8). */
 EXT_RAM_BSS_ATTR static char s_file[UI_PRESETS_JSON_MAX];
-EXT_RAM_BSS_ATTR static char s_settings_base[2048]; /* settings.json as read: unknown keys stay */
+EXT_RAM_BSS_ATTR static char s_settings_base[SETTINGS_FILE_MAX]; /* settings.json as read: unknown keys stay */
 static char s_err[96];
 static char s_toast[64];
 static int64_t s_toast_until_ms;
@@ -57,6 +57,7 @@ static void default_settings(settings_t *out)
     };
     settings_sync_defaults(out);
     settings_radar_defaults(out);
+    settings_solar_defaults(out);
     snprintf(out->place, sizeof(out->place), "%s", CONFIG_REFLBO_LOCATION_NAME);
     snprintf(out->tz_posix, sizeof(out->tz_posix), "%s", CONFIG_REFLBO_TZ);
     snprintf(out->tz_iana, sizeof(out->tz_iana), "%s", CONFIG_REFLBO_TZ_NAME);

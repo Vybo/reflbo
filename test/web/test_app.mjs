@@ -351,6 +351,24 @@ test('Sync now follows the sync to its end', async () => {
   assert.match(text(main), /failed: HTTP 503/);
 });
 
+test('a sync whose only failure is the house\'s energy is done, as the device counts it (D36)', async () => {
+  let polls = 0;
+  const done = { mode: 'times', running: false, last: { at: 1790859600, ok: true, failed: 'energy',
+                 detail: 'tokenId is invalid', steps: { wifi: 'ok', time: 'ok', weather: 'ok', air: 'ok', radar: 'ok',
+                                                        solar: 'ok', energy: 'failed' } } };
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, SYNC_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus(++polls < 3 ? { mode: 'times', running: true, step: 'energy' } : done)),
+    'POST /api/sync': () => reply(202, { started: true }),
+  });
+  ctx.setTimeout = (fn) => { fn(); return 0; };
+  await ctx.syncPage();
+  await buttonNamed(main, 'Sync now').click();
+  await settle();
+  assert.doesNotMatch(text(main), /The sync failed/);
+  assert.match(text(main), /Synced; the house's energy failed, see above\./);
+});
+
 test('the place search fills in the name and the coordinates', async () => {
   const { ctx, calls, main } = await load({
     'GET /api/settings': () => reply(200, { schema: 1, location: { name: 'Brno', lat: 49.1951, lon: 16.6068 }, time: {} }),

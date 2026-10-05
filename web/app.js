@@ -366,9 +366,11 @@ async function syncPage() {
       await sleep(1500);
       const now = await api('GET', '/api/status');
       showStatus(now);
-      if (!now.sync.running) {
-        nowNote.className = now.sync.last && !now.sync.last.failed ? 'good' : 'bad';
-        nowNote.textContent = now.sync.last && !now.sync.last.failed ? 'Synced.' : 'The sync failed; see above.';
+      if (!now.sync.running) { /* the house's energy failing alone fails no sync (D36) */
+        const last = now.sync.last, done = last && (last.ok ?? !last.failed);
+        nowNote.className = done ? 'good' : 'bad';
+        nowNote.textContent = !done ? 'The sync failed; see above.'
+          : last.failed ? 'Synced; the house\'s energy failed, see above.' : 'Synced.';
         return;
       }
     }

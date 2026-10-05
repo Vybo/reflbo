@@ -181,6 +181,7 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
                 cJSON_AddStringToObject(details, sync_step_name((sync_step_t)i), st->sync.last_detail[i]);
             }
         }
+        cJSON_AddBoolToObject(last, "ok", !sync_report_failed(st->sync.last_result)); /* the Energy step aside, D36 */
         if (st->sync.last_failed_step < SYNC_STEP_COUNT) {
             cJSON_AddStringToObject(last, "failed", sync_step_name((sync_step_t)st->sync.last_failed_step));
             cJSON_AddStringToObject(last, "detail", st->sync.last_detail[st->sync.last_failed_step]);

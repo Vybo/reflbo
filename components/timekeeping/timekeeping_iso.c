@@ -50,8 +50,16 @@ bool timekeeping_parse_iso8601(const char *text, time_t *utc)
     if (!number(&p, 2, &h) || !expect(&p, ':') || !number(&p, 2, &mi)) {
         return false;
     }
-    if (*p == ':' && (p++, !number(&p, 2, &s))) {
+    bool with_seconds = *p == ':';
+    if (with_seconds && (p++, !number(&p, 2, &s))) {
         return false;
+    }
+    if (*p == '.' && with_seconds) { /* a fraction of the second (Solcast's), dropped */
+        if (!isdigit((unsigned char)p[1])) {
+            return false;
+        }
+        for (p++; isdigit((unsigned char)*p); p++) {
+        }
     }
     if (y < 1970 || mo < 1 || mo > 12 || d < 1 || d > days_in_month(y, mo) || h > 23 || mi > 59 || s > 59) {
         return false;

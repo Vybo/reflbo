@@ -2,4 +2,4 @@
 # quarter hours. Pure C on cJSON, also built on the host; the sync task fetches.
 idf_component_register(SRCS "solar.c" "solar_url.c" "solar_parse.c"
                        INCLUDE_DIRS "include"
-                       PRIV_REQUIRES json util)
+                       PRIV_REQUIRES json util timekeeping)

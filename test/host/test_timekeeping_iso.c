@@ -48,6 +48,17 @@ static void test_seconds_are_optional(void)
     TEST_ASSERT_EQUAL_INT64(FRI_2026_09_25_204805 - 5, t);
 }
 
+static void test_a_fraction_of_a_second_is_dropped(void)
+{
+    time_t t = 0;
+    TEST_ASSERT_TRUE(timekeeping_parse_iso8601("2026-09-25T20:48:05.0000000Z", &t)); /* Solcast's form */
+    TEST_ASSERT_EQUAL_INT64(FRI_2026_09_25_204805, t);
+    TEST_ASSERT_TRUE(timekeeping_parse_iso8601("2026-09-25T22:48:05.75+02:00", &t));
+    TEST_ASSERT_EQUAL_INT64(FRI_2026_09_25_204805, t);
+    TEST_ASSERT_FALSE(timekeeping_parse_iso8601("2026-09-25T20:48:05.Z", &t)); /* a point needs digits */
+    TEST_ASSERT_FALSE(timekeeping_parse_iso8601("2026-09-25T20:48.5Z", &t));  /* and seconds before it */
+}
+
 static void test_rejects_malformed_or_impossible_input(void)
 {
     const char *bad[] = { "", "garbage", "2026-13-01T00:00Z", "2026-02-30T00:00Z", "2026-09-25T25:00Z",
@@ -67,6 +78,7 @@ int main(void)
     RUN_TEST(test_parses_an_offset);
     RUN_TEST(test_parses_local_time_with_the_tz_rules);
     RUN_TEST(test_seconds_are_optional);
+    RUN_TEST(test_a_fraction_of_a_second_is_dropped);
     RUN_TEST(test_rejects_malformed_or_impossible_input);
     return UNITY_END();
 }

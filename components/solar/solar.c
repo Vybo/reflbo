@@ -192,3 +192,13 @@ bool solar_peak(const solar_forecast_t *f, int32_t day, uint32_t *w, int *quarte
     *quarter = best;
     return q[best] > 0;
 }
+
+uint32_t solar_solcast_wait_s(int sites)
+{
+    return sites > 1 ? 6 * 3600 : 3 * 3600;
+}
+
+bool solar_solcast_due(uint32_t last_asked, int sites, uint32_t now)
+{
+    return last_asked == 0 || now < last_asked || now - last_asked >= solar_solcast_wait_s(sites);
+}

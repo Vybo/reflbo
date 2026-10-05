@@ -38,6 +38,38 @@ typedef enum {
 #define SETTINGS_SYNC_TIMES_MAX 8
 #define SETTINGS_NTP_MAX 2
 #define SETTINGS_HOST_LEN 64
+#define SETTINGS_FILE_MAX 4096 /* settings.json as the app reads and writes it */
+
+/* sync.steps (spec §9.3, D35): the data steps that run, as bits. The time always runs. */
+typedef enum {
+    SETTINGS_STEP_WEATHER = 1 << 0,
+    SETTINGS_STEP_AIR = 1 << 1,
+    SETTINGS_STEP_RADAR = 1 << 2,
+    SETTINGS_STEP_SOLAR = 1 << 3,
+    SETTINGS_STEP_ENERGY = 1 << 4,
+} settings_step_t;
+#define SETTINGS_STEPS_ALL 0x1F
+
+/* solar.source (spec §11.5); the values match solar_source_t in the solar component. */
+typedef enum {
+    SETTINGS_SOLAR_OFF,
+    SETTINGS_SOLAR_OPEN_METEO,
+    SETTINGS_SOLAR_FORECAST_SOLAR,
+    SETTINGS_SOLAR_SOLCAST,
+} settings_solar_source_t;
+
+/* energy.source and energy.battery (spec §11.6); the battery's values match energy_battery_t. */
+typedef enum { SETTINGS_ENERGY_OFF, SETTINGS_ENERGY_SOLAX } settings_energy_source_t;
+typedef enum { SETTINGS_BATTERY_AUTO, SETTINGS_BATTERY_ON, SETTINGS_BATTERY_OFF } settings_energy_battery_t;
+
+#define SETTINGS_PLANES_MAX 2
+
+/* A roof plane (spec §11.5). */
+typedef struct {
+    uint16_t kwp_e2; /* 10..10000: 0.1 to 100 kWp in hundredths */
+    uint8_t tilt;    /* 0..90° */
+    int16_t azimuth; /* -180..180°: 0 south, -90 east, 90 west */
+} settings_plane_t;
 
 typedef struct {
     char language[4];                    /* "en" */
@@ -73,6 +105,14 @@ typedef struct {
     uint16_t fl_min_alt_ft; /* 0..60000 */
     bool fl_ground;         /* aircraft on the ground too */
     uint8_t fl_max;         /* aircraft shown at most, 1..100 */
+    uint8_t sync_steps;     /* settings_step_t bits (D35) */
+    uint8_t solar_source;   /* settings_solar_source_t */
+    uint8_t solar_plane_count;                         /* 1..SETTINGS_PLANES_MAX */
+    settings_plane_t solar_planes[SETTINGS_PLANES_MAX];
+    uint8_t solar_losses_pct;      /* 0..50, our model's */
+    uint16_t solar_inverter_kw_e2; /* 0..10000: the inverter's limit in hundredths of kW, 0 for none */
+    uint8_t energy_source;         /* settings_energy_source_t */
+    uint8_t energy_battery;        /* settings_energy_battery_t */
 } settings_t;
 
 /* The sync's and the NTP servers' defaults (spec §14.3): times mode at 05:30, a 60 min interval,
@@ -93,6 +133,42 @@ void settings_toggle_always(settings_t *s);
 /* The radars' defaults (spec §14.3): zoom 6.5; a range of 50 km, every altitude, none on the ground,
  * 100 aircraft; both centres on out->lat_e4 and lon_e4, so set the location first. */
 void settings_radar_defaults(settings_t *out);
+
+/* The steps', the PV forecast's and the house's defaults (spec §14.3): every step on; no source; one
+ * plane of 5 kWp tilted 35° to the south, 14 % losses, no inverter limit; the battery on auto. */
+void settings_solar_defaults(settings_t *out);
+/* A step's name in sync.steps: "weather", "air", "radar", "solar", "energy". */
+const char *settings_step_name(settings_step_t step);
+/* Forecast.Solar takes a second plane only with a key (spec §11.5): false with the reason. */
+bool settings_check_solar(const settings_t *s, bool fs_key_set, char *err, size_t err_size);
+
+/* The secrets a PATCH may carry (spec §10.3, §14.2): write-only, kept in NVS `secrets`, never in the
+ * file. */
+typedef enum {
+    SETTINGS_SECRET_FS_KEY,        /* solar.fs_key */
+    SETTINGS_SECRET_SOLCAST_KEY,   /* solar.solcast_key */
+    SETTINGS_SECRET_SOLCAST_SITE1, /* solar.solcast_sites[0] */
+    SETTINGS_SECRET_SOLCAST_SITE2, /* solar.solcast_sites[1] */
+    SETTINGS_SECRET_SOLAX_TOKEN,   /* energy.solax_token */
+    SETTINGS_SECRET_SOLAX_SN,      /* energy.solax_sn */
+    SETTINGS_SECRET_COUNT,
+} settings_secret_t;
+#define SETTINGS_SECRET_LEN 64
+
+typedef struct {
+    bool given[SETTINGS_SECRET_COUNT];                    /* the patch names it; "" or null clears it */
+    char value[SETTINGS_SECRET_COUNT][SETTINGS_SECRET_LEN];
+} settings_secrets_t;
+
+/* Its key in NVS `secrets`: "fs_key", "solcast_key", "solcast_site1", ... */
+const char *settings_secret_key(settings_secret_t secret);
+/* `patch` without its secrets into `out`, the secrets into `secrets`. Each must be one the requests
+ * can carry: letters and digits (the Solcast key also - and _, its sites -), 63 at most. Returns the
+ * length written, or 0 with the reason in `err`. */
+size_t settings_take_secrets(const char *patch, char *out, size_t size, settings_secrets_t *secrets, char *err,
+                             size_t err_size);
+/* Whether `secrets` sets or clears Solcast's key or a site: its budget then starts over (spec §11.5). */
+bool settings_secrets_solcast(const settings_secrets_t *secrets);
 
 /* Fails only if the text is not a JSON object with "schema": 1. */
 bool settings_from_json(const char *json, const settings_t *defaults, settings_t *out, char *err, size_t err_size);

@@ -285,6 +285,9 @@ int64_t app_mqtt_deadline_ms(void); /* app_uptime_ms() of its next look at the s
 void app_mqtt_settings_changed(const settings_t *before); /* a kept connection starts again with them */
 void app_mqtt_password_changed(void);
 bool app_mqtt_failed(void);  /* the status bar's MQTT mark (spec §5.2) */
+/* The house's reading from the mapped MQTT values (D40, spec §12.11): sync_request_t.energy_mqtt, on the sync's task,
+ * built on the app task. */
+bool app_mqtt_energy(energy_reading_t *out, char *detail, size_t size);
 void app_mqtt_summary(char *out, size_t size); /* Info ▸ MQTT: "Off", "12:05 OK", "Connected" */
 /* The mapped fields' values and the message (spec §12.5, §12.7), kept in RTC memory through deep sleep: a
  * routine wake keeps them, anything else reads the mappings again. */

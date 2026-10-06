@@ -266,6 +266,32 @@ static void test_the_block_is_sealed(void)
     TEST_ASSERT_TRUE(sizeof(ha_store_t) <= 4096); /* D40's none and time take no room: RTC FAST keeps 4 KB for it */
 }
 
+/* A mapped number for the house's energy (D40, spec §12.11): its value and unit while fresh; nothing for a stale,
+ * absent or text value, or HA's none. */
+static void test_a_fresh_number_for_the_energy(void)
+{
+    ha_value_t v = number(-342, 2);
+    ha_store_set(&s_store, 0, &v, NOW - 60);
+    double value = 0;
+    const char *unit = NULL;
+    uint32_t at = 0;
+    TEST_ASSERT_TRUE(ha_store_number(&s_store, "outdoor", NOW, &value, &unit, &at));
+    TEST_ASSERT_EQUAL_DOUBLE(-3.42, value);
+    TEST_ASSERT_EQUAL_STRING("°C", unit);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)(NOW - 60), at);
+    ha_store_set_default_ttl(&s_store, 600);
+    TEST_ASSERT_FALSE(ha_store_number(&s_store, "outdoor", NOW + 600, &value, &unit, &at)); /* stale */
+    ha_store_set_default_ttl(&s_store, 0);
+    v = text("Open");
+    ha_store_set(&s_store, 1, &v, NOW);
+    TEST_ASSERT_FALSE(ha_store_number(&s_store, "door", NOW, &value, &unit, &at));
+    TEST_ASSERT_FALSE(ha_store_number(&s_store, "window", NOW, &value, &unit, &at));
+    TEST_ASSERT_FALSE(ha_store_number(&s_store, "", NOW, &value, &unit, &at));
+    v = (ha_value_t){ .kind = HA_KIND_NUMBER, .none = true };
+    ha_store_set(&s_store, 0, &v, NOW);
+    TEST_ASSERT_FALSE(ha_store_number(&s_store, "outdoor", NOW, &value, &unit, &at));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -280,5 +306,6 @@ int main(void)
     RUN_TEST(test_no_value_shows_as_missing);
     RUN_TEST(test_a_time_is_kept);
     RUN_TEST(test_the_block_is_sealed);
+    RUN_TEST(test_a_fresh_number_for_the_energy);
     return UNITY_END();
 }

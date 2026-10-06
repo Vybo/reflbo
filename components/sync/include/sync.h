@@ -70,6 +70,9 @@ typedef struct {
     /* M7: the MQTT session on the sync's task within budget_ms, ESP_OK or why not in `detail`; NULL while MQTT is
      * off, which skips the step */
     esp_err_t (*mqtt)(int budget_ms, char *detail, size_t size);
+    /* D40: the house's reading from the mapped MQTT values, on the app task, false and why in `detail`; NULL while
+     * MQTT is off. Called after the MQTT step, or in a check at once (spec §12.11) */
+    bool (*energy_mqtt)(energy_reading_t *out, char *detail, size_t size);
 } sync_request_t;
 
 typedef struct {
@@ -86,6 +89,7 @@ typedef struct {
     uint32_t solcast_asked;     /* when the step asked Solcast (UTC); 0: it didn't */
     uint8_t solcast_sites;      /* Solcast's sites, for the forecast's freshness */
     energy_reading_t energy;    /* SYNC_STEP_ENERGY ok: the reading */
+    bool energy_local;          /* it is MQTT's, dated by the device's clock (D40): the app moves it with the clock */
     char energy_access[ENERGY_DEV_TOKEN_MAX]; /* the Developer API's new access token, for the app to keep; "" if none */
     uint32_t energy_access_until;
     bool energy_access_dropped;    /* the kept token was refused and no new one came: the app forgets it */

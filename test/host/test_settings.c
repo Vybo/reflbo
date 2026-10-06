@@ -507,6 +507,12 @@ static void test_the_solar_defaults_are_the_specs(void)
     TEST_ASSERT_EQUAL_UINT16(0, defaults.solar_inverter_kw_e2);
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_ENERGY_OFF, defaults.energy_source);
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_BATTERY_AUTO, defaults.energy_battery);
+    for (int i = 0; i < SETTINGS_EM_COUNT; i++) { /* D40: nothing mapped; + import, + charging, today's counters */
+        TEST_ASSERT_EQUAL_STRING("", defaults.energy_mqtt[i]);
+    }
+    TEST_ASSERT_FALSE(defaults.energy_grid_export);
+    TEST_ASSERT_FALSE(defaults.energy_bat_discharge);
+    TEST_ASSERT_FALSE(defaults.energy_lifetime);
     /* A file from before M6d runs every step, with no solar source and no inverter */
     const char *json = "{\"schema\":1,\"sync\":{\"mode\":\"interval\"}}";
     TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
@@ -784,10 +790,75 @@ static void test_the_largest_settings_fit_the_file_buffer(void)
     s.mqtt_user[sizeof(s.mqtt_user) - 1] = '\0';
     memset(s.mqtt_prefix, 'p', sizeof(s.mqtt_prefix) - 1);
     s.mqtt_prefix[sizeof(s.mqtt_prefix) - 1] = '\0';
+    s.energy_source = SETTINGS_ENERGY_MQTT; /* D40: every value mapped by a key of 23 characters */
+    for (int i = 0; i < SETTINGS_EM_COUNT; i++) {
+        memset(s.energy_mqtt[i], 'k', sizeof(s.energy_mqtt[i]) - 1);
+        s.energy_mqtt[i][sizeof(s.energy_mqtt[i]) - 1] = '\0';
+    }
+    s.energy_grid_export = s.energy_bat_discharge = s.energy_lifetime = true;
     size_t n = settings_to_json(&s, NULL, s_json, sizeof(s_json));
     printf("the largest settings.json: %u bytes of %d\n", (unsigned)n, SETTINGS_FILE_MAX);
     TEST_ASSERT_TRUE(n > 0);
     TEST_ASSERT_TRUE(n < SETTINGS_FILE_MAX * 3 / 4); /* room for keys a later firmware adds */
+}
+
+/* D40 (spec §12.11): the house's energy from MQTT, the mapped field for each value, the two signs and the counters. */
+static void test_the_energy_from_mqtt_parses_and_round_trips(void)
+{
+    const char *json = "{\"schema\":1,\"energy\":{\"source\":\"mqtt\",\"mqtt\":{\"pv\":\"pv_power\","
+                       "\"grid\":\"grid_power\",\"load\":\"\",\"battery\":\"bat_power\",\"soc\":\"bat_soc\","
+                       "\"yield\":\"pv_today\",\"to_grid\":\"export_today\",\"from_grid\":\"import_today\","
+                       "\"grid_sign\":\"export\",\"battery_sign\":\"discharge\",\"totals\":\"lifetime\"}}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_ENERGY_MQTT, s_out.energy_source);
+    TEST_ASSERT_EQUAL_STRING("pv_power", s_out.energy_mqtt[SETTINGS_EM_PV]);
+    TEST_ASSERT_EQUAL_STRING("grid_power", s_out.energy_mqtt[SETTINGS_EM_GRID]);
+    TEST_ASSERT_EQUAL_STRING("", s_out.energy_mqtt[SETTINGS_EM_LOAD]);
+    TEST_ASSERT_EQUAL_STRING("bat_soc", s_out.energy_mqtt[SETTINGS_EM_SOC]);
+    TEST_ASSERT_EQUAL_STRING("import_today", s_out.energy_mqtt[SETTINGS_EM_FROM_GRID]);
+    TEST_ASSERT_TRUE(s_out.energy_grid_export);
+    TEST_ASSERT_TRUE(s_out.energy_bat_discharge);
+    TEST_ASSERT_TRUE(s_out.energy_lifetime);
+    TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"source\":\t\"mqtt\""));
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"grid_sign\":\t\"export\""));
+    settings_t again;
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &again, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_out, &again, sizeof(again));
+}
+
+/* Each value is read on its own (spec §14.3): a key that isn't one (1-23 of a-z, 0-9 and _), or a sign it doesn't
+ * know, keeps the one before. */
+static void test_bad_energy_mqtt_values_keep_the_old_ones(void)
+{
+    snprintf(s_defaults.energy_mqtt[SETTINGS_EM_PV], sizeof(s_defaults.energy_mqtt[0]), "pv_power");
+    snprintf(s_defaults.energy_mqtt[SETTINGS_EM_SOC], sizeof(s_defaults.energy_mqtt[0]), "bat_soc");
+    const char *json = "{\"schema\":1,\"energy\":{\"mqtt\":{\"pv\":\"PV Power\",\"grid\":7,"
+                       "\"soc\":\"a23456789012345678901234\",\"grid_sign\":\"sideways\","
+                       "\"battery_sign\":true,\"totals\":\"weekly\"}}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("pv_power", s_out.energy_mqtt[SETTINGS_EM_PV]);
+    TEST_ASSERT_EQUAL_STRING("", s_out.energy_mqtt[SETTINGS_EM_GRID]);
+    TEST_ASSERT_EQUAL_STRING("bat_soc", s_out.energy_mqtt[SETTINGS_EM_SOC]);
+    TEST_ASSERT_FALSE(s_out.energy_grid_export);
+    TEST_ASSERT_FALSE(s_out.energy_bat_discharge);
+    TEST_ASSERT_FALSE(s_out.energy_lifetime);
+    json = "{\"schema\":1,\"energy\":{\"mqtt\":{\"pv\":\"\"}}}"; /* "" maps none */
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("", s_out.energy_mqtt[SETTINGS_EM_PV]);
+}
+
+/* Its solar and grid values are needed (spec §12.11): a page that picks MQTT's source without them is refused. */
+static void test_the_energy_from_mqtt_needs_solar_and_grid(void)
+{
+    settings_t s = s_defaults;
+    s.energy_source = SETTINGS_ENERGY_MQTT;
+    TEST_ASSERT_FALSE(settings_check_solar(&s, false, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_STRING("the house's energy from MQTT needs its solar and grid values", s_err);
+    snprintf(s.energy_mqtt[SETTINGS_EM_PV], sizeof(s.energy_mqtt[0]), "pv");
+    TEST_ASSERT_FALSE(settings_check_solar(&s, false, s_err, sizeof(s_err)));
+    snprintf(s.energy_mqtt[SETTINGS_EM_GRID], sizeof(s.energy_mqtt[0]), "grid");
+    TEST_ASSERT_TRUE_MESSAGE(settings_check_solar(&s, false, s_err, sizeof(s_err)), s_err);
 }
 
 /* A file without energy.region keeps the region set, as a file keeps any value it doesn't name (D37 review). */
@@ -958,6 +1029,9 @@ int main(void)
     RUN_TEST(test_a_second_plane_needs_a_forecast_solar_key);
     RUN_TEST(test_the_largest_settings_fit_the_file_buffer);
     RUN_TEST(test_a_missing_region_keeps_the_one_set);
+    RUN_TEST(test_the_energy_from_mqtt_parses_and_round_trips);
+    RUN_TEST(test_bad_energy_mqtt_values_keep_the_old_ones);
+    RUN_TEST(test_the_energy_from_mqtt_needs_solar_and_grid);
     RUN_TEST(test_the_mqtt_defaults_are_the_specs);
     RUN_TEST(test_the_mqtt_settings_parse_clamp_and_round_trip);
     RUN_TEST(test_bad_mqtt_values_fall_back_one_by_one);

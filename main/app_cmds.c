@@ -537,8 +537,8 @@ static int solar_body(int argc, char **argv)
         print_time("  Solcast asked", (time_t)s->solcast_asked);
         printf("  its sites: %u\n", s->solcast_sites);
     }
-    static const char *const k_energy[] = { "off", "solax", "solax-dev" };
-    printf("energy: %s, battery %s\n", k_energy[set->energy_source <= SETTINGS_ENERGY_SOLAX_DEV ? set->energy_source : 0],
+    static const char *const k_energy[] = { "off", "solax", "solax-dev", "mqtt" };
+    printf("energy: %s, battery %s\n", k_energy[set->energy_source <= SETTINGS_ENERGY_MQTT ? set->energy_source : 0],
            set->energy_battery == SETTINGS_BATTERY_ON ? "on" : set->energy_battery == SETTINGS_BATTERY_OFF ? "off"
                                                                                                           : "auto");
     const energy_reading_t *r = &s->reading;
@@ -549,15 +549,26 @@ static int solar_body(int argc, char **argv)
         int32_t day = energy_reading_day(r);
         uint32_t out = energy_to_grid_wh(&s->day, r, day), in = energy_from_grid_wh(&s->day, r, day);
         printf("  its day:");
-        print_wh("produced", r->yield_wh);
+        print_wh("produced", r->yield_wh == ENERGY_WH_NONE ? SOLAR_WH_NONE : r->yield_wh);
         print_wh("to the grid", out == ENERGY_WH_NONE ? SOLAR_WH_NONE : out);
         print_wh("from it", in == ENERGY_WH_NONE ? SOLAR_WH_NONE : in);
         printf("\n");
         if (r->today) {
-            printf("  its day's totals: SolaX's own\n");
+            printf("  its day's totals: the source's own\n");
         } else {
             print_time("  midnight's reading", (time_t)s->day.base_at);
         }
+    }
+    if (set->energy_source == SETTINGS_ENERGY_MQTT) { /* D40 */
+        static const char *const k_names[SETTINGS_EM_COUNT] = { "solar",  "grid",     "home",    "battery",
+                                                                "charge", "produced", "to grid", "from grid" };
+        printf("  from MQTT:");
+        for (int i = 0; i < SETTINGS_EM_COUNT; i++) {
+            printf("%s %s %s", i > 0 ? "," : "", k_names[i], set->energy_mqtt[i][0] ? set->energy_mqtt[i] : "-");
+        }
+        printf("; + %s, battery + %s, counters %s\n", set->energy_grid_export ? "export" : "import",
+               set->energy_bat_discharge ? "discharging" : "charging",
+               set->energy_lifetime ? "since installation" : "today's");
     }
     if (set->energy_source == SETTINGS_ENERGY_SOLAX_DEV) {
         const energy_dev_site_t *site = &s->site;

@@ -61,9 +61,28 @@ typedef enum {
 } settings_solar_source_t;
 
 /* energy.source, energy.region and energy.battery (spec §11.6): SolaX Cloud by its Token ID ("solax") or by its
- * Developer API ("solax-dev", D37) in one of SolaX's regions. The regions' and the battery's values match
- * energy_dev_region_t and energy_battery_t. */
-typedef enum { SETTINGS_ENERGY_OFF, SETTINGS_ENERGY_SOLAX, SETTINGS_ENERGY_SOLAX_DEV } settings_energy_source_t;
+ * Developer API ("solax-dev", D37) in one of SolaX's regions, or mapped MQTT values ("mqtt", D40, spec §12.11). The
+ * regions' and the battery's values match energy_dev_region_t and energy_battery_t. */
+typedef enum {
+    SETTINGS_ENERGY_OFF,
+    SETTINGS_ENERGY_SOLAX,
+    SETTINGS_ENERGY_SOLAX_DEV,
+    SETTINGS_ENERGY_MQTT,
+} settings_energy_source_t;
+/* energy.mqtt's values (spec §12.11): each names a number mapping's key, "" for none; the order of
+ * energy_mqtt_item_t. */
+typedef enum {
+    SETTINGS_EM_PV,
+    SETTINGS_EM_GRID,
+    SETTINGS_EM_LOAD,
+    SETTINGS_EM_BATTERY,
+    SETTINGS_EM_SOC,
+    SETTINGS_EM_YIELD,
+    SETTINGS_EM_TO_GRID,
+    SETTINGS_EM_FROM_GRID,
+    SETTINGS_EM_COUNT,
+} settings_energy_mqtt_t;
+#define SETTINGS_MQTT_KEY_LEN 24 /* a mapping's key, 1-23 of a-z, 0-9 and _ (HA_KEY_LEN) */
 typedef enum { SETTINGS_REGION_EU, SETTINGS_REGION_CN, SETTINGS_REGION_IN } settings_energy_region_t;
 typedef enum { SETTINGS_BATTERY_AUTO, SETTINGS_BATTERY_ON, SETTINGS_BATTERY_OFF } settings_energy_battery_t;
 
@@ -119,6 +138,10 @@ typedef struct {
     uint8_t energy_source;         /* settings_energy_source_t */
     uint8_t energy_battery;        /* settings_energy_battery_t */
     uint8_t energy_region;         /* settings_energy_region_t: the Developer API's */
+    char energy_mqtt[SETTINGS_EM_COUNT][SETTINGS_MQTT_KEY_LEN]; /* energy.mqtt: the mappings' keys (D40); "" for none */
+    bool energy_grid_export;       /* energy.mqtt.grid_sign "export": a positive grid value goes out */
+    bool energy_bat_discharge;     /* energy.mqtt.battery_sign "discharge": a positive battery value comes out of it */
+    bool energy_lifetime;          /* energy.mqtt.totals "lifetime": the grid's counters run since installation */
     bool mqtt_enabled;                          /* MQTT and Home Assistant (spec §12.1, D32) */
     char mqtt_host[SETTINGS_HOST_LEN];          /* the broker: a host name or an address; "" for none */
     uint16_t mqtt_port;                         /* 1..65535 */
@@ -153,7 +176,8 @@ void settings_solar_defaults(settings_t *out);
 void settings_mqtt_defaults(settings_t *out);
 /* A step's name in sync.steps: "weather", "air", "radar", "solar", "energy". */
 const char *settings_step_name(settings_step_t step);
-/* Forecast.Solar takes a second plane only with a key (spec §11.5): false with the reason. */
+/* Forecast.Solar takes a second plane only with a key (spec §11.5), and the house's energy from MQTT its solar and
+ * grid values (spec §12.11): false with the reason. */
 bool settings_check_solar(const settings_t *s, bool fs_key_set, char *err, size_t err_size);
 
 /* The secrets a PATCH may carry (spec §10.3, §14.2): write-only, kept in NVS `secrets`, never in the

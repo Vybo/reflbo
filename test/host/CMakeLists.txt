@@ -196,8 +196,10 @@ target_include_directories(solar_logic PUBLIC ${REPO_ROOT}/components/solar/incl
 target_compile_options(solar_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(solar_logic PUBLIC util timekeeping_logic PRIVATE cjson m)
 
-# energy: SolaX Cloud's reply, the signs, the battery's rule and the day's totals (spec §11.6); pure C.
-add_library(energy_logic STATIC ${REPO_ROOT}/components/energy/energy.c ${REPO_ROOT}/components/energy/energy_dev.c)
+# energy: SolaX Cloud's reply, a reading from MQTT's values, the signs, the battery's rule and the day's totals
+# (spec §11.6, §12.11); pure C.
+add_library(energy_logic STATIC ${REPO_ROOT}/components/energy/energy.c ${REPO_ROOT}/components/energy/energy_dev.c
+            ${REPO_ROOT}/components/energy/energy_mqtt.c)
 target_include_directories(energy_logic PUBLIC ${REPO_ROOT}/components/energy/include)
 target_compile_options(energy_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(energy_logic PUBLIC util timekeeping_logic PRIVATE cjson m)
@@ -274,6 +276,7 @@ reflbo_host_test(test_solar solar_logic)
 target_compile_definitions(test_solar PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/solar")
 reflbo_host_test(test_energy energy_logic)
 reflbo_host_test(test_energy_dev energy_logic)
+reflbo_host_test(test_energy_mqtt energy_logic)
 target_compile_definitions(test_energy PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/energy")
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)

@@ -1030,7 +1030,14 @@ async function mqttPage() {
 const SOLAR_SOURCES = [['off', 'Off'], ['open-meteo', 'Open-Meteo, through the device\'s own model'],
                        ['forecast-solar', 'Forecast.Solar'], ['solcast', 'Solcast']];
 const ENERGY_SOURCES = [['off', 'Off'], ['solax-dev', 'SolaX Cloud, Developer API'],
-                        ['solax', 'SolaX Cloud, Token ID']];
+                        ['solax', 'SolaX Cloud, Token ID'], ['mqtt', 'MQTT (mapped fields)']];
+/* The values the house's energy takes from MQTT's number fields (D40, spec §12.11), as energy.mqtt names them. */
+const ENERGY_VALUES = [['pv', 'Solar'], ['grid', 'Grid'], ['load', 'Home'], ['battery', 'Battery'],
+                       ['soc', 'Battery charge'], ['yield', 'Produced today'], ['to_grid', 'To the grid'],
+                       ['from_grid', 'From the grid']];
+const GRID_SIGNS = [['import', 'comes from the grid'], ['export', 'goes to the grid']];
+const BATTERY_SIGNS = [['charge', 'charges it'], ['discharge', 'comes out of it']];
+const COUNTERS = [['today', 'Today\'s, from 0 each midnight'], ['lifetime', 'Since installation']];
 const SOLAX_REGIONS = [['eu', 'Europe'], ['cn', 'China'], ['in', 'India']];
 const BATTERY_MODES = [['auto', 'Automatic: a hybrid inverter, or a charge above 0 %'], ['on', 'Shown'],
                        ['off', 'Hidden']];
@@ -1062,7 +1069,8 @@ function secretInput(label, isSet, hint) {
 }
 
 async function solarPage() {
-  const [s, st] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status')]);
+  const [s, st, mapped] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status'),
+    api('GET', '/api/mqtt_fields').catch(() => ({ fields: [] }))]);
   const solar = s.solar || {}, energy = s.energy || {}, keys = solar.keys || {}, ekeys = energy.keys || {};
 
   const source = choose(SOLAR_SOURCES, solar.source || 'off');
@@ -1115,7 +1123,31 @@ async function solarPage() {
   const sn = secretInput('Registration number', !!ekeys.solax_sn, 'The dongle\'s, on its label.');
   const battery = choose(BATTERY_MODES, energy.battery || 'auto');
   const solaxBox = h('div', {}, token.el, sn.el);
-  const eshow = () => { solaxBox.hidden = esource.value !== 'solax'; devBox.hidden = esource.value !== 'solax-dev'; };
+  /* D40: each value from a number field of the MQTT page; one whose field is gone stays, marked */
+  const em = energy.mqtt || {};
+  const numbers = (mapped.fields || []).filter((f) => f.kind === 'number');
+  const valueSelect = (key) => {
+    const current = em[key] || '';
+    const options = [['', '(none)'], ...numbers.map((f) => [f.key, `${f.label} (${f.key})`])];
+    if (current && !numbers.some((f) => f.key === current)) options.push([current, `${current} (no mapping)`]);
+    return choose(options, current);
+  };
+  const values = ENERGY_VALUES.map(([key]) => valueSelect(key));
+  const gridSign = choose(GRID_SIGNS, em.grid_sign === 'export' ? 'export' : 'import');
+  const batSign = choose(BATTERY_SIGNS, em.battery_sign === 'discharge' ? 'discharge' : 'charge');
+  const counters = choose(COUNTERS, em.totals === 'lifetime' ? 'lifetime' : 'today');
+  const mqttBox = h('div', {},
+    h('p', { class: 'muted small' }, 'From the number fields mapped on the ',
+      h('a', { href: '#mqtt' }, 'MQTT page'), ': solar and grid are needed, the rest may be left out. Powers in kW ' +
+      'or W, energies in kWh or Wh, the charge in %.'),
+    ENERGY_VALUES.map(([, name], i) => field(name, values[i])),
+    field('A positive grid value', gridSign), field('A positive battery value', batSign),
+    field('Counters', counters, 'To and from the grid. Produced today is today\'s either way.'));
+  const eshow = () => {
+    solaxBox.hidden = esource.value !== 'solax';
+    devBox.hidden = esource.value !== 'solax-dev';
+    mqttBox.hidden = esource.value !== 'mqtt';
+  };
   esource.addEventListener('change', eshow);
   eshow();
 
@@ -1124,6 +1156,9 @@ async function solarPage() {
     const touched = sites.some((x) => x.value() !== undefined);
     if (touched && sites.some((x) => x.isSet && x.value() === undefined)) {
       throw new ApiError('Type both site ids, or clear the one you don\'t want.');
+    }
+    if (esource.value === 'mqtt' && (!values[0].value || !values[1].value)) {
+      throw new ApiError('The house\'s energy from MQTT needs its solar and grid values.');
     }
     const out = { solar: { source: source.value, planes: planes.map((q) => ({ kwp: Number(q.kwp), tilt: Number(q.tilt),
                                                                              azimuth: Number(q.azimuth) })),
@@ -1137,6 +1172,10 @@ async function solarPage() {
     put(out.energy, 'solax_sn', sn.value());
     put(out.energy, 'solax_client_id', clientId.value());
     put(out.energy, 'solax_client_secret', secret.value());
+    if (esource.value === 'mqtt') {
+      out.energy.mqtt = { ...Object.fromEntries(ENERGY_VALUES.map(([key], i) => [key, values[i].value])),
+                          grid_sign: gridSign.value, battery_sign: batSign.value, totals: counters.value };
+    }
     await api('PATCH', '/api/settings', out);
     note.className = 'good';
     note.textContent = 'Saved.';
@@ -1179,10 +1218,10 @@ async function solarPage() {
 
   main.replaceChildren(h('h1', { text: 'Solar' }),
     card('PV forecast', field('Source', source), planeBox, modelBox, fsBox, scBox),
-    card('The house\'s energy', field('Source', esource), devBox, solaxBox, field('Home battery', battery)),
+    card('The house\'s energy', field('Source', esource), devBox, solaxBox, mqttBox, field('Home battery', battery)),
     save, nowCard,
     card('Credits', h('p', { class: 'muted small', text: 'Forecasts: Open-Meteo (CC BY 4.0), Forecast.Solar (CC BY-SA ' +
-      '4.0), Solcast (for personal use only, as its terms say). The house\'s readings: SolaX Cloud.' })));
+      '4.0), Solcast (for personal use only, as its terms say). The house\'s readings: SolaX Cloud, or MQTT.' })));
 }
 
 const LANGUAGES = [['en', 'English'], ['cs', 'Čeština']];

@@ -3,6 +3,7 @@
 
 #include "app.h"
 #include "app_internal.h"
+#include "energy_mqtt.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -250,14 +251,17 @@ static void apply(void *arg)
         apply_refresh(r);
         return;
     }
+    int64_t moved_ms = 0;
     if (r->result[SYNC_STEP_TIME] == SYNC_STEP_OK) {
-        int64_t moved_ms = 0;
         esp_err_t err = timekeeping_apply_true_time(r->ntp_utc_us, r->ntp_mono_us, &moved_ms);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "setting the time: %s", esp_err_to_name(err));
         } else if (moved_ms > 1000 || moved_ms < -1000) {
             ESP_LOGI(TAG, "the clock moved %lld ms", (long long)moved_ms);
         }
+    }
+    if (r->energy_local && moved_ms != 0) { /* D40: after a lost clock (D9) its values came dated in 2000 */
+        energy_mqtt_shift(&r->energy, (moved_ms + (moved_ms >= 0 ? 500 : -500)) / 1000);
     }
     time_t now = time(NULL);
     if (r->result[SYNC_STEP_WEATHER] == SYNC_STEP_OK) {
@@ -328,6 +332,7 @@ static esp_err_t start(bool manual, sync_due_t due)
     if (app_mqtt_on()) { /* M7 (spec §9.3 step 8) */
         app_mqtt_prepare();
         req.mqtt = app_mqtt_sync_step;
+        req.energy_mqtt = set->energy_source == SETTINGS_ENERGY_MQTT ? app_mqtt_energy : NULL; /* D40 */
     }
     esp_err_t err = sync_start(&req, done);
     if (err == ESP_OK) {
@@ -431,6 +436,7 @@ esp_err_t app_sync_check(void)
     req = (sync_request_t){ .kind = SYNC_KIND_CHECK, .steps = SETTINGS_STEPS_ALL, .lat_e4 = set->lat_e4,
                             .lon_e4 = set->lon_e4, .now = timekeeping_valid() ? (uint32_t)time(NULL) : 0 };
     app_solar_request(&req.solar, &req.energy); /* asked for: the steps' switches don't hold it back */
+    req.energy_mqtt = set->energy_source == SETTINGS_ENERGY_MQTT && app_mqtt_on() ? app_mqtt_energy : NULL; /* D40 */
     esp_err_t err = sync_start(&req, done);
     if (err == ESP_OK) {
         s_active = true;
@@ -481,7 +487,7 @@ static void refresh_tick(time_t now)
     const settings_t *set = app_settings();
     bool radar = (set->sync_steps & SETTINGS_STEP_RADAR) && now >= s_radar_next;
     bool energy = (set->sync_steps & SETTINGS_STEP_ENERGY) && set->energy_source != SETTINGS_ENERGY_OFF &&
-                  now >= s_energy_next;
+                  set->energy_source != SETTINGS_ENERGY_MQTT && now >= s_energy_next; /* MQTT's come by themselves */
     if (s_active || (!radar && !energy)) {
         return;
     }

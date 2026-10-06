@@ -910,6 +910,66 @@ test('the house\'s energy takes SolaX Cloud\'s token and registration number, an
                                             solax_sn: 'SXA1B2C3D4' });
 });
 
+/* D40 (spec §12.11): the house's energy from MQTT's number fields. */
+const ENERGY_MAPPINGS = { schema: 1, fields: [
+  { key: 'pv_power', label: 'PV power', kind: 'number', unit: 'W', precision: null, topic: 'solax/pv', json_path: null,
+    ttl_s: 0 },
+  { key: 'grid_power', label: 'Grid power', kind: 'number', unit: 'W', precision: null, topic: 'solax/grid',
+    json_path: null, ttl_s: 0 },
+  { key: 'pv_today', label: 'PV today', kind: 'number', unit: 'kWh', precision: null, topic: 'solax/today',
+    json_path: null, ttl_s: 0 },
+  { key: 'front_door', label: 'Door', kind: 'text', unit: '', precision: null, topic: 'door', json_path: null, ttl_s: 0 },
+] };
+const mappedSolarDevice = (patches, settings = SOLAR_SETTINGS) =>
+  solarDevice(patches, settings, { 'GET /api/mqtt_fields': () => reply(200, ENERGY_MAPPINGS) });
+
+test('the house\'s energy from MQTT takes mapped number fields, its signs and its counters (D40)', async () => {
+  const patches = [];
+  const { ctx, main } = await load(mappedSolarDevice(patches));
+  await ctx.solarPage();
+  await type(inputNamed(main, 'Source', 1), 'mqtt');
+  assert.ok(hiddenAbove(main, inputNamed(main, 'Token ID')));
+  assert.ok(!hiddenAbove(main, inputNamed(main, 'Solar')));
+  assert.deepEqual(below(inputNamed(main, 'Solar')).filter((e) => e.tag === 'option').map(text),
+                   ['(none)', 'PV power (pv_power)', 'Grid power (grid_power)', 'PV today (pv_today)']);
+  await type(inputNamed(main, 'Solar'), 'pv_power');
+  await type(inputNamed(main, 'Grid'), 'grid_power');
+  await type(inputNamed(main, 'Produced today'), 'pv_today');
+  await type(inputNamed(main, 'A positive grid value'), 'export');
+  await type(inputNamed(main, 'Counters'), 'lifetime');
+  await buttonNamed(main, 'Save').click();
+  assert.deepEqual(patches.at(-1).energy, { source: 'mqtt', region: 'eu', battery: 'auto',
+    mqtt: { pv: 'pv_power', grid: 'grid_power', load: '', battery: '', soc: '', yield: 'pv_today', to_grid: '',
+            from_grid: '', grid_sign: 'export', battery_sign: 'charge', totals: 'lifetime' } });
+  assert.match(text(main), /MQTT page/);
+});
+
+test('the house\'s energy from MQTT needs its solar and grid values (D40)', async () => {
+  const patches = [];
+  const { ctx, main } = await load(mappedSolarDevice(patches));
+  await ctx.solarPage();
+  await type(inputNamed(main, 'Source', 1), 'mqtt');
+  await type(inputNamed(main, 'Solar'), 'pv_power');
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.length, 0);
+  assert.match(text(main), /needs its solar and grid values/);
+});
+
+test('a value whose field is gone from the MQTT page stays, marked (D40)', async () => {
+  const settings = { ...SOLAR_SETTINGS, energy: { ...SOLAR_SETTINGS.energy, source: 'mqtt',
+    mqtt: { pv: 'old_pv', grid: 'grid_power', load: '', battery: '', soc: '', yield: '', to_grid: '', from_grid: '',
+            grid_sign: 'import', battery_sign: 'discharge', totals: 'today' } } };
+  const patches = [];
+  const { ctx, main } = await load(mappedSolarDevice(patches, settings));
+  await ctx.solarPage();
+  const solar = inputNamed(main, 'Solar');
+  assert.equal(solar.value, 'old_pv');
+  assert.ok(below(solar).some((e) => e.tag === 'option' && text(e) === 'old_pv (no mapping)'));
+  assert.equal(inputNamed(main, 'A positive battery value').value, 'discharge');
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.at(-1).energy.mqtt.pv, 'old_pv');
+});
+
 test('the Developer API takes an application\'s Client ID and Client Secret and SolaX\'s region (D37)', async () => {
   const patches = [];
   const { ctx, main } = await load(solarDevice(patches));
@@ -931,7 +991,7 @@ test('the Developer API is the first SolaX source, and Europe its region by defa
   await ctx.solarPage();
   const source = inputNamed(main, 'Source', 1);
   assert.deepEqual(source.children.filter((c) => c instanceof FakeElement).map((o) => o.value),
-                   ['off', 'solax-dev', 'solax']);
+                   ['off', 'solax-dev', 'solax', 'mqtt']); /* MQTT's mapped fields last (D40) */
   assert.equal(inputNamed(main, 'Region').value, 'eu');
   assert.ok(hiddenAbove(main, inputNamed(main, 'Client ID')), 'its keys show with the source off');
 });

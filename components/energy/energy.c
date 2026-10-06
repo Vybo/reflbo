@@ -247,14 +247,19 @@ const uint16_t *energy_day_q(const energy_day_t *d, int32_t day)
     return d != NULL && d->day != 0 && d->day == day ? d->q : NULL;
 }
 
-/* `total` less its value at day `day`'s midnight; a reading with today's totals has them as they are. */
+/* `total` less its value at day `day`'s midnight; a reading with today's totals has them as they are. A counter
+ * the reading or its midnight had none of (MQTT's, D40) is none. */
 static uint32_t since_midnight(const energy_day_t *d, const energy_reading_t *r, int32_t day, uint32_t total,
                                uint32_t base)
 {
+    if (total == ENERGY_WH_NONE) {
+        return ENERGY_WH_NONE;
+    }
     if (r != NULL && r->today) {
         return energy_reading_day(r) == day ? total : ENERGY_WH_NONE;
     }
-    if (d == NULL || r == NULL || d->day != day || d->base_at == 0 || energy_reading_day(r) != day) {
+    if (d == NULL || r == NULL || d->day != day || d->base_at == 0 || base == ENERGY_WH_NONE ||
+        energy_reading_day(r) != day) {
         return ENERGY_WH_NONE;
     }
     return total >= base ? total - base : 0;
@@ -273,7 +278,7 @@ uint32_t energy_from_grid_wh(const energy_day_t *d, const energy_reading_t *r, i
 int energy_self_pct(const energy_day_t *d, const energy_reading_t *r, int32_t day)
 {
     uint32_t out = energy_to_grid_wh(d, r, day);
-    if (out == ENERGY_WH_NONE || r->yield_wh == 0) {
+    if (out == ENERGY_WH_NONE || r->yield_wh == 0 || r->yield_wh == ENERGY_WH_NONE) {
         return -1;
     }
     if (out >= r->yield_wh) {

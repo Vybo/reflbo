@@ -87,6 +87,21 @@ ha_freshness_t ha_store_freshness(const ha_store_t *s, int i, time_t now)
     return ttl != 0 && now > (time_t)e->updated + (time_t)ttl ? HA_STALE : HA_FRESH;
 }
 
+bool ha_store_number(const ha_store_t *s, const char *key, time_t now, double *value, const char **unit,
+                     uint32_t *at)
+{
+    int i = key[0] != '\0' ? ha_store_find(s, key) : -1;
+    if (i < 0 || s->entry[i].kind != HA_KIND_NUMBER || ha_store_freshness(s, i, now) != HA_FRESH) {
+        return false;
+    }
+    static const double k_scale[] = { 1, 10, 100, 1000 };
+    const ha_entry_t *e = &s->entry[i];
+    *value = e->number / k_scale[e->decimals <= 3 ? e->decimals : 0];
+    *unit = e->unit;
+    *at = e->updated;
+    return true;
+}
+
 bool ha_store_set(ha_store_t *s, int i, const ha_value_t *v, time_t now)
 {
     if (i < 0 || i >= s->count || v->kind != s->entry[i].kind) {

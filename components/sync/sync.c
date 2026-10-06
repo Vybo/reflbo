@@ -576,6 +576,27 @@ static void step_energy_dev(void)
     }
 }
 
+/* The house's energy from mapped MQTT values (D40, spec §12.11): built on the app task from what a sync's MQTT
+ * session brought, or for the Solar page's check from what the app has. No request of its own. */
+static void step_energy_mqtt(void)
+{
+    if (s_req.energy_mqtt == NULL) {
+        failed(SYNC_STEP_ENERGY, "MQTT off");
+        return;
+    }
+    if (s_req.kind == SYNC_KIND_SYNC && s_report.result[SYNC_STEP_MQTT] != SYNC_STEP_OK) {
+        failed(SYNC_STEP_ENERGY, "no session");
+        return;
+    }
+    char detail[SYNC_DETAIL_LEN] = "";
+    if (s_req.energy_mqtt(&s_report.energy, detail, sizeof(detail))) {
+        s_report.result[SYNC_STEP_ENERGY] = SYNC_STEP_OK;
+        s_report.energy_local = true; /* the time step's true time may move the clock it was dated by */
+    } else {
+        failed(SYNC_STEP_ENERGY, detail[0] != '\0' ? detail : "no data");
+    }
+}
+
 /* The house's energy (spec §11.6): one reading; its failure shows but doesn't fail the sync. */
 static void step_energy(void)
 {
@@ -586,6 +607,10 @@ static void step_energy(void)
         step_energy_token();
     } else if (s_req.energy.source == SETTINGS_ENERGY_SOLAX_DEV) {
         step_energy_dev();
+    } else if (s_req.energy.source == SETTINGS_ENERGY_MQTT) {
+        if (s_req.kind != SYNC_KIND_SYNC) {
+            step_energy_mqtt(); /* a sync's comes after its MQTT step */
+        }
     } else {
         skipped(SYNC_STEP_ENERGY, "no source");
     }
@@ -665,6 +690,10 @@ static void sync_task(void *arg)
         step_energy();
         s_step = SYNC_STEP_MQTT;
         step_mqtt();
+        if (s_req.energy.source == SETTINGS_ENERGY_MQTT && (s_req.steps & SETTINGS_STEP_ENERGY)) {
+            s_step = SYNC_STEP_ENERGY; /* D40: from the values the session brought */
+            step_energy_mqtt();
+        }
     } else {
         const char *why = err == ESP_ERR_NOT_FOUND ? "no network saved" : err == ESP_ERR_INVALID_STATE ? "Wi-Fi busy"
                                                                                                     : "not joined";

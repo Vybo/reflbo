@@ -49,10 +49,11 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      14 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
+#define SNAP_VERSION      15 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
                                    9: 24 cells (M6c); 10: the solar state and the sync's two steps (M6d);
                                    11: the Developer API's plant (D37); 12: MQTT's settings (M7);
-                                   13: the presets' MQTT keys (M7); 14: the MQTT step, the last good sync (M7) */
+                                   13: the presets' MQTT keys (M7); 14: the MQTT step, the last good sync (M7);
+                                   15: the house's energy from MQTT (D40) */
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */

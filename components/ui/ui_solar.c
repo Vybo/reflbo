@@ -811,10 +811,10 @@ bool ui_draw_energy_layout(gfx_fb_t *fb, gfx_rect_t a, const ui_context_t *ctx)
     int pen = gfx_text(fb, &gfx_font_sans_bold_28, cx + 34, a.y + 44, t, GFX_BLACK);
     gfx_text(fb, &gfx_font_sans_16, pen + 3, a.y + 44, unit, GFX_BLACK);
     gfx_text(fb, &gfx_font_sans_16, cx + 34, a.y + 18, lang_str(lang, LS_EN_PV), GFX_BLACK);
-    /* when the inverter's reading came */
+    /* where the reading came from, and when */
     char when[16];
     ui_clock_text(ctx, (time_t)e->at, when, sizeof(when));
-    snprintf(v, sizeof(v), "SolaX %s", when);
+    snprintf(v, sizeof(v), "%s %s", s->mqtt ? "MQTT" : "SolaX", when);
     gfx_text(fb, &gfx_font_sans_12, a.x + 6, a.y + 14, v, GFX_BLACK);
     /* the lines, then the junction */
     flow_line(fb, cx, a.y + 56, cx, jy - 6, flow_dir(e->pv_w), 2, 6);

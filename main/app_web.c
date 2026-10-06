@@ -270,9 +270,9 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
         cJSON_AddBoolToObject(solar, "demo", true);
     }
     cJSON *energy = cJSON_AddObjectToObject(o, "energy");
-    static const char *const k_energy[] = { "off", "solax", "solax-dev" };
+    static const char *const k_energy[] = { "off", "solax", "solax-dev", "mqtt" };
     uint8_t esrc = st->settings.energy_source;
-    cJSON_AddStringToObject(energy, "source", k_energy[esrc <= SETTINGS_ENERGY_SOLAX_DEV ? esrc : 0]);
+    cJSON_AddStringToObject(energy, "source", k_energy[esrc <= SETTINGS_ENERGY_MQTT ? esrc : 0]);
     if (ss->reading.at != 0) {
         cJSON_AddNumberToObject(energy, "reading_at", ss->reading.at);
     }

@@ -335,6 +335,30 @@ static void test_a_reading_with_todays_totals_needs_no_midnight(void)
     TEST_ASSERT_EQUAL_UINT32(ENERGY_WH_NONE, energy_to_grid_wh(&d, &r, today));
 }
 
+/* A counter a reading has none of (MQTT's, D40) stays none, today's or since installation, as does own use. */
+static void test_counters_that_are_none_stay_none(void)
+{
+    energy_day_t d;
+    energy_day_init(&d);
+    energy_reading_t r = reading(local(2026, 10, 5, 0, 5), 0, 1000.0, 2000.0, 0.0);
+    r.from_grid_wh = ENERGY_WH_NONE;
+    energy_day_add(&d, &r);
+    r = reading(local(2026, 10, 5, 13, 17), 3000, 1004.9, 2000.6, 9.4);
+    energy_day_add(&d, &r);
+    int32_t today = day_of(2026, 10, 5);
+    TEST_ASSERT_EQUAL_UINT32(4900, energy_to_grid_wh(&d, &r, today));
+    TEST_ASSERT_EQUAL_UINT32(ENERGY_WH_NONE, energy_from_grid_wh(&d, &r, today)); /* its midnight had none */
+    r.to_grid_wh = ENERGY_WH_NONE;
+    TEST_ASSERT_EQUAL_UINT32(ENERGY_WH_NONE, energy_to_grid_wh(&d, &r, today));
+    TEST_ASSERT_EQUAL_INT(-1, energy_self_pct(&d, &r, today));
+    r.to_grid_wh = 1004900;
+    r.yield_wh = ENERGY_WH_NONE;
+    TEST_ASSERT_EQUAL_INT(-1, energy_self_pct(&d, &r, today));
+    r.today = true; /* today's counters as they are */
+    r.from_grid_wh = ENERGY_WH_NONE;
+    TEST_ASSERT_EQUAL_UINT32(ENERGY_WH_NONE, energy_from_grid_wh(&d, &r, today));
+}
+
 static void test_a_reading_with_todays_totals_is_no_midnight_base(void)
 {
     energy_day_t d;
@@ -395,6 +419,7 @@ int main(void)
     RUN_TEST(test_own_use_is_the_share_the_house_kept);
     RUN_TEST(test_a_reading_with_todays_totals_needs_no_midnight);
     RUN_TEST(test_a_reading_with_todays_totals_is_no_midnight_base);
+    RUN_TEST(test_counters_that_are_none_stay_none);
     RUN_TEST(test_a_reading_is_fresh_for_15_minutes);
     RUN_TEST(test_a_reading_from_the_future_is_refused);
     return UNITY_END();

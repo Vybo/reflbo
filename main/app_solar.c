@@ -212,6 +212,7 @@ const ui_solar_t *app_solar_ui(void)
         .reading = &s->reading,
         .day = &s->day,
         .battery = energy_battery_shown((energy_battery_t)set->energy_battery, &s->reading),
+        .mqtt = set->energy_source == SETTINGS_ENERGY_MQTT, /* D40: the Energy layout says where it came from */
     };
     return &view;
 }

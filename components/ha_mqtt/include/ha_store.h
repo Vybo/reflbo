@@ -62,6 +62,10 @@ void ha_store_set_default_ttl(ha_store_t *s, uint32_t ttl_s);
  * A value of the wrong kind, or for no entry, is ignored. */
 bool ha_store_set(ha_store_t *s, int i, const ha_value_t *v, time_t now);
 ha_freshness_t ha_store_freshness(const ha_store_t *s, int i, time_t now);
+/* A number for the house's energy (D40, spec §12.11): entry `key`'s value, unit and arrival while it is fresh; false
+ * for a stale, absent or text value, or HA's none. */
+bool ha_store_number(const ha_store_t *s, const char *key, time_t now, double *value, const char **unit,
+                     uint32_t *at);
 /* Entry `i` has no value again (the console's `field clear`); false if it had none. */
 bool ha_store_clear(ha_store_t *s, int i);
 /* The clock moved by `delta_s` (a sync set it): every value and the message keep their age. */

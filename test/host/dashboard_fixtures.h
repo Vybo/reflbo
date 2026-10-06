@@ -442,6 +442,11 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         s_fix_reading.pv_w = 382;
         s_fix_reading.load_w = 382;
         s_fix_reading.grid_w = 0;
+    } else if (strcmp(name, "energy_mqtt") == 0) { /* D40: the reading from MQTT, with no counter of imports mapped */
+        *preset = fixture_preset("energy");
+        fixture_solar_ctx(ctx, true, false);
+        s_fix_solar.mqtt = true;
+        s_fix_reading.from_grid_wh = ENERGY_WH_NONE;
     } else if (strcmp(name, "energy_none") == 0) { /* before the first reading */
         *preset = fixture_preset("energy");
         fixture_solar_ctx(ctx, false, false);
@@ -515,4 +520,4 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "energy_night_cs", "energy_none", "energy_low",
                                                     "grid_solar_low", "solar_evening", "mqtt_grid",
                                                     "mqtt_home_cs", "mqtt_split_xs", "home_mqtt_failed",
-                                                    "message_fields" };
+                                                    "message_fields", "energy_mqtt" };

@@ -230,7 +230,13 @@ static const char *const k_solar_sources[] = { [SETTINGS_SOLAR_OFF] = "off", [SE
                                                [SETTINGS_SOLAR_FORECAST_SOLAR] = "forecast-solar",
                                                [SETTINGS_SOLAR_SOLCAST] = "solcast" };
 static const char *const k_energy_sources[] = { [SETTINGS_ENERGY_OFF] = "off", [SETTINGS_ENERGY_SOLAX] = "solax",
-                                                [SETTINGS_ENERGY_SOLAX_DEV] = "solax-dev" };
+                                                [SETTINGS_ENERGY_SOLAX_DEV] = "solax-dev",
+                                                [SETTINGS_ENERGY_MQTT] = "mqtt" };
+static const char *const k_energy_mqtt[SETTINGS_EM_COUNT] = { "pv",    "grid",    "load",     "battery",
+                                                              "soc",   "yield",   "to_grid",  "from_grid" };
+static const char *const k_grid_signs[] = { "import", "export" };
+static const char *const k_battery_signs[] = { "charge", "discharge" };
+static const char *const k_totals[] = { "today", "lifetime" };
 static const char *const k_regions[] = { [SETTINGS_REGION_EU] = "eu", [SETTINGS_REGION_CN] = "cn",
                                          [SETTINGS_REGION_IN] = "in" };
 static const char *const k_batteries[] = { [SETTINGS_BATTERY_AUTO] = "auto", [SETTINGS_BATTERY_ON] = "on",
@@ -262,6 +268,13 @@ static void read_steps(const cJSON *steps, settings_t *out)
     }
 }
 
+/* A mapping's key (spec §12.5): 1-23 of a-z, 0-9 and _, as ha_key_valid() has it. */
+static bool mapping_key(const char *s)
+{
+    size_t n = strlen(s);
+    return n > 0 && n < SETTINGS_MQTT_KEY_LEN && strspn(s, "abcdefghijklmnopqrstuvwxyz0123456789_") == n;
+}
+
 static void read_solar(const cJSON *solar, const cJSON *energy, settings_t *out)
 {
     out->solar_source = choice(child(solar, "source"), k_solar_sources,
@@ -288,6 +301,16 @@ static void read_solar(const cJSON *solar, const cJSON *energy, settings_t *out)
                                  out->energy_battery);
     out->energy_region = choice(child(energy, "region"), k_regions, sizeof(k_regions) / sizeof(k_regions[0]),
                                 out->energy_region);
+    const cJSON *mqtt = child(energy, "mqtt"); /* D40: each value on its own; a key that isn't one keeps the last */
+    for (int i = 0; i < SETTINGS_EM_COUNT; i++) {
+        const cJSON *key = child(mqtt, k_energy_mqtt[i]);
+        if (cJSON_IsString(key) && (key->valuestring[0] == '\0' || mapping_key(key->valuestring))) {
+            snprintf(out->energy_mqtt[i], sizeof(out->energy_mqtt[i]), "%s", key->valuestring);
+        }
+    }
+    out->energy_grid_export = choice(child(mqtt, "grid_sign"), k_grid_signs, 2, out->energy_grid_export) == 1;
+    out->energy_bat_discharge = choice(child(mqtt, "battery_sign"), k_battery_signs, 2, out->energy_bat_discharge) == 1;
+    out->energy_lifetime = choice(child(mqtt, "totals"), k_totals, 2, out->energy_lifetime) == 1;
 }
 
 /* Text without control characters (UTF-8 is fine): what a broker takes as a user name. */
@@ -356,6 +379,10 @@ void settings_solar_defaults(settings_t *out)
     out->energy_source = SETTINGS_ENERGY_OFF;
     out->energy_battery = SETTINGS_BATTERY_AUTO;
     out->energy_region = SETTINGS_REGION_EU;
+    memset(out->energy_mqtt, 0, sizeof(out->energy_mqtt)); /* D40: nothing mapped, + import, + charging, today's */
+    out->energy_grid_export = false;
+    out->energy_bat_discharge = false;
+    out->energy_lifetime = false;
 }
 
 const char *settings_step_name(settings_step_t step)
@@ -372,6 +399,10 @@ bool settings_check_solar(const settings_t *s, bool fs_key_set, char *err, size_
 {
     if (s->solar_source == SETTINGS_SOLAR_FORECAST_SOLAR && s->solar_plane_count > 1 && !fs_key_set) {
         return fail(err, err_size, "a second plane needs a Forecast.Solar key");
+    }
+    if (s->energy_source == SETTINGS_ENERGY_MQTT &&
+        (s->energy_mqtt[SETTINGS_EM_PV][0] == '\0' || s->energy_mqtt[SETTINGS_EM_GRID][0] == '\0')) {
+        return fail(err, err_size, "the house's energy from MQTT needs its solar and grid values");
     }
     return true;
 }
@@ -624,12 +655,19 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     put(solar, "losses_pct", cJSON_CreateNumber(s->solar_losses_pct));
     put(solar, "inverter_kw", cJSON_CreateNumber(s->solar_inverter_kw_e2 / 100.0));
     cJSON *energy = object_at(root, "energy");
-    uint8_t energy_source = s->energy_source <= SETTINGS_ENERGY_SOLAX_DEV ? s->energy_source : 0;
+    uint8_t energy_source = s->energy_source <= SETTINGS_ENERGY_MQTT ? s->energy_source : 0;
     uint8_t energy_battery = s->energy_battery <= SETTINGS_BATTERY_OFF ? s->energy_battery : 0;
     uint8_t energy_region = s->energy_region <= SETTINGS_REGION_IN ? s->energy_region : 0;
     put(energy, "source", cJSON_CreateString(k_energy_sources[energy_source]));
     put(energy, "battery", cJSON_CreateString(k_batteries[energy_battery]));
     put(energy, "region", cJSON_CreateString(k_regions[energy_region]));
+    cJSON *energy_mqtt = object_at(energy, "mqtt");
+    for (int i = 0; i < SETTINGS_EM_COUNT; i++) {
+        put(energy_mqtt, k_energy_mqtt[i], cJSON_CreateString(s->energy_mqtt[i]));
+    }
+    put(energy_mqtt, "grid_sign", cJSON_CreateString(k_grid_signs[s->energy_grid_export]));
+    put(energy_mqtt, "battery_sign", cJSON_CreateString(k_battery_signs[s->energy_bat_discharge]));
+    put(energy_mqtt, "totals", cJSON_CreateString(k_totals[s->energy_lifetime]));
     cJSON *mqtt = object_at(root, "mqtt");
     put(mqtt, "enabled", cJSON_CreateBool(s->mqtt_enabled));
     put(mqtt, "host", cJSON_CreateString(s->mqtt_host));

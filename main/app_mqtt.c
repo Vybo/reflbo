@@ -11,6 +11,7 @@
 #include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "energy_mqtt.h"
 #include "ha_mqtt.h"
 #include "ha_session.h"
 #include "ha_store.h"
@@ -31,10 +32,15 @@ _Static_assert(HA_PASS_LEN >= SETTINGS_SECRET_LEN, "the broker's password fits t
 
 #define CHECK_MS 30000        /* sync mode `always`: how often the state is looked at (spec §12.9) */
 #define RESUBSCRIBE_MS 300000 /* sync mode `always`: the retained values again, with the 5-min state */
+#define ENERGY_LIVE_MS 60000  /* D40: in sync mode `always`, the house's reading at most once a minute */
+
+_Static_assert((int)SETTINGS_EM_COUNT == (int)ENERGY_MQTT_COUNT, "energy.mqtt maps the reading's values");
 
 static bool s_started;           /* the client's task runs */
 static ha_conn_t s_conn;         /* the next session's: set on the app task as a sync starts */
 static bool s_keeping;           /* sync mode `always` keeps the client */
+static bool s_energy_pending;    /* sync mode `always`: a value of the house's energy came since its last reading */
+static int64_t s_energy_ms;      /* app_uptime_ms() of that reading; 0 for none */
 static int64_t s_published_ms = -1;
 static int64_t s_check_ms;
 static int64_t s_resubscribe_ms;
@@ -303,6 +309,54 @@ static void on_command(ha_cmd_t cmd, const char *payload, size_t len)
     }
 }
 
+/* The house's reading from the mapped values (D40, spec §12.11), on the app task, which owns the store. */
+static bool energy_reading(energy_reading_t *out, char *detail, size_t size)
+{
+    const settings_t *s = app_settings();
+    energy_mqtt_value_t v[ENERGY_MQTT_COUNT];
+    time_t now = time(NULL);
+    for (int i = 0; i < ENERGY_MQTT_COUNT; i++) {
+        v[i] = (energy_mqtt_value_t){ .unit = "" };
+        v[i].fresh = ha_store_number(&s_store, s->energy_mqtt[i], now, &v[i].value, &v[i].unit, &v[i].at);
+    }
+    energy_mqtt_signs_t signs = { .grid_export = s->energy_grid_export, .bat_discharge = s->energy_bat_discharge,
+                                  .lifetime = s->energy_lifetime };
+    return energy_mqtt_reading(v, &signs, out, detail, size);
+}
+
+typedef struct {
+    energy_reading_t *out;
+    char *detail;
+    size_t size;
+    bool ok;
+} energy_call_t;
+
+static void energy_on_app(void *arg)
+{
+    energy_call_t *c = arg;
+    c->ok = energy_reading(c->out, c->detail, c->size);
+}
+
+bool app_mqtt_energy(energy_reading_t *out, char *detail, size_t size) /* on the sync's task */
+{
+    energy_call_t c = { .out = out, .detail = detail, .size = size };
+    return app_execute(energy_on_app, &c) == ESP_OK && c.ok;
+}
+
+/* One of the house's values among `batch` (D40): the energy's source is MQTT, and a key it names came. */
+static bool energy_value(const staged_t *batch, int n)
+{
+    const settings_t *s = app_settings();
+    for (int i = 0; s->energy_source == SETTINGS_ENERGY_MQTT && i < n; i++) {
+        for (int k = 0; k < SETTINGS_EM_COUNT; k++) {
+            if (s->energy_mqtt[k][0] != '\0' && strcmp(s->energy_mqtt[k], batch[i].key) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /* On the app task: the values that came since the last time, then one render if any shows differently. */
 static void drain_values(void *arg)
 {
@@ -319,6 +373,7 @@ static void drain_values(void *arg)
     for (int i = 0; i < n; i++) {
         changed |= ha_store_set(&s_store, ha_store_find(&s_store, batch[i].key), &batch[i].v, now);
     }
+    s_energy_pending |= s_keeping && energy_value(batch, n); /* app_mqtt_tick() reads it (spec §12.11) */
     if (changed) {
         app_ui_render();
     }
@@ -420,6 +475,15 @@ void app_mqtt_tick(void)
         ESP_LOGI(TAG, "sync mode always: disconnected");
     }
     int64_t now = app_uptime_ms();
+    if (s_energy_pending && (s_energy_ms == 0 || now - s_energy_ms >= ENERGY_LIVE_MS)) { /* D40 */
+        s_energy_pending = false;
+        s_energy_ms = now;
+        energy_reading_t r;
+        char why[SYNC_DETAIL_LEN];
+        bool ok = energy_reading(&r, why, sizeof(why));
+        app_solar_reading_done(ok ? &r : NULL, ok ? NULL : why); /* also the chart's measured bars */
+        app_ui_render();
+    }
     if (!s_keeping || now < s_check_ms) {
         return;
     }
@@ -452,7 +516,9 @@ void app_mqtt_tick(void)
 
 int64_t app_mqtt_deadline_ms(void)
 {
-    return s_keeping ? s_check_ms : 0;
+    int64_t energy = s_energy_pending ? s_energy_ms + ENERGY_LIVE_MS : 0;
+    int64_t check = s_keeping ? s_check_ms : 0;
+    return energy != 0 && (check == 0 || energy < check) ? energy : check;
 }
 
 void app_mqtt_settings_changed(const settings_t *before)

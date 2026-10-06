@@ -1,0 +1,298 @@
+#include <stdio.h>
+#include <string.h>
+
+#include "ha_fields.h"
+#include "unity.h"
+
+static ha_fields_t s_out;
+static char s_err[96];
+static char s_json[HA_FIELDS_JSON_MAX];
+
+void setUp(void)
+{
+    memset(&s_out, 0xAA, sizeof(s_out));
+    s_err[0] = '\0';
+}
+
+void tearDown(void) {}
+
+/* The spec's example (§12.5). */
+static const char *k_example =
+    "{\"schema\": 1, \"fields\": ["
+    " {\"key\": \"outdoor_temp\", \"label\": \"Outside\", \"kind\": \"number\", \"unit\": \"°C\", \"precision\": 1,"
+    "  \"topic\": \"ha/statestream/sensor/outdoor_temperature/state\", \"json_path\": null, \"ttl_s\": 172800},"
+    " {\"key\": \"co2\", \"label\": \"CO2\", \"kind\": \"number\", \"unit\": \"ppm\", \"precision\": 0,"
+    "  \"topic\": \"zigbee2mqtt/living_room\", \"json_path\": \"co2\"},"
+    " {\"key\": \"front_door\", \"label\": \"Door\", \"kind\": \"text\","
+    "  \"topic\": \"ha/statestream/binary_sensor/front_door/state\","
+    "  \"states\": {\"on\": \"Open\", \"off\": \"Closed\"}},"
+    " {\"key\": \"next_alarm\", \"label\": \"Alarm\", \"kind\": \"time\","
+    "  \"topic\": \"ha/statestream/sensor/phone_next_alarm/state\"}]}";
+
+static void test_the_spec_example_parses(void)
+{
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(k_example, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(4, s_out.count);
+    const ha_field_t *f = &s_out.field[0];
+    TEST_ASSERT_EQUAL_STRING("outdoor_temp", f->key);
+    TEST_ASSERT_EQUAL_STRING("Outside", f->label);
+    TEST_ASSERT_EQUAL_UINT8(HA_KIND_NUMBER, f->kind);
+    TEST_ASSERT_EQUAL_STRING("°C", f->unit);
+    TEST_ASSERT_EQUAL_UINT8(1, f->precision);
+    TEST_ASSERT_EQUAL_STRING("ha/statestream/sensor/outdoor_temperature/state", f->topic);
+    TEST_ASSERT_EQUAL_STRING("", f->json_path);
+    TEST_ASSERT_EQUAL_UINT32(172800, f->ttl_s);
+    f = &s_out.field[1];
+    TEST_ASSERT_EQUAL_STRING("co2", f->key);
+    TEST_ASSERT_EQUAL_UINT8(0, f->precision);
+    TEST_ASSERT_EQUAL_STRING("co2", f->json_path);
+    TEST_ASSERT_EQUAL_UINT32(0, f->ttl_s); /* the default: twice the expected interval */
+    TEST_ASSERT_EQUAL_INT(1, ha_fields_find(&s_out, "co2"));
+    TEST_ASSERT_EQUAL_INT(-1, ha_fields_find(&s_out, "co"));
+    f = &s_out.field[2]; /* D40: a binary sensor's states as words */
+    TEST_ASSERT_EQUAL_UINT8(HA_KIND_TEXT, f->kind);
+    TEST_ASSERT_EQUAL_UINT8(2, f->state_count);
+    TEST_ASSERT_EQUAL_STRING("Open", ha_field_state_label(f, "on"));
+    TEST_ASSERT_EQUAL_STRING("Closed", ha_field_state_label(f, "off"));
+    TEST_ASSERT_NULL(ha_field_state_label(f, "On")); /* exact states only */
+    TEST_ASSERT_NULL(ha_field_state_label(f, "unknown"));
+    TEST_ASSERT_EQUAL_UINT8(HA_KIND_TIME, s_out.field[3].kind); /* D40: a timestamp */
+}
+
+/* State labels (D40): up to 8 a text field, a label cut at a character like a field's; a number or a time keeps
+ * none. */
+static void test_state_labels_are_kept_for_texts(void)
+{
+    const char *json = "{\"schema\": 1, \"fields\": [{\"key\": \"me\", \"topic\": \"ha/person/me\", \"kind\": \"text\","
+                       " \"states\": {\"home\": \"Doma\", \"not_home\": \"Pryč na dlouhou cestu kolem\","
+                       " \"x\": \"a\\nb\"}},"
+                       " {\"key\": \"watts\", \"topic\": \"z2m/plug\", \"states\": {\"on\": \"On\"}}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(json, &s_out, s_err, sizeof(s_err)), s_err);
+    const ha_field_t *f = &s_out.field[0];
+    TEST_ASSERT_EQUAL_UINT8(3, f->state_count);
+    TEST_ASSERT_EQUAL_STRING("Doma", ha_field_state_label(f, "home"));
+    TEST_ASSERT_EQUAL_STRING("Pryč na dlouhou cestu ", ha_field_state_label(f, "not_home")); /* 23 bytes */
+    TEST_ASSERT_EQUAL_STRING("a", ha_field_state_label(f, "x"));                              /* to a control one */
+    TEST_ASSERT_EQUAL_UINT8(0, s_out.field[1].state_count); /* a number has no states */
+    TEST_ASSERT_NULL(ha_field_state_label(&s_out.field[1], "on"));
+}
+
+/* State labels that can't work refuse the file and say why. */
+static void test_bad_state_labels_refuse_the_file(void)
+{
+    static const struct {
+        const char *states, *why;
+    } k_cases[] = {
+        { "[\"on\"]", "field a: states map each state to its label" },
+        { "{\"1\":\"a\",\"2\":\"b\",\"3\":\"c\",\"4\":\"d\",\"5\":\"e\","
+          "\"6\":\"f\",\"7\":\"g\",\"8\":\"h\",\"9\":\"i\"}",
+          "field a: at most 8 state labels" },
+        { "{\"\":\"a\"}", "field a: a state is 1-23 printable characters" },
+        { "{\"a23456789012345678901234\":\"a\"}", "field a: a state is 1-23 printable characters" },
+        { "{\"on\":1}", "field a: a state's label is a text" },
+        { "{\"on\":\"\"}", "field a: a state's label is a text" },
+    };
+    for (size_t i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
+        char json[256];
+        snprintf(json, sizeof(json),
+                 "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"t\", \"kind\": \"text\","
+                 " \"states\": %s}]}", k_cases[i].states);
+        TEST_ASSERT_FALSE_MESSAGE(ha_fields_from_json(json, &s_out, s_err, sizeof(s_err)), json);
+        TEST_ASSERT_EQUAL_STRING(k_cases[i].why, s_err);
+    }
+}
+
+/* Only the key and the topic are needed; the rest takes its defaults. */
+static void test_a_field_needs_only_a_key_and_a_topic(void)
+{
+    const char *json = "{\"schema\": 1, \"fields\": [{\"key\": \"door\", \"topic\": \"z2m/door\", \"kind\": \"text\"},"
+                       " {\"key\": \"power\", \"topic\": \"z2m/plug\"}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(json, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("door", s_out.field[0].label); /* the key stands in */
+    TEST_ASSERT_EQUAL_UINT8(HA_KIND_TEXT, s_out.field[0].kind);
+    TEST_ASSERT_EQUAL_UINT8(HA_KIND_NUMBER, s_out.field[1].kind);
+    TEST_ASSERT_EQUAL_UINT8(HA_PRECISION_AUTO, s_out.field[1].precision); /* the payload's own decimals */
+    TEST_ASSERT_EQUAL_STRING("", s_out.field[1].unit);
+    TEST_ASSERT_TRUE(ha_fields_from_json("{\"schema\": 1}", &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_UINT8(0, s_out.count); /* no mappings yet */
+}
+
+static void test_it_round_trips(void)
+{
+    TEST_ASSERT_TRUE(ha_fields_from_json(k_example, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_TRUE(ha_fields_to_json(&s_out, s_json, sizeof(s_json)) > 0);
+    ha_fields_t again;
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(s_json, &again, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(s_out.count, again.count);
+    TEST_ASSERT_EQUAL_MEMORY(s_out.field, again.field, sizeof(again.field[0]) * again.count);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_json, "\"json_path\":null"), s_json); /* the whole payload */
+    TEST_ASSERT_EQUAL_UINT(0, ha_fields_to_json(&s_out, s_json, 16)); /* no room */
+}
+
+/* Keys go into presets as mqtt.<key> (spec §12.5): 1-23 bytes of a-z, 0-9 and _. */
+static void test_keys_are_short_and_plain(void)
+{
+    TEST_ASSERT_TRUE(ha_key_valid("outdoor_temp"));
+    TEST_ASSERT_TRUE(ha_key_valid("a2345678901234567890123"));
+    TEST_ASSERT_FALSE(ha_key_valid("a23456789012345678901234"));
+    TEST_ASSERT_FALSE(ha_key_valid(""));
+    TEST_ASSERT_FALSE(ha_key_valid("Outdoor"));
+    TEST_ASSERT_FALSE(ha_key_valid("out-door"));
+    TEST_ASSERT_FALSE(ha_key_valid("out.door"));
+    TEST_ASSERT_FALSE(ha_key_valid(NULL));
+}
+
+/* A file with a structural error is refused whole, and the error names it. */
+static void test_structural_errors_refuse_the_file(void)
+{
+    static const struct {
+        const char *json, *err;
+    } k_cases[] = {
+        { "{", "not valid JSON" },
+        { "{\"schema\": 2}", "schema must be 1" },
+        { "{\"schema\": 1, \"fields\": {}}", "fields must be a list" },
+        { "{\"schema\": 1, \"fields\": [5]}", "field 1 must be an object" },
+        { "{\"schema\": 1, \"fields\": [{\"topic\": \"a\"}]}", "field 1: a key is 1-23 characters of a-z, 0-9 or _" },
+        { "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"x\"}, {\"key\": \"a\", \"topic\": \"y\"}]}",
+          "duplicate key \"a\"" },
+        { "{\"schema\": 1, \"fields\": [{\"key\": \"a\"}]}", "field a: a topic of 1-127 printable characters" },
+        { "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"z2m/+/x\"}]}",
+          "field a: the topic has a wildcard" },
+        { "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"z2m/#\"}]}",
+          "field a: the topic has a wildcard" },
+        { "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"z2m\\\"x\"}]}",
+          "field a: a topic of 1-127 printable characters" },
+        { "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"x\", \"kind\": \"bool\"}]}",
+          "field a: kind is number, text or time" },
+        { "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"x\", \"json_path\": \"a..b\"}]}",
+          "field a: json_path is keys joined by dots" },
+        { "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"x\", \"json_path\": 5}]}",
+          "field a: json_path is keys joined by dots" },
+    };
+    for (size_t i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
+        TEST_ASSERT_FALSE_MESSAGE(ha_fields_from_json(k_cases[i].json, &s_out, s_err, sizeof(s_err)), k_cases[i].json);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(k_cases[i].err, s_err, k_cases[i].json);
+    }
+}
+
+/* The console names a field's kind as the file does: a time field's error says "time" (D40). */
+static void test_kinds_are_named_as_the_file_names_them(void)
+{
+    TEST_ASSERT_EQUAL_STRING("number", ha_kind_name(HA_KIND_NUMBER));
+    TEST_ASSERT_EQUAL_STRING("text", ha_kind_name(HA_KIND_TEXT));
+    TEST_ASSERT_EQUAL_STRING("time", ha_kind_name(HA_KIND_TIME));
+}
+
+/* Topics are MQTT's UTF-8, so Zigbee2MQTT's friendly names may have diacritics; a byte that isn't UTF-8 is refused, as
+ * are control characters, quotes and backslashes. */
+static void test_topics_may_be_utf8(void)
+{
+    const char *json = "{\"schema\": 1, \"fields\": [{\"key\": \"t\","
+                       " \"topic\": \"zigbee2mqtt/ob\xC3\xBDv\xC3\xA1k\"}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(json, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/ob\xC3\xBDv\xC3\xA1k", s_out.field[0].topic);
+    TEST_ASSERT_TRUE(ha_fields_to_json(&s_out, s_json, sizeof(s_json)) > 0);
+    ha_fields_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(s_json, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING(s_out.field[0].topic, back.field[0].topic);
+    static const char *const k_bad[] = { "a\xFF", "a\xC3", "a\xC3x", "\xC0\xAF", "a\\u0001" };
+    for (size_t i = 0; i < sizeof(k_bad) / sizeof(k_bad[0]); i++) {
+        char doc[128];
+        snprintf(doc, sizeof(doc), "{\"schema\": 1, \"fields\": [{\"key\": \"t\", \"topic\": \"%s\"}]}", k_bad[i]);
+        TEST_ASSERT_FALSE_MESSAGE(ha_fields_from_json(doc, &s_out, s_err, sizeof(s_err)), k_bad[i]);
+        TEST_ASSERT_EQUAL_STRING("field t: a topic of 1-127 printable characters", s_err);
+    }
+}
+
+/* `n` fields k0, k1, ... in s_json. */
+static const char *many(int n)
+{
+    size_t at = (size_t)snprintf(s_json, sizeof(s_json), "{\"schema\": 1, \"fields\": [");
+    for (int i = 0; i < n; i++) {
+        at += (size_t)snprintf(s_json + at, sizeof(s_json) - at, "%s{\"key\": \"k%d\", \"topic\": \"t/%d\"}",
+                               i ? "," : "", i, i);
+    }
+    snprintf(s_json + at, sizeof(s_json) - at, "]}");
+    return s_json;
+}
+
+static void test_at_most_32_fields(void)
+{
+    TEST_ASSERT_FALSE(ha_fields_from_json(many(HA_FIELDS_MAX + 1), &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_STRING("at most 32 MQTT fields", s_err);
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(many(HA_FIELDS_MAX), &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(32, s_out.count);
+}
+
+/* Everything else is lenient: labels and units are cut at a character, numbers clamped. */
+static void test_the_rest_is_cut_or_clamped(void)
+{
+    const char *json = "{\"schema\": 1, \"fields\": [{\"key\": \"a\", \"topic\": \"x\","
+                       " \"label\": \"abcdefghijklmnopqrstuvč\", \"unit\": \"µg/m³ ok\", \"precision\": 7,"
+                       " \"ttl_s\": 5}, {\"key\": \"b\", \"topic\": \"y\", \"label\": \"one\\ntwo\", \"precision\": -1,"
+                       " \"ttl_s\": 99999999}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(json, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("abcdefghijklmnopqrstuv", s_out.field[0].label); /* 22 bytes: "č" would split */
+    TEST_ASSERT_EQUAL_STRING("µg/m³", s_out.field[0].unit);                 /* 7 bytes */
+    TEST_ASSERT_EQUAL_UINT8(3, s_out.field[0].precision);
+    TEST_ASSERT_EQUAL_UINT32(HA_TTL_MIN_S, s_out.field[0].ttl_s);
+    TEST_ASSERT_EQUAL_STRING("one", s_out.field[1].label); /* up to a control character */
+    TEST_ASSERT_EQUAL_UINT8(0, s_out.field[1].precision);
+    TEST_ASSERT_EQUAL_UINT32(HA_TTL_MAX_S, s_out.field[1].ttl_s);
+}
+
+static void test_deep_nesting_is_refused_before_parsing(void)
+{
+    size_t at = (size_t)snprintf(s_json, sizeof(s_json), "{\"schema\": 1, \"x\": ");
+    memset(s_json + at, '[', 40);
+    memset(s_json + at + 40, ']', 40);
+    snprintf(s_json + at + 80, sizeof(s_json) - at - 80, "}");
+    TEST_ASSERT_FALSE(ha_fields_from_json(s_json, &s_out, s_err, sizeof(s_err)));
+    TEST_ASSERT_NOT_NULL(strstr(s_err, "nested"));
+}
+
+/* The largest file: 32 fields with every text at its longest; HA_FIELDS_JSON_MAX holds it. */
+static void test_the_largest_file_fits(void)
+{
+    ha_fields_t f = { .count = HA_FIELDS_MAX };
+    for (int i = 0; i < HA_FIELDS_MAX; i++) {
+        ha_field_t *x = &f.field[i];
+        snprintf(x->key, sizeof(x->key), "k%022d", i);
+        memset(x->label, 'L', sizeof(x->label) - 1);
+        memset(x->unit, 'u', sizeof(x->unit) - 1);
+        memset(x->topic, 't', sizeof(x->topic) - 1);
+        memset(x->json_path, 'p', sizeof(x->json_path) - 1);
+        x->kind = HA_KIND_TEXT; /* with every state label */
+        x->precision = 3;
+        x->ttl_s = HA_TTL_MAX_S;
+        x->state_count = HA_STATES_MAX;
+        for (int j = 0; j < HA_STATES_MAX; j++) {
+            snprintf(x->states[j].state, sizeof(x->states[j].state), "s%021d", j);
+            memset(x->states[j].label, 'l', sizeof(x->states[j].label) - 1);
+        }
+    }
+    size_t n = ha_fields_to_json(&f, s_json, sizeof(s_json));
+    TEST_ASSERT_TRUE(n > 0);
+    printf("the largest mqtt_fields.json: %u bytes of %u\n", (unsigned)n, (unsigned)sizeof(s_json));
+    TEST_ASSERT_TRUE_MESSAGE(ha_fields_from_json(s_json, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&f, &s_out, sizeof(f));
+}
+
+int main(void)
+{
+    UNITY_BEGIN();
+    RUN_TEST(test_the_spec_example_parses);
+    RUN_TEST(test_a_field_needs_only_a_key_and_a_topic);
+    RUN_TEST(test_it_round_trips);
+    RUN_TEST(test_keys_are_short_and_plain);
+    RUN_TEST(test_structural_errors_refuse_the_file);
+    RUN_TEST(test_at_most_32_fields);
+    RUN_TEST(test_the_rest_is_cut_or_clamped);
+    RUN_TEST(test_deep_nesting_is_refused_before_parsing);
+    RUN_TEST(test_the_largest_file_fits);
+    RUN_TEST(test_state_labels_are_kept_for_texts);
+    RUN_TEST(test_bad_state_labels_refuse_the_file);
+    RUN_TEST(test_topics_may_be_utf8);
+    RUN_TEST(test_kinds_are_named_as_the_file_names_them);
+    return UNITY_END();
+}

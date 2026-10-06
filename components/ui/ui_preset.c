@@ -96,6 +96,16 @@ int ui_presets_find(const ui_presets_t *p, const char *id)
     return -1;
 }
 
+int ui_presets_lookup(const ui_presets_t *p, const char *text)
+{
+    for (int i = 0; text != NULL && text[0] != '\0' && i < p->count; i++) {
+        if (strcmp(p->presets[i].name, text) == 0) {
+            return i;
+        }
+    }
+    return ui_presets_find(p, text);
+}
+
 int ui_presets_next(const ui_presets_t *p, bool always)
 {
     for (int step = 1; step < p->count; step++) {

@@ -92,6 +92,21 @@ static void test_a_value_says_whether_the_screen_changes(void)
 }
 
 /* Editing the mappings keeps the values of the keys that stay with their kind. */
+/* The console's `field clear mqtt.<key>` (spec §15): the entry has no value again; other entries keep theirs. */
+static void test_a_value_can_be_cleared(void)
+{
+    ha_value_t n = number(123, 1), t = text("open");
+    ha_store_set(&s_store, 0, &n, NOW);
+    ha_store_set(&s_store, 1, &t, NOW);
+    TEST_ASSERT_TRUE(ha_store_clear(&s_store, 0));
+    TEST_ASSERT_EQUAL(HA_MISSING, ha_store_freshness(&s_store, 0, NOW));
+    TEST_ASSERT_EQUAL(HA_FRESH, ha_store_freshness(&s_store, 1, NOW));
+    TEST_ASSERT_FALSE(ha_store_clear(&s_store, 0)); /* nothing left to clear */
+    TEST_ASSERT_FALSE(ha_store_clear(&s_store, 5));
+    TEST_ASSERT_FALSE(ha_store_clear(&s_store, -1));
+    TEST_ASSERT_TRUE(ha_store_set(&s_store, 0, &n, NOW)); /* the same value again shows again */
+}
+
 static void test_a_rebuild_keeps_what_still_maps(void)
 {
     ha_value_t v = number(215, 1);
@@ -257,6 +272,7 @@ int main(void)
     RUN_TEST(test_entries_follow_the_mappings);
     RUN_TEST(test_values_go_stale_after_their_time_to_live);
     RUN_TEST(test_a_value_says_whether_the_screen_changes);
+    RUN_TEST(test_a_value_can_be_cleared);
     RUN_TEST(test_a_rebuild_keeps_what_still_maps);
     RUN_TEST(test_a_rebuild_follows_the_keys_through_any_order);
     RUN_TEST(test_a_clock_move_keeps_the_ages);

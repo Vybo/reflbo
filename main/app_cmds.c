@@ -13,7 +13,7 @@
 #include "ui_layout.h"
 #include "util_time.h"
 
-/* `field` and `preset` (spec §15): inspect the dashboard and inject test data on the device. */
+/* `field`, `preset` and the others (spec §15): inspect the dashboard and inject test data on the device. */
 
 static const char *TAG = "app_cmds";
 
@@ -23,22 +23,78 @@ static int usage(const char *text)
     return 1;
 }
 
+static void print_value(const char *id, const ui_value_t *v)
+{
+    const char *state = v->state == UI_VALUE_FRESH ? "fresh" : v->state == UI_VALUE_STALE ? "stale" : "missing";
+    printf("%-13s %-7s %s%s%s", id, state, v->text, v->unit[0] ? " " : "", v->unit);
+    if (v->extra[0]) {
+        printf(" (%s)", v->extra);
+    }
+    if (v->state == UI_VALUE_STALE) {
+        printf(", %lu s old", (unsigned long)v->age_s);
+    }
+    if (v->trend) {
+        printf(", %s", v->trend > 0 ? "rising" : "falling");
+    }
+    printf("\n");
+}
+
 static void print_field(const ui_context_t *ctx, ui_field_id_t field)
 {
     ui_value_t v;
     ui_resolve(ctx, field, &v);
-    const char *state = v.state == UI_VALUE_FRESH ? "fresh" : v.state == UI_VALUE_STALE ? "stale" : "missing";
-    printf("%-13s %-7s %s%s%s", ui_field_info(field)->id, state, v.text, v.unit[0] ? " " : "", v.unit);
-    if (v.extra[0]) {
-        printf(" (%s)", v.extra);
+    print_value(ui_field_info(field)->id, &v);
+}
+
+/* mqtt.<key> (spec §12.5): store entry `i`, whether a preset shows it or not. */
+static void print_mqtt(const ui_context_t *ctx, int i)
+{
+    ui_value_t v = { 0 };
+    ui_mqtt_value(ctx, i, &v);
+    char id[8 + HA_KEY_LEN];
+    snprintf(id, sizeof(id), "mqtt.%s", ctx->mqtt->entry[i].key);
+    print_value(id, &v);
+}
+
+/* The words from argv[from] on, one space between them: a message or a text value needs no quotes. */
+static void join_args(int argc, char **argv, int from, char *out, size_t size)
+{
+    size_t at = 0;
+    out[0] = '\0';
+    for (int i = from; i < argc && at < size; i++) {
+        at += (size_t)snprintf(out + at, size - at, "%s%s", i > from ? " " : "", argv[i]);
     }
-    if (v.state == UI_VALUE_STALE) {
-        printf(", %lu s old", (unsigned long)v.age_s);
+}
+
+/* `field get|set|clear mqtt.<key>`: a value as its topic would bring it (spec §15). */
+static int mqtt_field(ui_context_t *ctx, int argc, char **argv, const char *usage_text)
+{
+    const char *key = argv[2] + 5;
+    int i = ha_store_find(ctx->mqtt, key);
+    if (i < 0) {
+        printf("field: no MQTT field \"%s\" (see `mqtt status`)\n", key);
+        return 1;
     }
-    if (v.trend) {
-        printf(", %s", v.trend > 0 ? "rising" : "falling");
+    if (argc == 3 && strcmp(argv[1], "get") == 0) {
+        print_mqtt(ctx, i);
+        return 0;
     }
-    printf("\n");
+    if (argc >= 4 && strcmp(argv[1], "set") == 0) {
+        char text[256], err[80];
+        join_args(argc, argv, 3, text, sizeof(text));
+        if (!app_mqtt_set_value(key, text, err, sizeof(err))) {
+            printf("field: %s\n", err);
+            return 1;
+        }
+    } else if (argc == 3 && strcmp(argv[1], "clear") == 0) {
+        app_mqtt_clear_value(key);
+    } else {
+        return usage(usage_text);
+    }
+    app_ui_render();
+    app_ui_context(ctx);
+    print_mqtt(ctx, i);
+    return 0;
 }
 
 /* Datastore units per console unit: 0.01 °C, 0.01 %, %, 0.1 d. */
@@ -56,10 +112,16 @@ static int field_body(int argc, char **argv)
         for (int f = UI_FIELD_NONE + 1; f < UI_FIELD_COUNT; f++) {
             print_field(&ctx, (ui_field_id_t)f);
         }
+        for (int i = 0; i < ctx.mqtt->count; i++) {
+            print_mqtt(&ctx, i);
+        }
         return 0;
     }
     if (argc < 3) {
         return usage(k_usage);
+    }
+    if (strncmp(argv[2], "mqtt.", 5) == 0) {
+        return mqtt_field(&ctx, argc, argv, k_usage);
     }
     ui_field_id_t field = ui_field_by_name(argv[2]);
     if (field == UI_FIELD_NONE) {
@@ -67,6 +129,17 @@ static int field_body(int argc, char **argv)
         return 1;
     }
     if (argc == 3 && strcmp(argv[1], "get") == 0) {
+        print_field(&ctx, field);
+        return 0;
+    }
+    if (field == UI_FIELD_HA_MESSAGE && argc >= 3 && (strcmp(argv[1], "set") == 0 || strcmp(argv[1], "clear") == 0)) {
+        char text[256] = ""; /* spec §12.7: as Home Assistant's would come, a banner too */
+        if (strcmp(argv[1], "set") == 0) {
+            join_args(argc, argv, 3, text, sizeof(text));
+        }
+        app_mqtt_set_message(text);
+        app_ui_render();
+        app_ui_context(&ctx);
         print_field(&ctx, field);
         return 0;
     }
@@ -121,6 +194,21 @@ static int preset_body(int argc, char **argv)
         return 0;
     }
     return usage(k_usage);
+}
+
+/* `mqtt status` (spec §15). */
+static int mqtt_body(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "status") == 0) {
+        app_mqtt_print_status();
+        return 0;
+    }
+    return usage("mqtt status");
+}
+
+static int cmd_mqtt(int argc, char **argv)
+{
+    return diag_on_owner(mqtt_body, argc, argv);
 }
 
 static int cmd_field(int argc, char **argv)
@@ -530,6 +618,7 @@ void app_register_commands(void)
         { .command = "radar", .help = "radar status | loop (spec §11.2, §11.3)", .func = &cmd_radar },
         { .command = "solar", .help = "solar status | demo on | demo off (spec §11.5, §11.6)", .func = &cmd_solar },
         { .command = "energy", .help = "energy raw: SolaX's last replies (D37)", .func = &cmd_energy },
+        { .command = "mqtt", .help = "mqtt status (spec §12)", .func = &cmd_mqtt },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_err_t err = esp_console_cmd_register(&cmds[i]);

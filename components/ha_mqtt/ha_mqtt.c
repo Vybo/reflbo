@@ -38,9 +38,7 @@ static const char *TAG = "ha_mqtt";
 #define BIT_CONNECTED BIT0
 #define BIT_DOWN BIT1
 
-typedef enum {
-    REQ_SESSION, REQ_KEEP, REQ_DROP, REQ_STATE, REQ_ACTION, REQ_TEST, REQ_FIELDS, REQ_UP, REQ_DOWN
-} req_type_t;
+typedef enum { REQ_SESSION, REQ_KEEP, REQ_DROP, REQ_STATE, REQ_TEST, REQ_FIELDS, REQ_UP, REQ_DOWN } req_type_t;
 
 typedef struct {
     req_type_t type;
@@ -57,7 +55,8 @@ static QueueHandle_t s_queue;
  * us events, and on_data() takes s_lock: so nothing calls esp-mqtt, or a hook, with s_lock held. */
 static SemaphoreHandle_t s_lock;
 static EventGroupHandle_t s_bits;
-static esp_mqtt_client_handle_t s_client; /* the task's */
+static esp_mqtt_client_handle_t s_client; /* the task's; set under s_client_lock, which the app's key presses take */
+static SemaphoreHandle_t s_client_lock;
 static volatile uint32_t s_gen;            /* the client's generation: a closed client's late events are ignored */
 static ha_conn_t s_conn;                   /* what s_client connects with */
 static volatile bool s_connected, s_keep;
@@ -240,15 +239,23 @@ static esp_mqtt_client_handle_t open_client(const ha_conn_t *c, int timeout_ms)
     return client;
 }
 
+static void set_client(esp_mqtt_client_handle_t client)
+{
+    xSemaphoreTake(s_client_lock, portMAX_DELAY);
+    s_client = client;
+    xSemaphoreGive(s_client_lock);
+}
+
 static void close_client(void)
 {
     s_gen++; /* its events from now on are ignored, the CONNECTED of a connect that ends during the stop too */
-    if (s_client != NULL) {
-        esp_mqtt_client_stop(s_client); /* a DISCONNECT first: the broker keeps the session (spec §12.4) */
-        esp_mqtt_client_destroy(s_client);
-        s_client = NULL;
-    }
+    esp_mqtt_client_handle_t client = s_client;
+    set_client(NULL);
     s_connected = false;
+    if (client != NULL) {
+        esp_mqtt_client_stop(client); /* a DISCONNECT first: the broker keeps the session (spec §12.4) */
+        esp_mqtt_client_destroy(client);
+    }
 }
 
 /* Waits for the connection; false with the reason in s_detail. */
@@ -408,7 +415,7 @@ static void run_session(const ha_conn_t *c, int budget_ms)
         xSemaphoreGive(s_lock);
     } else {
         s_conn = *c;
-        s_client = open_client(c, budget_ms < CONNECT_MAX_MS ? budget_ms : CONNECT_MAX_MS);
+        set_client(open_client(c, budget_ms < CONNECT_MAX_MS ? budget_ms : CONNECT_MAX_MS));
         ok = s_client != NULL && wait_connected(end) && subscribe(end);
         if (ok) {
             collect(end);
@@ -430,7 +437,7 @@ static void keep(const ha_conn_t *c)
     s_failures = 0;
     s_retry_at_ms = 0;
     s_conn = *c;
-    s_client = open_client(c, CONNECT_MAX_MS);
+    set_client(open_client(c, CONNECT_MAX_MS));
     if (s_client == NULL) {
         s_retry_at_ms = now_ms() + ha_backoff_ms(s_failures++);
     }
@@ -444,7 +451,7 @@ static void test(const ha_conn_t *c)
     } else {
         ha_conn_t saved = s_conn;
         s_conn = *c;
-        s_client = open_client(c, CONNECT_MAX_MS);
+        set_client(open_client(c, CONNECT_MAX_MS));
         ok = s_client != NULL && wait_connected(now_ms() + CONNECT_MAX_MS);
         close_client();
         s_conn = saved;
@@ -475,17 +482,16 @@ static void handle(req_t *r)
         s_hooks.status();
         break;
     case REQ_STATE:
-    case REQ_ACTION:
         if (s_connected && s_client != NULL) {
             char topic[HA_TOPIC_MAX];
-            ha_topic(topic, sizeof(topic), s_conn.id, r->type == REQ_STATE ? "state" : "action");
-            esp_mqtt_client_publish(s_client, topic, r->text, 0, r->type == REQ_STATE ? 1 : 0, r->type == REQ_STATE);
+            ha_topic(topic, sizeof(topic), s_conn.id, "state");
+            esp_mqtt_client_publish(s_client, topic, r->text, 0, 1, 1);
         }
         break;
     case REQ_TEST:
         test(r->conn);
         break;
-    case REQ_FIELDS:
+    case REQ_FIELDS: /* new mappings, or the retained values again */
         if (s_keep && s_connected) {
             subscribe(now_ms() + CONNECT_MAX_MS);
         }
@@ -548,10 +554,11 @@ esp_err_t ha_mqtt_init(const ha_hooks_t *hooks)
     s_hooks = *hooks;
     /* each made once: after a failure, a later call makes what is still missing */
     s_lock = s_lock != NULL ? s_lock : xSemaphoreCreateMutex();
+    s_client_lock = s_client_lock != NULL ? s_client_lock : xSemaphoreCreateMutex();
     s_bits = s_bits != NULL ? s_bits : xEventGroupCreate();
     s_session.done = s_session.done != NULL ? s_session.done : xSemaphoreCreateBinary();
     s_queue = s_queue != NULL ? s_queue : xQueueCreate(QUEUE_DEPTH, sizeof(req_t));
-    if (s_lock == NULL || s_bits == NULL || s_session.done == NULL || s_queue == NULL ||
+    if (s_lock == NULL || s_client_lock == NULL || s_bits == NULL || s_session.done == NULL || s_queue == NULL ||
         xTaskCreatePinnedToCore(task, "ha_mqtt", TASK_STACK, NULL, TASK_PRIORITY, NULL, 0) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
@@ -567,6 +574,11 @@ void ha_mqtt_set_fields(const ha_fields_t *f)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_fields = *f;
     xSemaphoreGive(s_lock);
+    post(&(req_t){ .type = REQ_FIELDS });
+}
+
+void ha_mqtt_resubscribe(void)
+{
     post(&(req_t){ .type = REQ_FIELDS });
 }
 
@@ -616,25 +628,32 @@ void ha_mqtt_drop(void)
     post(&(req_t){ .type = REQ_DROP });
 }
 
-static void publish_text(req_type_t type, const char *text)
+void ha_mqtt_publish_state(const char *json)
 {
     if (!s_connected) {
         return;
     }
-    char *copy_text = strdup(text);
-    if (copy_text != NULL) {
-        post(&(req_t){ .type = type, .text = copy_text });
+    char *text = strdup(json);
+    if (text != NULL) {
+        post(&(req_t){ .type = REQ_STATE, .text = text });
     }
 }
 
-void ha_mqtt_publish_state(const char *json)
-{
-    publish_text(REQ_STATE, json);
-}
-
+/* On the app task, at once: a sync's session keeps the client's task busy until it ends (spec §12.8). Once
+ * connected, esp-mqtt holds its lock only briefly, and a QoS 0 publish is a write. */
 void ha_mqtt_publish_action(const char *payload)
 {
-    publish_text(REQ_ACTION, payload);
+    if (s_client_lock == NULL || payload == NULL) {
+        return;
+    }
+    xSemaphoreTake(s_client_lock, portMAX_DELAY);
+    if (s_connected && s_client != NULL) {
+        char topic[HA_TOPIC_MAX];
+        ha_topic(topic, sizeof(topic), s_conn.id, "action");
+        esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 0);
+        ESP_LOGI(TAG, "key press: %s", payload);
+    }
+    xSemaphoreGive(s_client_lock);
 }
 
 void ha_mqtt_test(const ha_conn_t *c)
@@ -653,6 +672,11 @@ void ha_mqtt_test(const ha_conn_t *c)
 void ha_mqtt_forget_discovery(void)
 {
     disc_hash_save(0);
+}
+
+uint32_t ha_mqtt_discovery_hash(void)
+{
+    return disc_hash_saved();
 }
 
 void ha_mqtt_status(ha_mqtt_status_t *out)

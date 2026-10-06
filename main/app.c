@@ -258,6 +258,7 @@ static void on_tick(bool force, bool rtc_edge)
 void app_clock_moved(int64_t delta_s)
 {
     sensors_shift_time(delta_s); /* the battery history keeps its spacing on the new clock */
+    app_mqtt_clock_moved(delta_s); /* and the MQTT values their age (a sync sets the clock after its session) */
     app_state()->sched_checked = time(NULL); /* entries the jump skipped don't run late */
     app_state()->cycle_at = 0; /* the next tick starts the cycle interval again, rather than switching at once */
     app_sync_schedule(); /* the next sync by the new clock */
@@ -270,42 +271,12 @@ static const char *preset_name(void)
     return p->presets[p->active].name;
 }
 
-/* Dashboard bindings (spec §5.6); the menu has its own while it is open. */
-static void handle_button(board_button_t button, gesture_t gesture)
+/* The dashboard's bindings (spec §5.6). */
+static void dashboard_button(board_button_t button, gesture_t gesture)
 {
-    power_hold_awake_ms(GRACE_MS);
-    if (app_ui_night()) { /* any press keeps the night's dashboard up, awake, as the peek lives in RAM */
-        s_peek_until_ms = app_uptime_ms() + PEEK_MS;
-        power_hold_awake_ms(PEEK_MS);
-    }
     const lang_t *lang = lang_get(app_settings()->language);
     char text[64];
-    if (button != BOARD_BUTTON_BOOT || gesture != GESTURE_SHORT) {
-        app_radar_loop_stop(); /* spec §11.2: KEY short still switches the preset */
-    }
-    if (app_menu_is_open()) {
-        bool held = gesture == GESTURE_LONG;
-        app_menu_key(button == BOARD_BUTTON_KEY ? (held ? UI_MENU_KEY_SELECT : UI_MENU_KEY_NEXT)
-                                                : (held ? UI_MENU_KEY_EXIT : UI_MENU_KEY_BACK));
-    } else if (app_config_active()) { /* spec §5.6 */
-        if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT) {
-            app_config_key();
-        } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
-            app_config_exit();
-        }
-    } else if (app_state()->critical) {
-        app_ui_sample(time(NULL)); /* only a recovered battery leaves this screen (spec §8) */
-        app_ui_render();
-    } else if (app_ui_first_run()) { /* spec §5.5: KEY leads on to the dashboard or the menu */
-        if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
-            app_config_enter();
-        } else if (button == BOARD_BUTTON_KEY && (gesture == GESTURE_SHORT || gesture == GESTURE_LONG)) {
-            app_ui_end_first_run();
-            if (gesture == GESTURE_LONG) {
-                app_menu_open();
-            }
-        }
-    } else if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT) {
+    if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT) {
         app_ui_select(ui_presets_next(app_presets(), app_state()->settings.sync_mode == SETTINGS_SYNC_ALWAYS), true);
         snprintf(text, sizeof(text), "%s: %s", lang_str(lang, LS_T_PRESET), preset_name());
         app_ui_toast(text);
@@ -334,6 +305,48 @@ static void handle_button(board_button_t button, gesture_t gesture)
         }
     } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
         app_config_enter(); /* 3 s on the dashboard (spec §5.6) */
+    }
+}
+
+/* Button gestures: the menu's, config mode's and the special screens' bindings, or the dashboard's. */
+static void handle_button(board_button_t button, gesture_t gesture)
+{
+    power_hold_awake_ms(GRACE_MS);
+    if (app_ui_night()) { /* any press keeps the night's dashboard up, awake, as the peek lives in RAM */
+        s_peek_until_ms = app_uptime_ms() + PEEK_MS;
+        power_hold_awake_ms(PEEK_MS);
+    }
+    if (button != BOARD_BUTTON_BOOT || gesture != GESTURE_SHORT) {
+        app_radar_loop_stop(); /* spec §11.2: KEY short still switches the preset */
+    }
+    if (app_menu_is_open()) {
+        bool held = gesture == GESTURE_LONG;
+        app_menu_key(button == BOARD_BUTTON_KEY ? (held ? UI_MENU_KEY_SELECT : UI_MENU_KEY_NEXT)
+                                                : (held ? UI_MENU_KEY_EXIT : UI_MENU_KEY_BACK));
+    } else if (app_config_active()) { /* spec §5.6 */
+        if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT) {
+            app_config_key();
+        } else if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
+            app_config_exit();
+        }
+    } else if (app_state()->critical) {
+        app_ui_sample(time(NULL)); /* only a recovered battery leaves this screen (spec §8) */
+        app_ui_render();
+    } else if (app_ui_first_run()) { /* spec §5.5: KEY leads on to the dashboard or the menu */
+        if (button == BOARD_BUTTON_BOOT && gesture == GESTURE_LONG) {
+            app_config_enter();
+        } else if (button == BOARD_BUTTON_KEY && (gesture == GESTURE_SHORT || gesture == GESTURE_LONG)) {
+            app_ui_end_first_run();
+            if (gesture == GESTURE_LONG) {
+                app_menu_open();
+            }
+        }
+    } else if (button == BOARD_BUTTON_KEY && gesture == GESTURE_SHORT && app_mqtt_banner()) {
+        app_mqtt_dismiss(); /* spec §12.7: that press does nothing else */
+        app_ui_render();
+    } else {
+        app_mqtt_key(button, gesture); /* spec §12.8: HA hears it too while MQTT is connected */
+        dashboard_button(button, gesture);
     }
     schedule_next();
 }
@@ -445,6 +458,7 @@ static bool prepare_deep_sleep(void)
     display_export(&s_snap.display);
     app_ui_export(&s_snap.ui);
     s_snap.next_alarm = s_next_alarm;
+    app_mqtt_seal();
     util_snapshot_seal(&s_snap, sizeof(s_snap), SNAP_MAGIC, SNAP_VERSION);
     esp_err_t err = display_prepare_deep_sleep();
     if (err != ESP_OK) {
@@ -592,6 +606,7 @@ static esp_err_t boot(void)
         app_ui_restore_forecast(); /* spec §6: shown as stale by its age */
         app_solar_restore();       /* spec §11.5, §11.6: the forecast and today's readings */
     }
+    app_mqtt_boot(warm); /* the MQTT fields' values and the message (spec §12.5) */
 
     ESP_RETURN_ON_ERROR(board_init(wake == POWER_WAKE_COLD), TAG, "board");
     ESP_RETURN_ON_ERROR(pcf85063_init(board_i2c()), TAG, "RTC");

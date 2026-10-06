@@ -113,6 +113,15 @@ bool ha_store_set(ha_store_t *s, int i, const ha_value_t *v, time_t now)
     return v->none ? !(had && same) : !(was == HA_FRESH && same);
 }
 
+bool ha_store_clear(ha_store_t *s, int i)
+{
+    if (i < 0 || i >= s->count || s->entry[i].updated == 0) {
+        return false;
+    }
+    s->entry[i].updated = 0;
+    return true;
+}
+
 /* A time moved by `delta_s`, kept at 1 or later: 0 means none. */
 static uint32_t shifted(uint32_t t, int64_t delta_s)
 {

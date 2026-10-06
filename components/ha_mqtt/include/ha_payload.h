@@ -35,6 +35,16 @@ bool ha_cmd_press(const char *payload, size_t len);
 /* The message's text: control characters as spaces, cut at a character to 96 bytes. */
 void ha_message_text(const char *payload, size_t len, char *out, size_t size);
 
+typedef enum {
+    HA_PRESS_SHORT,
+    HA_PRESS_DOUBLE,
+    HA_PRESS_LONG,
+} ha_press_t;
+
+/* A dashboard gesture's payload on reflbo/<id>/action (spec §12.8): "key_short" ... "boot_long"; NULL for
+ * no such press. */
+const char *ha_action_payload(bool boot, ha_press_t press);
+
 typedef struct {
     uint8_t kind;     /* ha_kind_t */
     bool none;        /* HA says there is none: unknown, unavailable, null or empty (D40); the field clears */

@@ -47,6 +47,19 @@ static void test_defaults_are_the_eight_built_ins(void)
     TEST_ASSERT_EQUAL_INT(-1, ui_presets_find(&s_p, "nope"));
 }
 
+/* cmd/preset (spec §12.4): HA's select sends a preset's name, as its options are the names; an automation or
+ * the console may send an id. Names first, so the select always gets the preset it shows. */
+static void test_a_preset_is_found_by_its_name_or_its_id(void)
+{
+    TEST_ASSERT_EQUAL_INT(4, ui_presets_lookup(&s_p, "Rain radar"));
+    TEST_ASSERT_EQUAL_INT(4, ui_presets_lookup(&s_p, "rain"));
+    TEST_ASSERT_EQUAL_INT(-1, ui_presets_lookup(&s_p, "rain radar")); /* names match exactly */
+    TEST_ASSERT_EQUAL_INT(-1, ui_presets_lookup(&s_p, ""));
+    TEST_ASSERT_EQUAL_INT(-1, ui_presets_lookup(&s_p, NULL));
+    snprintf(s_p.presets[1].name, sizeof(s_p.presets[1].name), "%s", "rain"); /* a name that is another's id */
+    TEST_ASSERT_EQUAL_INT(1, ui_presets_lookup(&s_p, "rain"));
+}
+
 static void test_next_follows_cycle_order_and_skips_presets_out_of_it(void)
 {
     TEST_ASSERT_EQUAL_INT(1, ui_presets_next(&s_p, true)); /* home -> indoor */
@@ -742,6 +755,7 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_defaults_are_the_eight_built_ins);
+    RUN_TEST(test_a_preset_is_found_by_its_name_or_its_id);
     RUN_TEST(test_next_follows_cycle_order_and_skips_presets_out_of_it);
     RUN_TEST(test_the_cycle_visits_flights_only_in_sync_mode_always);
     RUN_TEST(test_a_file_from_before_m6_gains_the_radars_once);

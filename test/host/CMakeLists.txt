@@ -176,7 +176,8 @@ target_link_libraries(storage_logic PRIVATE cjson util m)
 
 # ha_mqtt: MQTT and Home Assistant's mappings, payloads and store build on the host; the client does not.
 add_library(ha_mqtt_logic STATIC ${REPO_ROOT}/components/ha_mqtt/ha_fields.c
-            ${REPO_ROOT}/components/ha_mqtt/ha_payload.c ${REPO_ROOT}/components/ha_mqtt/ha_store.c)
+            ${REPO_ROOT}/components/ha_mqtt/ha_payload.c ${REPO_ROOT}/components/ha_mqtt/ha_store.c
+            ${REPO_ROOT}/components/ha_mqtt/ha_session.c)
 target_include_directories(ha_mqtt_logic PUBLIC ${REPO_ROOT}/components/ha_mqtt/include)
 target_compile_options(ha_mqtt_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(ha_mqtt_logic PUBLIC util timekeeping_logic PRIVATE cjson m)
@@ -293,6 +294,7 @@ reflbo_host_test(test_ha_fields ha_mqtt_logic)
 reflbo_host_test(test_ha_payload ha_mqtt_logic cjson)
 target_compile_definitions(test_ha_payload PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/ha")
 reflbo_host_test(test_ha_store ha_mqtt_logic)
+reflbo_host_test(test_ha_session ha_mqtt_logic)
 
 reflbo_host_test(test_test_pattern_golden gfx)
 target_compile_definitions(test_test_pattern_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")

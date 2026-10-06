@@ -36,9 +36,10 @@ typedef struct {
 
 /* The real-time values the devices reported, gathered device by device; a value counts only with its `have_`. */
 typedef struct {
-    bool have_pv, have_ac, have_grid, have_meter, have_bat, have_soc, have_yield;
+    bool have_pv, have_ac, have_eps, have_grid, have_meter, have_bat, have_soc, have_yield;
     double pv_w;      /* the panels: MPPTTotalInputPower, else the mpptMap's ...Power entries added up */
-    double ac_w;      /* the inverter's output: totalActivePower */
+    double ac_w;      /* the inverter's output: its phases, acPower1-3, added up, else totalActivePower */
+    double eps_w;     /* its backup port's output: EPSL1-3ActivePower added up */
     double feed_w;    /* to the grid +: the meter's totalActivePower, else the inverter's gridPower */
     double bat_w;     /* charging +: chargeDischargePower */
     double soc;       /* batterySOC, % */

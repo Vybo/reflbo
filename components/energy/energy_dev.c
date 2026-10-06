@@ -358,6 +358,21 @@ static bool panels(const cJSON *entry, double *w)
     return any;
 }
 
+/* The values of `keys` that `entry` has, added up, times `k`; false with none of them. */
+static bool sum_at(const cJSON *entry, const char *const keys[3], double k, double *out)
+{
+    double sum = 0, v;
+    bool any = false;
+    for (int i = 0; i < 3; i++) {
+        if (number_at(entry, keys[i], &v)) {
+            sum += v;
+            any = true;
+        }
+    }
+    *out = sum * k;
+    return any;
+}
+
 bool energy_dev_parse_realtime(const char *json, size_t len, energy_dev_device_t device, int business,
                                energy_dev_now_t *now, char *err, size_t err_size)
 {
@@ -385,10 +400,15 @@ bool energy_dev_parse_realtime(const char *json, size_t len, energy_dev_device_t
             now->pv_w = v * k;
             now->have_pv = true;
         }
-        if (number_at(entry, "totalActivePower", &v)) {
+        static const char *const k_phases[3] = { "acPower1", "acPower2", "acPower3" };
+        static const char *const k_backup[3] = { "EPSL1ActivePower", "EPSL2ActivePower", "EPSL3ActivePower" };
+        if (sum_at(entry, k_phases, k, &now->ac_w)) { /* an X3-Hybrid sends totalActivePower 0 beside them */
+            now->have_ac = true;
+        } else if (number_at(entry, "totalActivePower", &v)) {
             now->ac_w = v * k;
             now->have_ac = true;
         }
+        now->have_eps = sum_at(entry, k_backup, k, &now->eps_w);
         if (!now->have_meter && number_at(entry, "gridPower", &v)) {
             now->feed_w = v * k;
             now->have_grid = true;
@@ -503,7 +523,9 @@ bool energy_dev_reading(const energy_dev_now_t *now, const energy_dev_today_t *t
     out->pv_w = watts(pv < 0 ? 0 : pv);
     out->grid_w = watts(-feed);
     out->bat_w = watts(bat);
-    double load = now->have_ac ? now->ac_w - feed : pv - bat - feed; /* the inverter's output nets the battery */
+    double eps = now->have_eps ? now->eps_w : 0;
+    /* the house: the inverter's output, which nets the battery, and its backup port's, with what the grid brings */
+    double load = now->have_ac ? now->ac_w + eps - feed : pv - bat - feed;
     out->load_w = watts(load < 0 ? 0 : load);
     out->soc = now->have_soc ? (int16_t)lround(now->soc < 0 ? 0 : now->soc > 100 ? 100 : now->soc) : -1;
     out->today = true;

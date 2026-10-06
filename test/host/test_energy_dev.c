@@ -220,6 +220,48 @@ static void test_the_meter_stands_for_the_grid_and_the_battery_for_itself(void)
     TEST_ASSERT_EQUAL_UINT32((uint32_t)local(2026, 10, 5, 13, 20), now.at); /* the newest */
 }
 
+/* An X3-Hybrid's reply, from the owner's plant (2026-10-06; serials replaced): `totalActivePower` stays 0 while its
+ * three phases carry the output, so the phases count; the house draws that output and the grid's 1358 W. */
+static void test_a_hybrids_phases_are_its_output_and_the_house_draws_them_and_the_grid(void)
+{
+    const char *json = "{\"code\":10000,\"result\":[{\"deviceStatus\":102,\"todayImportEnergy\":6.50,"
+                       "\"todayExportEnergy\":0.00,\"gridPowerM2\":0.00,\"dataTime\":\"2026-10-06T09:27:38.000+00:00\","
+                       "\"plantLocalTime\":\"2026-10-06 11:27:38\",\"deviceSn\":\"H34A10J0000000\","
+                       "\"acPower1\":238,\"acPower2\":24,\"acPower3\":1135,\"dailyACOutput\":1.2,\"dailyYield\":1.3,"
+                       "\"mpptMap\":{\"MPPT1Voltage\":191.6,\"MPPT1Power\":1471.0,\"MPPT2Power\":0.0},"
+                       "\"EPSL1ActivePower\":0,\"EPSL2ActivePower\":0,\"EPSL3ActivePower\":0,\"totalReactivePower\":0,"
+                       "\"totalActivePower\":0,\"MPPTTotalInputPower\":1471,\"gridPower\":-1358.0}]}";
+    energy_dev_now_t now;
+    memset(&now, 0, sizeof(now));
+    TEST_ASSERT_TRUE_MESSAGE(energy_dev_parse_realtime(json, strlen(json), ENERGY_DEV_INVERTER, 1, &now, s_err,
+                                                       sizeof(s_err)),
+                             s_err);
+    TEST_ASSERT_EQUAL_DOUBLE(1397, now.ac_w);
+    energy_dev_today_t today = { .found = false };
+    energy_reading_t r;
+    TEST_ASSERT_TRUE(energy_dev_reading(&now, &today, 0, &r));
+    TEST_ASSERT_EQUAL_INT32(1471, r.pv_w);
+    TEST_ASSERT_EQUAL_INT32(1358, r.grid_w); /* importing */
+    TEST_ASSERT_EQUAL_INT32(2755, r.load_w);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)local(2026, 10, 6, 11, 27) + 38, r.at);
+}
+
+/* A house on the hybrid's backup (EPS) port draws from it too, as the Token ID's `peps1`–`peps3` count. */
+static void test_the_backup_ports_power_is_the_houses_too(void)
+{
+    const char *json = "{\"code\":10000,\"result\":[{\"acPower1\":0,\"acPower2\":0,\"acPower3\":0,"
+                       "\"EPSL1ActivePower\":310,\"EPSL2ActivePower\":0,\"EPSL3ActivePower\":72,"
+                       "\"MPPTTotalInputPower\":400,\"gridPower\":0}]}";
+    energy_dev_now_t now;
+    memset(&now, 0, sizeof(now));
+    TEST_ASSERT_TRUE(energy_dev_parse_realtime(json, strlen(json), ENERGY_DEV_INVERTER, 1, &now, s_err,
+                                               sizeof(s_err)));
+    energy_reading_t r;
+    TEST_ASSERT_TRUE(energy_dev_reading(&now, NULL, 1791205100, &r));
+    TEST_ASSERT_EQUAL_INT32(382, r.load_w);
+    TEST_ASSERT_EQUAL_INT32(0, r.grid_w);
+}
+
 /* SolaX's dataTime in the forms a reply may take: ISO 8601 with its zone, with or without the offset's colon; the
  * plant's local time with a space or with slashes; seconds or milliseconds since 1970. */
 static void test_the_data_time_in_its_forms(void)
@@ -427,6 +469,8 @@ int main(void)
     RUN_TEST(test_the_inverter_gives_the_panels_its_output_and_the_grid);
     RUN_TEST(test_without_a_total_the_mppts_add_up_and_a_commercial_plant_is_in_kw);
     RUN_TEST(test_the_meter_stands_for_the_grid_and_the_battery_for_itself);
+    RUN_TEST(test_a_hybrids_phases_are_its_output_and_the_house_draws_them_and_the_grid);
+    RUN_TEST(test_the_backup_ports_power_is_the_houses_too);
     RUN_TEST(test_the_data_time_in_its_forms);
     RUN_TEST(test_a_data_time_it_cant_read_refuses_the_reply);
     RUN_TEST(test_todays_row_of_the_month);

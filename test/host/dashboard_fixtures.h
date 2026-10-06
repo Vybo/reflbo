@@ -362,6 +362,35 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         *preset = fixture_preset("weather");
         fixture_grid_split(preset, 3, 8, 0, k_fixture_small24, sizeof(k_fixture_small24));
         fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "mqtt_grid") == 0) { /* M7: MQTT fields, fresh, a text, stale, missing, unmapped */
+        *preset = fixture_preset("indoor");
+        for (int k = 0; k < 6; k++) {
+            preset->slots[k] = (uint8_t)FIX_MQTT(k);
+        }
+        fixture_mqtt(ctx);
+    } else if (strcmp(name, "mqtt_home_cs") == 0) { /* small slots: each label where an icon would be */
+        *preset = fixture_preset("home");
+        for (int k = 0; k < 4; k++) {
+            preset->slots[2 + k] = (uint8_t)FIX_MQTT(k);
+        }
+        fixture_mqtt(ctx);
+        ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "mqtt_split_xs") == 0) { /* XS: labels before the values, then over them (D40) */
+        static const uint8_t k_fields[] = {
+            FIX_MQTT(0), FIX_MQTT(1), FIX_MQTT(2),        FIX_MQTT(3),      FIX_MQTT(4),     FIX_MQTT(6),
+            FIX_MQTT(5), UI_FIELD_ENV_TEMP, /* 4 × 2 rows of 200 × 34, then 2 × 6 cells of 66 × 69 */
+            FIX_MQTT(0), FIX_MQTT(1), FIX_MQTT(2),        FIX_MQTT(3),      FIX_MQTT(4),     FIX_MQTT(6),
+            UI_FIELD_TIME_CLOCK, UI_FIELD_ENV_TEMP, UI_FIELD_ENV_HUM, UI_FIELD_DATE_DAY, UI_FIELD_BAT_LEVEL,
+            UI_FIELD_MOON_PHASE,
+        };
+        *preset = fixture_preset("weather");
+        uint8_t tree[UI_SPLIT_NODES];
+        memset(tree, 0, sizeof(tree));
+        tree[0] = UI_RATIO_1_2;
+        int n = fixture_rows(tree, 1, 4, 2, 0);
+        n = fixture_rows(tree, n, 2, 6, 0);
+        fixture_split(preset, tree, (size_t)n, k_fields, sizeof(k_fields));
+        fixture_mqtt(ctx);
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -474,4 +503,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "weather_solar", "focus_solar", "solar", "solar_actual",
                                                     "solar_cs", "solar_none", "energy", "energy_battery",
                                                     "energy_night_cs", "energy_none", "energy_low",
-                                                    "grid_solar_low", "solar_evening" };
+                                                    "grid_solar_low", "solar_evening", "mqtt_grid",
+                                                    "mqtt_home_cs", "mqtt_split_xs" };

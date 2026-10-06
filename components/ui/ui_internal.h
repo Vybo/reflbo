@@ -11,6 +11,9 @@
 
 /* "20:48" or "8:48 PM": a UTC time in local time, as the clock setting shows it (ui_forecast.c). */
 void ui_clock_text(const ui_context_t *ctx, time_t t, char *out, size_t size);
+/* A time as the clock shows times (D40): "20:48" today, "Sat 06:48" within six days either way, "2 Oct" beyond, with
+ * no valid clock to count from, or for a date alone (`date_only`) (ui_forecast.c). */
+void ui_when_text(const ui_context_t *ctx, time_t t, bool date_only, char *out, size_t size);
 /* An age as the stale mark shows it: "45 min", "3 h", "2 d" (ui_widget.c). */
 void ui_format_age(const lang_t *lang, uint32_t age_s, char *out, size_t size);
 /* The pattern's one "%s" replaced by `value`, as the packs' LS_AGO has it ("%s ago", "před %s"). */

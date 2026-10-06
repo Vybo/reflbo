@@ -110,6 +110,7 @@ typedef struct {
     ui_preset_t presets[UI_PRESET_MAX];
     ui_schedule_t schedule;
     uint8_t offered; /* UI_OFFERED_* */
+    ui_mqtt_keys_t mqtt; /* the keys the slots' mqtt.<key> fields name (M7, spec §12.5) */
 } ui_presets_t;
 
 /* How many of `p`'s slots its layout uses: a fixed layout's slots, or the cells of its split tree

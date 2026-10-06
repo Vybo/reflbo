@@ -37,13 +37,12 @@ static void draw_separators(gfx_fb_t *fb, ui_layout_id_t layout)
 bool ui_draw_cell(gfx_fb_t *fb, gfx_rect_t cell, const ui_context_t *ctx, ui_field_id_t field,
                   ui_stale_policy_t policy)
 {
-    const ui_field_info_t *info = ui_field_info(field);
-    int size = info != NULL ? ui_split_field_size(info->kind, cell.w, cell.h) : -1;
+    ui_value_t v;
+    ui_resolve(ctx, field, &v); /* an MQTT field's kind is its mapping's */
+    int size = v.field != UI_FIELD_NONE ? ui_split_field_size(v.kind, cell.w, cell.h) : -1;
     if (size < 0) {
         return false;
     }
-    ui_value_t v;
-    ui_resolve(ctx, field, &v);
     ui_widget_draw(fb, cell, (ui_size_t)size, &v, policy, ctx->lang);
     return v.state == UI_VALUE_STALE;
 }
@@ -103,6 +102,9 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
         for (int i = 0; i < layout->slot_count; i++) {
             ui_value_t v;
             ui_resolve(&c, (ui_field_id_t)preset->slots[i], &v);
+            if (v.field != UI_FIELD_NONE && !(layout->slots[i].kinds & UI_KIND(v.kind))) {
+                continue; /* an MQTT field whose mapping's kind the slot can't show: empty (spec §12.5) */
+            }
             any_stale |= v.state == UI_VALUE_STALE;
             ui_widget_draw(fb, layout->slots[i].rect, layout->slots[i].size, &v,
                            (ui_stale_policy_t)preset->stale_policy, c.lang);

@@ -1,10 +1,12 @@
 #pragma once
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "datastore.h"
+#include "ha_store.h"
 #include "lang.h"
 #include "ui_fields.h"
 #include "util_time.h"
@@ -157,4 +159,57 @@ static inline ui_context_t fixture_context(void)
                          .local_day = FIX_DAY, .ds = &s_fix_ds, .lang = lang_get("en"), .clock_24h = true,
                          .lat_e4 = 491951, .lon_e4 = 166068 };
     return ctx;
+}
+
+/* MQTT fields (spec §12.5): the store's six mappings, and the seven keys the presets name. outdoor
+ * 21.5 °C and co2 612 ppm ten minutes old, door "Closed" (a text), power 1.24 kW three hours old against
+ * its hour (stale), washer mapped but without a value yet, alarm a time three hours ahead (D40); window is
+ * named by the presets and mapped by nothing, so its slot stays empty. FIX_MQTT(k) is the field of the
+ * presets' key k. */
+static ha_store_t s_fix_mqtt;
+static ui_mqtt_keys_t s_fix_keys;
+#define FIX_MQTT(k) ((ui_field_id_t)(UI_FIELD_MQTT + (k)))
+
+static inline void fixture_mqtt(ui_context_t *ctx)
+{
+    static const struct {
+        const char *key, *label, *unit;
+        uint8_t kind;
+        uint32_t ttl_s;
+    } k_map[] = { { "outdoor", "Outside", "\xC2\xB0" "C", HA_KIND_NUMBER, 0 },
+                  { "co2", "CO2", "ppm", HA_KIND_NUMBER, 0 },
+                  { "door", "Front door", "", HA_KIND_TEXT, 0 },
+                  { "power", "Power", "kW", HA_KIND_NUMBER, 3600 },
+                  { "washer", "Washer", "", HA_KIND_TEXT, 0 },
+                  { "alarm", "Alarm", "", HA_KIND_TIME, 0 } };
+    static ha_fields_t f;
+    memset(&f, 0, sizeof(f));
+    for (size_t i = 0; i < sizeof(k_map) / sizeof(k_map[0]); i++) {
+        ha_field_t *m = &f.field[f.count++];
+        snprintf(m->key, sizeof(m->key), "%s", k_map[i].key);
+        snprintf(m->label, sizeof(m->label), "%s", k_map[i].label);
+        snprintf(m->unit, sizeof(m->unit), "%s", k_map[i].unit);
+        m->kind = k_map[i].kind;
+        m->ttl_s = k_map[i].ttl_s;
+    }
+    ha_store_init(&s_fix_mqtt);
+    ha_store_rebuild(&s_fix_mqtt, &f);
+    ha_store_set_default_ttl(&s_fix_mqtt, 2 * 86400);
+    ha_value_t v = { .kind = HA_KIND_NUMBER, .number = 215, .decimals = 1 };
+    ha_store_set(&s_fix_mqtt, 0, &v, FIX_NOW - 600);
+    v = (ha_value_t){ .kind = HA_KIND_NUMBER, .number = 612 };
+    ha_store_set(&s_fix_mqtt, 1, &v, FIX_NOW - 600);
+    v = (ha_value_t){ .kind = HA_KIND_TEXT, .text = "Closed" };
+    ha_store_set(&s_fix_mqtt, 2, &v, FIX_NOW - 600);
+    v = (ha_value_t){ .kind = HA_KIND_NUMBER, .number = 124, .decimals = 2 };
+    ha_store_set(&s_fix_mqtt, 3, &v, FIX_NOW - 3 * 3600);
+    v = (ha_value_t){ .kind = HA_KIND_TIME, .time = (uint32_t)(FIX_NOW + 3 * 3600) };
+    ha_store_set(&s_fix_mqtt, 5, &v, FIX_NOW - 600);
+    static const char *const k_keys[] = { "outdoor", "co2", "door", "power", "washer", "window", "alarm" };
+    memset(&s_fix_keys, 0, sizeof(s_fix_keys));
+    for (size_t i = 0; i < sizeof(k_keys) / sizeof(k_keys[0]); i++) {
+        snprintf(s_fix_keys.key[s_fix_keys.count++], HA_KEY_LEN, "%s", k_keys[i]);
+    }
+    ctx->mqtt = &s_fix_mqtt;
+    ctx->mqtt_keys = &s_fix_keys;
 }

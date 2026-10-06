@@ -207,6 +207,7 @@ add_library(ui STATIC ${UI_SOURCES})
 target_include_directories(ui PUBLIC ${REPO_ROOT}/components/ui/include)
 target_compile_options(ui PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(ui PUBLIC gfx locale datastore util map radar_logic adsb_logic solar_logic energy_logic
+                      ha_mqtt_logic
                       PRIVATE cjson scheduler weather_logic astro m)
 
 # reflbo_host_test(<name> <libs...>): builds <name>.c against Unity and registers it with ctest.

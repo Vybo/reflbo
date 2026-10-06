@@ -49,9 +49,10 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      12 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
+#define SNAP_VERSION      13 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
                                    9: 24 cells (M6c); 10: the solar state and the sync's two steps (M6d);
-                                   11: the Developer API's plant (D37); 12: MQTT's settings (M7) */
+                                   11: the Developer API's plant (D37); 12: MQTT's settings (M7);
+                                   13: the presets' MQTT keys (M7) */
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */
@@ -97,7 +98,7 @@ typedef struct {
     app_ui_state_t ui;
     time_t next_alarm;
 } app_snapshot_t;
-_Static_assert(sizeof(app_snapshot_t) <= 6144, "the RTC-RAM snapshot is at most 6 KB (spec §6, M6c)");
+_Static_assert(sizeof(app_snapshot_t) <= 7168, "the RTC-RAM snapshot is at most 7 KB (spec §6, M7)");
 
 static RTC_DATA_ATTR app_snapshot_t s_snap;
 static QueueHandle_t s_queue;

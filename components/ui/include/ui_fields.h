@@ -6,6 +6,7 @@
 
 #include "datastore.h"
 #include "gfx.h"
+#include "ha_store.h"
 #include "lang.h"
 #include "util_calendar.h"
 
@@ -84,8 +85,23 @@ typedef enum {
     UI_FIELD_EN_SELF,
     UI_FIELD_PV_CHART, /* M6d: the day's forecast and the readings, as bars */
     UI_FIELD_EN_FLOW,  /* M6d: the house's energy flow now */
-    UI_FIELD_COUNT,
+    UI_FIELD_COUNT,    /* the built-in fields; the MQTT fields follow */
 } ui_field_id_t;
+
+/* mqtt.<key> fields (spec §12.5, M7): UI_FIELD_MQTT + k is the presets' key k (ui_presets_t.mqtt), which a
+ * mapping in the store may name. They have no ui_field_info(). */
+#define UI_MQTT_KEYS 32
+#define UI_FIELD_MQTT ((int)UI_FIELD_COUNT)
+
+typedef struct {
+    uint8_t count;
+    char key[UI_MQTT_KEYS][HA_KEY_LEN]; /* in the order presets.json first names them */
+} ui_mqtt_keys_t;
+
+static inline bool ui_field_is_mqtt(int field)
+{
+    return field >= UI_FIELD_MQTT && field < UI_FIELD_MQTT + UI_MQTT_KEYS;
+}
 
 typedef struct {
     const char *id; /* as in presets.json: "env.temp" */
@@ -143,6 +159,8 @@ typedef struct {
     ui_wifi_mark_t wifi;
     const ui_radar_t *radar; /* M6: the radars' map, frames and settings; NULL for none */
     const ui_solar_t *solar; /* M6d: the PV forecast and the house's energy; NULL for none */
+    const ha_store_t *mqtt;  /* M7: the MQTT fields' values and the message; NULL for none */
+    const ui_mqtt_keys_t *mqtt_keys; /* the keys of the presets drawn; NULL for none */
 } ui_context_t;
 
 typedef enum {
@@ -183,3 +201,5 @@ typedef struct {
 } ui_value_t;
 
 void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);
+/* The store's entry `i` as a field shows it: its label, unit and value (the catalogue lists them all). */
+void ui_mqtt_value(const ui_context_t *ctx, int i, ui_value_t *out);

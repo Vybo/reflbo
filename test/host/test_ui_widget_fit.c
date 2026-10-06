@@ -923,6 +923,163 @@ static void test_the_grid_shows_which_way_its_power_goes(void)
     TEST_ASSERT_FALSE(inked(pen + 1, m.x + m.w - 1, m.y, m.y + 6 + gfx_font_sans_12.line_height)); /* no arrow */
 }
 
+/* MQTT fields at their longest (spec §12.5, D40): a 23-byte label, a 7-byte unit, a number of 8 digits with a
+ * decimal, a 47-byte text and a time; in English and Czech (0, 1), stale (2, 3), on a 12-hour clock (4). */
+#define MQTT_VARIANTS 5
+static ha_store_t s_mqtt;
+static ui_mqtt_keys_t s_mqtt_keys;
+
+static ui_context_t mqtt_context(int variant)
+{
+    static ha_fields_t f;
+    memset(&f, 0, sizeof(f));
+    f.count = 3;
+    f.field[0] = (ha_field_t){ .key = "n", .label = "Teplota u gar\xC3\xA1\xC5\xBE" "e dole", .kind = HA_KIND_NUMBER,
+                               .unit = "\xC2\xB5g/m\xC2\xB3" };
+    f.field[1] = (ha_field_t){ .key = "t", .label = "Waschmaschine im Keller", .kind = HA_KIND_TEXT };
+    f.field[2] = (ha_field_t){ .key = "w", .label = "N\xC3\xA4" "chster Wecker Handy", .kind = HA_KIND_TIME };
+    ha_store_init(&s_mqtt);
+    ha_store_rebuild(&s_mqtt, &f);
+    ha_store_set_default_ttl(&s_mqtt, 3600);
+    s_mqtt_keys = (ui_mqtt_keys_t){ .count = 3, .key = { "n", "t", "w" } };
+    ui_context_t ctx = split_context(variant % 2);
+    ctx.clock_24h = variant != 4;
+    ctx.mqtt = &s_mqtt;
+    ctx.mqtt_keys = &s_mqtt_keys;
+    time_t at = variant == 2 || variant == 3 ? FIX_NOW - 2 * 3600 : FIX_NOW; /* stale: its age at the bottom right */
+    ha_value_t v = { .kind = HA_KIND_NUMBER, .number = -12345678, .decimals = 1 };
+    ha_store_set(&s_mqtt, 0, &v, at);
+    v = (ha_value_t){ .kind = HA_KIND_TEXT,
+                      .text = "W\xC3\xA4sche fertig: bitte ausr\xC3\xA4umen und aufh\xC3\xA4ngen" };
+    ha_store_set(&s_mqtt, 1, &v, at);
+    v = (ha_value_t){ .kind = HA_KIND_TIME, .time = (uint32_t)(FIX_NOW + 5 * 86400 + 2 * 3600) }; /* Wed 22:48 */
+    ha_store_set(&s_mqtt, 2, &v, at);
+    return ctx;
+}
+
+/* Each MQTT field in a w × h cell at the size its kind takes there: it shows, clear of the cell's edges; in XS and
+ * a short S, without the stale mark. Its label may be cut, so an ellipsis proves nothing here. */
+static void check_mqtt_cell(const ui_context_t *ctx, int w, int h, int variant)
+{
+    for (int k = 0; k < s_mqtt_keys.count; k++) {
+        ui_value_t v;
+        ui_resolve(ctx, (ui_field_id_t)(UI_FIELD_MQTT + k), &v);
+        int size = ui_split_field_size(v.kind, w, h);
+        if (size < 0) {
+            continue; /* no room: drawn as nothing, and refused in a preset */
+        }
+        gfx_rect_t r = { (int16_t)(400 - w), (int16_t)(300 - h), (int16_t)w, (int16_t)h };
+        gfx_fb_init(&s_fb, s_buf, 400, 300);
+        gfx_clear(&s_fb, GFX_WHITE);
+        ui_draw_cell(&s_fb, r, ctx, (ui_field_id_t)(UI_FIELD_MQTT + k), UI_STALE_STALE);
+        char msg[80];
+        snprintf(msg, sizeof(msg), "mqtt.%s at %d×%d (size %d), variant %d", s_mqtt_keys.key[k], w, h, size, variant);
+        TEST_ASSERT_TRUE_MESSAGE(inked(r.x + 2, r.x + w - 3, r.y + 2, r.y + h - 3), msg);
+        if (size == UI_SIZE_XS || (size == UI_SIZE_S && h < 80)) {
+            TEST_ASSERT_FALSE_MESSAGE(stale_mark(r), msg);
+        }
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y, r.y + 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + w - 1, r.y + h - 2, r.y + h - 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + 1, r.y, r.y + h - 1), msg);
+        TEST_ASSERT_FALSE_MESSAGE(inked(r.x + w - 2, r.x + w - 1, r.y, r.y + h - 1), msg);
+    }
+}
+
+static void test_mqtt_fields_fit_every_cell_a_split_can_make(void)
+{
+    s_cell_count = 0;
+    reach(400, 279, 0);
+    for (int variant = 0; variant < MQTT_VARIANTS; variant++) {
+        ui_context_t ctx = mqtt_context(variant);
+        for (int i = 0; i < s_cell_count; i++) {
+            check_mqtt_cell(&ctx, s_cells[i].w, s_cells[i].h, variant);
+        }
+    }
+}
+
+/* ... and at every threshold of XS and of a short S (D34). */
+static void test_mqtt_fields_fit_every_xs_and_short_s_cell(void)
+{
+    for (int variant = 0; variant < MQTT_VARIANTS; variant++) {
+        ui_context_t ctx = mqtt_context(variant);
+        for (size_t i = 0; i < sizeof(k_xs_w) / sizeof(k_xs_w[0]); i++) {
+            for (size_t j = 0; j < sizeof(k_xs_h) / sizeof(k_xs_h[0]); j++) {
+                check_mqtt_cell(&ctx, k_xs_w[i], k_xs_h[j], variant);
+            }
+        }
+        for (size_t i = 0; i < sizeof(k_xs_wide_w) / sizeof(k_xs_wide_w[0]); i++) {
+            for (size_t j = 0; j < sizeof(k_xs_low_h) / sizeof(k_xs_low_h[0]); j++) {
+                check_mqtt_cell(&ctx, k_xs_wide_w[i], k_xs_low_h[j], variant);
+            }
+        }
+        for (size_t i = 0; i < sizeof(k_s_w) / sizeof(k_s_w[0]); i++) {
+            for (size_t j = 0; j < sizeof(k_s_h) / sizeof(k_s_h[0]); j++) {
+                check_mqtt_cell(&ctx, k_s_w[i], k_s_h[j], variant);
+            }
+        }
+    }
+}
+
+/* Where glyph `cp` of `f` first shows in `area`, a blank pixel all round it: its top left. */
+static bool glyph_in(gfx_rect_t area, const gfx_font_t *f, uint32_t cp, int *gx, int *gy)
+{
+    const gfx_glyph_t *g = gfx_font_glyph(f, cp);
+    int fx, fy;
+    first_ink(f->bitmap + g->offset, g->width, g->height, &fx, &fy);
+    for (int x = area.x, y = area.y; next_ink(area, &x, &y); x++) {
+        int x0 = x - fx, y0 = y - fy;
+        if (x0 >= area.x && y0 >= area.y && x0 + g->width <= area.x + area.w && y0 + g->height <= area.y + area.h &&
+            glyph_at(f, g, x0, y0)) {
+            *gx = x0, *gy = y0;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* An MQTT field has no icon (spec §12.5): its label stands where the icon would, in the small face, in S and XS:
+ * before the value on a line, over it in a narrow, tall cell. A label with no room gives way to the value. */
+static void test_mqtt_labels_stand_where_icons_would(void)
+{
+    static const struct {
+        int16_t w, h;
+        int key;    /* FIX_MQTT's */
+        uint32_t cp; /* the label's first letter */
+        bool over;
+    } k_cases[] = {
+        { 200, 60, 0, 'O', false }, /* S: "Outside" before "21.5 °C" */
+        { 100, 100, 0, 'O', true }, /* S, narrow and tall: over it */
+        { 200, 34, 2, 'F', false }, /* XS on a line: "Front door" before "Closed" */
+        { 66, 69, 6, 'A', true },   /* XS stacked: "Alarm" over "23:48" */
+    };
+    ui_context_t ctx = split_context(0);
+    fixture_mqtt(&ctx);
+    for (size_t i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
+        gfx_rect_t r = { 0, 21, k_cases[i].w, k_cases[i].h };
+        gfx_fb_init(&s_fb, s_buf, 400, 300);
+        gfx_clear(&s_fb, GFX_WHITE);
+        ui_draw_cell(&s_fb, r, &ctx, FIX_MQTT(k_cases[i].key), UI_STALE_STALE);
+        char msg[48];
+        snprintf(msg, sizeof(msg), "mqtt key %d at %d×%d", k_cases[i].key, r.w, r.h);
+        int gx, gy;
+        TEST_ASSERT_TRUE_MESSAGE(glyph_in(r, &gfx_font_sans_12, k_cases[i].cp, &gx, &gy), msg);
+        if (k_cases[i].over) {
+            TEST_ASSERT_TRUE_MESSAGE(gy < r.y + r.h / 2, msg);
+            TEST_ASSERT_TRUE_MESSAGE(inked(r.x, r.x + r.w - 1, r.y + r.h / 2, r.y + r.h - 1), msg); /* the value */
+        } else {
+            TEST_ASSERT_TRUE_MESSAGE(gx < r.x + r.w * 2 / 5, msg);
+            TEST_ASSERT_TRUE_MESSAGE(inked(r.x + r.w * 2 / 5, r.x + r.w - 1, r.y, r.y + r.h - 1), msg);
+        }
+    }
+    gfx_rect_t r = { 0, 21, 40, 20 }; /* no room for "Outside": the value alone */
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    gfx_clear(&s_fb, GFX_WHITE);
+    ui_draw_cell(&s_fb, r, &ctx, FIX_MQTT(0), UI_STALE_STALE);
+    int gx, gy;
+    TEST_ASSERT_FALSE(glyph_in(r, &gfx_font_sans_12, 'O', &gx, &gy));
+    TEST_ASSERT_TRUE(inked(r.x + 2, r.x + r.w - 3, r.y + 2, r.y + r.h - 3));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -946,5 +1103,8 @@ int main(void)
     RUN_TEST(test_short_s_cells_show_a_short_form_before_cutting);
     RUN_TEST(test_the_solar_fields_show_their_symbols);
     RUN_TEST(test_the_grid_shows_which_way_its_power_goes);
+    RUN_TEST(test_mqtt_fields_fit_every_cell_a_split_can_make);
+    RUN_TEST(test_mqtt_fields_fit_every_xs_and_short_s_cell);
+    RUN_TEST(test_mqtt_labels_stand_where_icons_would);
     return UNITY_END();
 }

@@ -227,6 +227,7 @@ void app_ui_context(ui_context_t *ctx)
     ctx->local_day = local_day(&ctx->local);
     ctx->radar = app_radar_ui(); /* M6 */
     ctx->solar = app_solar_ui(); /* M6d */
+    ctx->mqtt_keys = &s.presets.mqtt; /* M7: the store comes with its task */
 }
 
 void app_ui_render(void)

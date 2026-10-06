@@ -331,6 +331,129 @@ static void test_numbers_with_decimals_carry_a_whole_number_form(void)
     TEST_ASSERT_EQUAL_STRING("", resolve(UI_FIELD_ENV_HUM).short_text);   /* no decimals to drop */
 }
 
+/* mqtt.<key> (spec §12.5): the mapping's label and unit, the value in the device's language. */
+static void test_mqtt_fields_come_from_the_store(void)
+{
+    fixture_mqtt(&s_ctx);
+    ui_value_t v = resolve(FIX_MQTT(0));
+    TEST_ASSERT_EQUAL(FIX_MQTT(0), v.field);
+    TEST_ASSERT_EQUAL(UI_FK_NUMBER, v.kind);
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+    TEST_ASSERT_EQUAL_STRING("Outside", v.label);
+    TEST_ASSERT_EQUAL_STRING("21.5", v.text);
+    TEST_ASSERT_EQUAL_STRING("22", v.short_text);
+    TEST_ASSERT_EQUAL_STRING("\xC2\xB0" "C", v.unit);
+    v = resolve(FIX_MQTT(1));
+    TEST_ASSERT_EQUAL_STRING("612", v.text);
+    TEST_ASSERT_EQUAL_STRING("", v.short_text); /* no decimals to drop */
+    TEST_ASSERT_EQUAL_STRING("ppm", v.unit);
+    v = resolve(FIX_MQTT(2));
+    TEST_ASSERT_EQUAL(UI_FK_TEXT, v.kind);
+    TEST_ASSERT_EQUAL_STRING("Front door", v.label);
+    TEST_ASSERT_EQUAL_STRING("Closed", v.text);
+    TEST_ASSERT_EQUAL_STRING("", v.unit);
+    s_ctx.lang = lang_get("cs");
+    TEST_ASSERT_EQUAL_STRING("21,5", resolve(FIX_MQTT(0)).text);
+    s_ctx.lang = lang_get("en");
+    /* the largest values a payload brings: the whole number rounds without overflow, where long is 32 bits */
+    s_fix_mqtt.entry[0].number = INT32_MAX;
+    TEST_ASSERT_EQUAL_STRING("214748364.7", resolve(FIX_MQTT(0)).text);
+    TEST_ASSERT_EQUAL_STRING("214748365", resolve(FIX_MQTT(0)).short_text);
+    s_fix_mqtt.entry[0].number = -INT32_MAX;
+    TEST_ASSERT_EQUAL_STRING("-214748365", resolve(FIX_MQTT(0)).short_text);
+}
+
+static void test_mqtt_values_go_stale_with_their_age(void)
+{
+    fixture_mqtt(&s_ctx);
+    ui_value_t v = resolve(FIX_MQTT(3));
+    TEST_ASSERT_EQUAL(UI_VALUE_STALE, v.state);
+    TEST_ASSERT_EQUAL_UINT32(3 * 3600, v.age_s);
+    TEST_ASSERT_EQUAL_STRING("1.24", v.text);
+    TEST_ASSERT_EQUAL_STRING("kW", v.unit);
+}
+
+/* A mapped key without a value yet is missing; a key no mapping names is an empty slot (spec §12.5). */
+static void test_unmapped_keys_are_empty_slots(void)
+{
+    fixture_mqtt(&s_ctx);
+    ui_value_t v = resolve(FIX_MQTT(4));
+    TEST_ASSERT_EQUAL(FIX_MQTT(4), v.field);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state);
+    TEST_ASSERT_EQUAL(UI_FK_TEXT, v.kind);
+    TEST_ASSERT_EQUAL_STRING("Washer", v.label);
+    TEST_ASSERT_EQUAL(UI_FIELD_NONE, resolve(FIX_MQTT(5)).field); /* window */
+    TEST_ASSERT_EQUAL(UI_FIELD_NONE, resolve(FIX_MQTT(7)).field); /* no such key */
+    s_ctx.mqtt = NULL;
+    TEST_ASSERT_EQUAL(UI_FIELD_NONE, resolve(FIX_MQTT(0)).field);
+}
+
+/* A time (D40, spec §12.5) reads as the clock shows times: today's as the time, the weekday and the time
+ * within six days, the date beyond; a past time the same way. Friday 20:48 now. */
+static void test_mqtt_times_read_as_the_clock(void)
+{
+    fixture_mqtt(&s_ctx);
+    ui_value_t v = resolve(FIX_MQTT(6));
+    TEST_ASSERT_EQUAL(FIX_MQTT(6), v.field);
+    TEST_ASSERT_EQUAL(UI_FK_TEXT, v.kind); /* drawn as words */
+    TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
+    TEST_ASSERT_EQUAL_STRING("Alarm", v.label);
+    TEST_ASSERT_EQUAL_STRING("23:48", v.text);
+    TEST_ASSERT_EQUAL_STRING("", v.unit);
+    s_ctx.clock_24h = false;
+    TEST_ASSERT_EQUAL_STRING("11:48 PM", resolve(FIX_MQTT(6)).text);
+    s_ctx.clock_24h = true;
+    static const struct {
+        int64_t from_now_s;
+        const char *text;
+    } k_cases[] = {
+        { 10 * 3600, "Sat 06:48" },     /* tomorrow */
+        { 6 * 86400, "Thu 20:48" },     /* the sixth day on */
+        { 7 * 86400, "2 Oct" },         /* beyond: the date */
+        { -2 * 3600, "18:48" },         /* earlier today */
+        { -86400, "Thu 20:48" },        /* yesterday */
+        { -7 * 86400 - 3600, "18 Sep" }, /* a week ago */
+    };
+    for (size_t i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
+        s_fix_mqtt.entry[5].time = (uint32_t)(FIX_NOW + k_cases[i].from_now_s);
+        TEST_ASSERT_EQUAL_STRING(k_cases[i].text, resolve(FIX_MQTT(6)).text);
+    }
+    s_ctx.lang = lang_get("cs");
+    TEST_ASSERT_EQUAL_STRING("18. 9.", resolve(FIX_MQTT(6)).text);
+    s_fix_mqtt.entry[5].time = (uint32_t)(FIX_NOW + 10 * 3600);
+    TEST_ASSERT_EQUAL_STRING("So 06:48", resolve(FIX_MQTT(6)).text);
+    s_ctx.lang = lang_get("en");
+    s_ctx.time_valid = false; /* no today to count from: the date */
+    TEST_ASSERT_EQUAL_STRING("26 Sep", resolve(FIX_MQTT(6)).text);
+}
+
+/* A date alone (D40) shows as its date, today's too: it has no time to show. */
+static void test_mqtt_dates_read_as_dates(void)
+{
+    fixture_mqtt(&s_ctx);
+    s_fix_mqtt.entry[5].date_only = true;
+    s_fix_mqtt.entry[5].time = 1790373600; /* Saturday 26 September, local midnight */
+    TEST_ASSERT_EQUAL_STRING("26 Sep", resolve(FIX_MQTT(6)).text);
+    s_fix_mqtt.entry[5].time = 1790287200; /* today */
+    TEST_ASSERT_EQUAL_STRING("25 Sep", resolve(FIX_MQTT(6)).text);
+    s_ctx.lang = lang_get("cs");
+    TEST_ASSERT_EQUAL_STRING("25. 9.", resolve(FIX_MQTT(6)).text);
+    s_ctx.lang = lang_get("en");
+}
+
+/* HA's unknown and unavailable (D40): the slot draws as missing, with its label. */
+static void test_mqtt_no_value_is_missing(void)
+{
+    fixture_mqtt(&s_ctx);
+    ha_value_t none = { .kind = HA_KIND_TIME, .none = true };
+    ha_store_set(&s_fix_mqtt, 5, &none, FIX_NOW - 60);
+    ui_value_t v = resolve(FIX_MQTT(6));
+    TEST_ASSERT_EQUAL(FIX_MQTT(6), v.field);
+    TEST_ASSERT_EQUAL(UI_VALUE_MISSING, v.state);
+    TEST_ASSERT_EQUAL_STRING("Alarm", v.label);
+    TEST_ASSERT_EQUAL_STRING("", v.text);
+}
+
 static void test_none_resolves_to_missing(void)
 {
     ui_value_t v = resolve(UI_FIELD_NONE);
@@ -604,5 +727,11 @@ int main(void)
     RUN_TEST(test_the_home_battery);
     RUN_TEST(test_todays_totals);
     RUN_TEST(test_a_reading_goes_stale_after_15_minutes);
+    RUN_TEST(test_mqtt_fields_come_from_the_store);
+    RUN_TEST(test_mqtt_values_go_stale_with_their_age);
+    RUN_TEST(test_mqtt_times_read_as_the_clock);
+    RUN_TEST(test_mqtt_no_value_is_missing);
+    RUN_TEST(test_mqtt_dates_read_as_dates);
+    RUN_TEST(test_unmapped_keys_are_empty_slots);
     return UNITY_END();
 }

@@ -82,6 +82,22 @@ void ui_clock_text(const ui_context_t *ctx, time_t t, char *out, size_t size)
     snprintf(out, size, "%s%s%s", hm, suffix[0] ? " " : "", suffix);
 }
 
+void ui_when_text(const ui_context_t *ctx, time_t t, bool date_only, char *out, size_t size)
+{
+    struct tm local;
+    localtime_r(&t, &local);
+    int32_t days = (int32_t)util_days_from_civil(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday) -
+                   ctx->local_day;
+    if (date_only || !ctx->time_valid || days < -6 || days > 6) {
+        lang_format_date(ctx->lang, &local, LANG_DATE_SHORT, out, size);
+        return;
+    }
+    char clock[16];
+    ui_clock_text(ctx, t, clock, sizeof(clock));
+    snprintf(out, size, "%s%s%s", days != 0 ? ctx->lang->weekdays_short[local.tm_wday] : "", days != 0 ? " " : "",
+             clock);
+}
+
 static void resolve_sun(const ui_context_t *ctx, ui_value_t *out)
 {
     if (!ctx->time_valid) {

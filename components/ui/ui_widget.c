@@ -7,6 +7,7 @@
 #include "ui_internal.h"
 
 #define PLACEHOLDER "\xE2\x80\x94" /* em dash */
+#define ELLIPSIS "\xE2\x80\xA6"
 #define ARROW_UP "\xE2\x86\x91"
 #define ARROW_DOWN "\xE2\x86\x93"
 #define PI 3.14159265358979323846
@@ -317,10 +318,33 @@ static void draw_min_max_mark(gfx_fb_t *fb, const ui_value_t *v, int x, int y)
     }
 }
 
-/* The small visual that stands for the field: an icon, a battery (its bolt while it charges, with `bolt`), or the
- * Moon. Returns its width. */
-static int draw_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int size, bool bolt)
+/* An MQTT field has no icon (spec §12.5): its label stands where the icon would, in the small face, cut to max_w;
+ * none where not even its first character fits before the ellipsis. Its width, 0 for none. */
+static int label_symbol(const ui_value_t *v, int max_w, char *out, size_t size)
 {
+    out[0] = '\0';
+    if (!ui_field_is_mqtt(v->field) || v->label == NULL) {
+        return 0;
+    }
+    int w = gfx_text_ellipsize(&gfx_font_sans_12, v->label, max_w, out, size);
+    if (w > max_w || strcmp(out, ELLIPSIS) == 0) {
+        out[0] = '\0';
+        return 0;
+    }
+    return w;
+}
+
+/* The small visual that stands for the field: an icon, a battery (its bolt while it charges, with `bolt`), the
+ * Moon, or an MQTT field's label, up to `max_w` wide. Returns its width. */
+static int draw_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int size, bool bolt, int max_w)
+{
+    if (ui_field_is_mqtt(v->field)) { /* its ink centred on the icon's box */
+        char label[48];
+        int w = label_symbol(v, max_w, label, sizeof(label));
+        const gfx_font_t *f = &gfx_font_sans_12;
+        gfx_text(fb, f, x, y + (size + ink_above(f, label) - ink_below(f, label)) / 2, label, GFX_BLACK);
+        return w;
+    }
     if (v->kind == UI_FK_BATTERY) {
         int w = size * 3 / 2, h = size * 3 / 4;
         ui_draw_battery(fb, x, y + (size - h) / 2, w, h, v->state == UI_VALUE_MISSING ? -1 : v->percent);
@@ -349,8 +373,12 @@ static int draw_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int size
 }
 
 /* The width draw_symbol() takes at `size` px. */
-static int symbol_width(const ui_value_t *v, int size, bool bolt)
+static int symbol_width(const ui_value_t *v, int size, bool bolt, int max_w)
 {
+    if (ui_field_is_mqtt(v->field)) {
+        char label[48];
+        return label_symbol(v, max_w, label, sizeof(label));
+    }
     if (v->kind == UI_FK_BATTERY) {
         return size * 3 / 2 + (bolt && v->battery == DS_BAT_CHARGING ? 18 : 0);
     }
@@ -393,6 +421,7 @@ static void draw_small_beside(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     const ui_fonts_t *f = &k_fonts[UI_SIZE_S];
     int pad = r.w < 150 ? 6 : 14, gap = r.w < 150 ? 6 : 10;
     int sym_y = r.y + (r.h - f->icon) / 2;
+    int label_w = r.w * 2 / 5; /* an MQTT field's label: up to two fifths of the cell */
     char fit[48];
     if (!numeric(v)) {
         const gfx_font_t *vf = v->state == UI_VALUE_MISSING ? f->value : f->text;
@@ -407,12 +436,12 @@ static void draw_small_beside(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         shown.trend = 0;
         int baseline = r.y + (r.h + digit_height(vf)) / 2;
         for (int with = 1; with >= 0; with--) {
-            int x = with ? r.x + pad + symbol_width(v, f->icon, true) + gap : r.x + 6;
+            int x = with ? r.x + pad + symbol_width(v, f->icon, true, label_w) + gap : r.x + 6;
             for (int k = 0; k < 3; k++) {
                 int w = gfx_text_width(vf, forms[k]);
                 if (forms[k][0] && w <= r.x + r.w - 6 - x) {
                     if (with) {
-                        draw_symbol(fb, v, r.x + pad, sym_y, f->icon, true);
+                        draw_symbol(fb, v, r.x + pad, sym_y, f->icon, true, label_w);
                     }
                     draw_group(fb, f, vf, &shown, forms[k], with ? x : r.x + (r.w - w) / 2, baseline);
                     return;
@@ -422,7 +451,7 @@ static void draw_small_beside(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
                 break; /* the disc is the phase */
             }
         }
-        int x = r.x + pad + draw_symbol(fb, v, r.x + pad, sym_y, f->icon, true) + gap;
+        int x = r.x + pad + draw_symbol(fb, v, r.x + pad, sym_y, f->icon, true, label_w) + gap;
         gfx_text_ellipsize(vf, forms[0], r.x + r.w - 6 - x, fit, sizeof(fit));
         draw_group(fb, f, vf, &shown, fit, x, baseline);
         return;
@@ -443,7 +472,7 @@ static void draw_small_beside(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         if (!k_tries[i].unit) {
             shown.unit[0] = '\0';
         }
-        int x = r.x + pad + (k_tries[i].sym ? symbol_width(v, f->icon, k_tries[i].bolt) : 0) + gap;
+        int x = r.x + pad + (k_tries[i].sym ? symbol_width(v, f->icon, k_tries[i].bolt, label_w) : 0) + gap;
         int max_w = k_tries[i].sym ? r.x + r.w - 6 - x : r.w - 12;
         const char *value = v->text;
         const gfx_font_t *vf = fit_number(f, k_fit_s, 3, &shown, &value, max_w, 0, 0, fit, sizeof(fit));
@@ -451,7 +480,7 @@ static void draw_small_beside(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
             continue; /* cut: give up something else first */
         }
         if (k_tries[i].sym) {
-            draw_symbol(fb, v, r.x + pad, sym_y, f->icon, k_tries[i].bolt);
+            draw_symbol(fb, v, r.x + pad, sym_y, f->icon, k_tries[i].bolt, label_w);
         } else {
             x = r.x + (r.w - group_width(f, vf, &shown, value)) / 2;
         }
@@ -475,9 +504,11 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     bool two_lines = !numeric(v) && v->kind != UI_FK_MOON && gfx_text_width(vf, value) > r.w - 8;
     if (r.w < 150 && r.h >= (two_lines ? 86 : 80)) { /* narrow and tall: symbol above, value below, the arrow beside */
         int sym_size = v->kind == UI_FK_MOON ? 28 : f->icon;
-        int sym_w = v->kind == UI_FK_BATTERY ? sym_size * 3 / 2 : sym_size;
+        int sym_w = v->kind == UI_FK_BATTERY        ? sym_size * 3 / 2
+                    : ui_field_is_mqtt(v->field) ? symbol_width(v, sym_size, true, r.w - 8)
+                                                 : sym_size;
         int sym_x = r.x + (r.w - sym_w) / 2;
-        draw_symbol(fb, v, sym_x, r.y + 12, sym_size, true);
+        draw_symbol(fb, v, sym_x, r.y + 12, sym_size, true, r.w - 8);
         if (shown.trend) {
             gfx_text(fb, &gfx_font_sans_bold_16, sym_x + sym_w + 4, r.y + 12 + sym_size - 4,
                      shown.trend > 0 ? ARROW_UP : ARROW_DOWN, GFX_BLACK);
@@ -634,9 +665,10 @@ static void bolt_ink(int *x0, int *w)
     *x0 = lo, *w = hi - lo + 1;
 }
 
-/* The symbol's size at `sym` px, its marks included: the battery's outline and bolt, the Moon, or the field's icon
- * and its arrow; 0 × 0 for a time and for a field without one. */
-static void tiny_symbol_size(const ui_value_t *v, int sym, int *w, int *h)
+/* The symbol's size at `sym` px, its marks included: the battery's outline and bolt, the Moon, the field's icon and
+ * its arrow, or an MQTT field's label up to `max_w` wide (its ink's height); 0 × 0 for a time and for a field
+ * without one. */
+static void tiny_symbol_size(const ui_value_t *v, int sym, int max_w, int *w, int *h)
 {
     *w = *h = 0;
     if (v->kind == UI_FK_BATTERY) {
@@ -646,6 +678,10 @@ static void tiny_symbol_size(const ui_value_t *v, int sym, int *w, int *h)
         *h = tiny_bolt(v) && *h < 16 ? 16 : *h;
     } else if (v->kind == UI_FK_MOON) {
         *w = *h = sym;
+    } else if (ui_field_is_mqtt(v->field)) {
+        char label[48];
+        *w = label_symbol(v, max_w, label, sizeof(label));
+        *h = *w > 0 ? ink_above(&gfx_font_sans_12, label) + ink_below(&gfx_font_sans_12, label) : 0;
     } else if (v->kind != UI_FK_TIME) {
         const gfx_bitmap_t *icon = field_icon(v->field, sym);
         if (icon != NULL) {
@@ -656,7 +692,7 @@ static void tiny_symbol_size(const ui_value_t *v, int sym, int *w, int *h)
 }
 
 /* The symbol with its top left at (x, y), `h` px tall as tiny_symbol_size() gave it. */
-static void draw_tiny_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int sym, int h)
+static void draw_tiny_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, int sym, int h, int max_w)
 {
     int cy = y + h / 2;
     if (v->kind == UI_FK_BATTERY) {
@@ -673,6 +709,10 @@ static void draw_tiny_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, in
         } else {
             ui_draw_moon(fb, x + sym / 2, cy, sym / 2 - 1, v->moon.age);
         }
+    } else if (ui_field_is_mqtt(v->field)) {
+        char label[48];
+        label_symbol(v, max_w, label, sizeof(label));
+        gfx_text(fb, &gfx_font_sans_12, x, y + ink_above(&gfx_font_sans_12, label), label, GFX_BLACK);
     } else if (v->kind != UI_FK_TIME) {
         const gfx_bitmap_t *icon = field_icon(v->field, sym);
         if (icon != NULL) {
@@ -692,8 +732,9 @@ static void draw_tiny_symbol(gfx_fb_t *fb, const ui_value_t *v, int x, int y, in
 static void draw_tiny_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
 {
     int sym = r.h >= 34 ? 24 : 16;
+    int label_w = r.w * 2 / 5; /* an MQTT field's label: up to two fifths of the cell */
     int sym_w, sym_h;
-    tiny_symbol_size(v, sym, &sym_w, &sym_h);
+    tiny_symbol_size(v, sym, label_w, &sym_w, &sym_h);
     int cy = r.y + r.h / 2, top = cy - sym_h / 2;
     char fit[48];
     if (numeric(v)) {
@@ -708,7 +749,7 @@ static void draw_tiny_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
                 continue; /* cut beside the symbol: the value alone */
             }
             if (with) {
-                draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h);
+                draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h, label_w);
             }
             int w = group_width(&uf, vf, &shown, value);
             draw_group(fb, &uf, vf, &shown, value, centre ? r.x + (r.w - w) / 2 : x, cy + digit_height(vf) / 2);
@@ -716,7 +757,7 @@ static void draw_tiny_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         }
     }
     if (v->kind == UI_FK_MOON && v->state != UI_VALUE_MISSING) {
-        draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h);
+        draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h, label_w);
         int x = r.x + 3 + sym_w + 4, max_w = r.x + r.w - 4 - x;
         const char *forms[3] = { v->text, v->short_text, v->extra };
         for (int k = r.w >= 120 ? 0 : 1; k < 3; k++) {
@@ -741,7 +782,7 @@ static void draw_tiny_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         }
         const gfx_font_t *tf = fit_tiny_text(t, max_w, r.h, fit, sizeof(fit));
         if (with) {
-            draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h);
+            draw_tiny_symbol(fb, v, r.x + 3, top, sym, sym_h, label_w);
         }
         gfx_text(fb, tf, x, r.y + (r.h + ink_above(tf, fit) - ink_below(tf, fit)) / 2, fit, GFX_BLACK);
         return;
@@ -780,10 +821,10 @@ static void draw_tiny_stacked(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         return;
     }
     int sym_w, sym_h;
-    tiny_symbol_size(v, sym, &sym_w, &sym_h);
+    tiny_symbol_size(v, sym, r.w - 4, &sym_w, &sym_h);
     if (sym == 24 && sym_w > r.w - 4) { /* a charging battery's bolt beside the 24 px outline: the 16 px one */
         sym = 16;
-        tiny_symbol_size(v, sym, &sym_w, &sym_h);
+        tiny_symbol_size(v, sym, r.w - 4, &sym_w, &sym_h);
     }
     int gap = sym_h ? 4 : 0;
     int room = r.h - 4 - sym_h - gap;
@@ -811,7 +852,7 @@ static void draw_tiny_stacked(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     }
     int block = sym_h + gap + value_h + (below ? unit_h : 0);
     int top = r.y + (r.h - block) / 2;
-    draw_tiny_symbol(fb, v, cx - sym_w / 2, top, sym, sym_h);
+    draw_tiny_symbol(fb, v, cx - sym_w / 2, top, sym, sym_h, r.w - 4);
     int y = top + sym_h + gap;
     if (numeric(v)) {
         int baseline = y + digit_height(vf);

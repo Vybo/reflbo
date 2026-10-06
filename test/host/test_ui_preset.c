@@ -612,6 +612,122 @@ static void test_the_deepest_tree_fits_the_nesting_limit(void)
     TEST_ASSERT_EQUAL_MEMORY(k_tree, back.presets[0].split, UI_SPLIT_NODES);
 }
 
+/* mqtt.<key> fields (spec §5.4, §12.5, D32): the presets name up to 32 keys between them, kept as names. */
+#define MQTT_PRESETS                                                                                                   \
+    "{\"schema\": 1, \"presets\": ["                                                                                   \
+    " {\"id\": \"ha\", \"layout\": \"grid\", \"slots\": {\"g1\": \"mqtt.outdoor_temp\", \"g2\": \"mqtt.co2\","         \
+    "  \"g3\": \"mqtt.outdoor_temp\", \"g4\": \"env.temp\"}},"                                                         \
+    " {\"id\": \"big\", \"layout\": \"classic\", \"slots\": {\"main\": \"mqtt.power\"}},"                              \
+    " {\"id\": \"cells\", \"layout\": \"split\", \"split\": {\"split\": \"rows\", \"ratio\": \"1/2\","                 \
+    "  \"a\": {\"field\": \"mqtt.door\"}, \"b\": {\"field\": \"mqtt.co2\"}}}]}"
+
+static void test_mqtt_fields_name_their_keys(void)
+{
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(MQTT_PRESETS, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(4, s_p.mqtt.count); /* in the order the file first names them */
+    TEST_ASSERT_EQUAL_STRING("outdoor_temp", s_p.mqtt.key[0]);
+    TEST_ASSERT_EQUAL_STRING("co2", s_p.mqtt.key[1]);
+    TEST_ASSERT_EQUAL_STRING("power", s_p.mqtt.key[2]);
+    TEST_ASSERT_EQUAL_STRING("door", s_p.mqtt.key[3]);
+    TEST_ASSERT_EQUAL_UINT8(UI_FIELD_MQTT + 0, s_p.presets[0].slots[0]);
+    TEST_ASSERT_EQUAL_UINT8(UI_FIELD_MQTT + 1, s_p.presets[0].slots[1]);
+    TEST_ASSERT_EQUAL_UINT8(UI_FIELD_MQTT + 0, s_p.presets[0].slots[2]); /* the same key, the same field */
+    TEST_ASSERT_EQUAL_UINT8(UI_FIELD_ENV_TEMP, s_p.presets[0].slots[3]);
+    TEST_ASSERT_EQUAL_UINT8(UI_FIELD_MQTT + 2, s_p.presets[1].slots[0]); /* Classic's XL slot takes numbers */
+    TEST_ASSERT_EQUAL_UINT8(UI_FIELD_MQTT + 3, s_p.presets[2].slots[0]);
+    TEST_ASSERT_TRUE(ui_field_is_mqtt(s_p.presets[0].slots[0]));
+    TEST_ASSERT_FALSE(ui_field_is_mqtt(UI_FIELD_ENV_TEMP));
+    TEST_ASSERT_FALSE(ui_field_is_mqtt(UI_FIELD_MQTT + UI_MQTT_KEYS));
+    ui_presets_defaults(&s_p);
+    TEST_ASSERT_EQUAL_UINT8(0, s_p.mqtt.count);
+}
+
+/* The names stay as written, mapped or not: the presets never learn which keys the mappings have. */
+static void test_mqtt_fields_survive_a_round_trip(void)
+{
+    TEST_ASSERT_TRUE(ui_presets_from_json(MQTT_PRESETS, &s_p, s_err, sizeof(s_err)));
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"g3\":\"mqtt.outdoor_temp\""));
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "{\"field\":\"mqtt.door\"}"));
+    ui_presets_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(back));
+}
+
+static void test_bad_mqtt_fields_are_rejected(void)
+{
+    static const struct {
+        const char *field, *err;
+    } k_cases[] = {
+        { "mqtt.Outdoor", "preset \"x\": unknown field \"mqtt.Outdoor\"" },
+        { "mqtt.", "preset \"x\": unknown field \"mqtt.\"" },
+        { "mqtt.a2345678901234567890123x", "preset \"x\": unknown field \"mqtt.a2345678901234567890123x\"" },
+    };
+    for (size_t i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
+        snprintf(s_json, sizeof(s_json), "{\"schema\": 1, \"presets\": [{\"id\": \"x\", \"layout\": \"grid\","
+                 " \"slots\": {\"g1\": \"%s\"}}]}", k_cases[i].field);
+        TEST_ASSERT_FALSE_MESSAGE(ui_presets_from_json(s_json, &s_p, s_err, sizeof(s_err)), k_cases[i].field);
+        TEST_ASSERT_EQUAL_STRING(k_cases[i].err, s_err);
+    }
+    /* 6 presets of 6 slots, each with a key of its own: 36 keys */
+    size_t at = (size_t)snprintf(s_json, sizeof(s_json), "{\"schema\": 1, \"presets\": [");
+    for (int i = 0; i < 6; i++) {
+        at += (size_t)snprintf(s_json + at, sizeof(s_json) - at,
+                               "%s{\"id\": \"p%d\", \"layout\": \"grid\", \"slots\": {", i ? "," : "", i);
+        for (int k = 0; k < 6; k++) {
+            at += (size_t)snprintf(s_json + at, sizeof(s_json) - at, "%s\"g%d\": \"mqtt.k%d\"", k ? "," : "", k + 1,
+                                   i * 6 + k);
+        }
+        at += (size_t)snprintf(s_json + at, sizeof(s_json) - at, "}}");
+    }
+    snprintf(s_json + at, sizeof(s_json) - at, "]}");
+    TEST_ASSERT_FALSE(ui_presets_from_json(s_json, &s_p, s_err, sizeof(s_err)));
+    TEST_ASSERT_EQUAL_STRING("preset \"p5\": at most 32 different MQTT fields", s_err);
+}
+
+/* The largest presets.json with MQTT fields: M6c's largest file (16 split presets of 24 cells) with every cell
+ * an MQTT field, 32 keys of 23 bytes, each first named in the order of the key table. */
+static void test_a_full_set_with_mqtt_fields_fits_the_save_buffer(void)
+{
+    static const uint8_t k_tree[UI_SPLIT_NODES] = { UI_RATIO_1_3 | UI_SPLIT_NO_LINE, EIGHT_COLUMNS,
+                                                    UI_RATIO_1_2 | UI_SPLIT_NO_LINE, EIGHT_COLUMNS, EIGHT_COLUMNS };
+    memset(&s_p, 0, sizeof(s_p));
+    for (int k = 0; k < UI_MQTT_KEYS; k++) {
+        snprintf(s_p.mqtt.key[k], sizeof(s_p.mqtt.key[k]), "k%022d", k);
+    }
+    s_p.mqtt.count = UI_MQTT_KEYS;
+    for (int i = 0; i < UI_PRESET_MAX; i++) {
+        ui_preset_t *p = &s_p.presets[i];
+        snprintf(p->id, sizeof(p->id), "preset-%08d", i);
+        memset(p->name, 0x01, UI_PRESET_NAME_LEN - 1);
+        p->layout = UI_LAYOUT_SPLIT;
+        memcpy(p->split, k_tree, sizeof(k_tree));
+        for (int k = 0; k < UI_SPLIT_CELLS; k++) {
+            p->slots[k] = (uint8_t)(UI_FIELD_MQTT + (i * UI_SPLIT_CELLS + k) % UI_MQTT_KEYS); /* first use in order */
+        }
+        p->clock = UI_CLOCK_12H;
+        p->stale_policy = UI_STALE_PLACEHOLDER;
+        p->status_battery = UI_STATUS_BAT_PERCENT | UI_STATUS_BAT_VOLTAGE | UI_STATUS_BAT_DAYS;
+    }
+    s_p.count = UI_PRESET_MAX;
+    s_p.cycle_interval_s = UI_CYCLE_MAX_S;
+    s_p.offered = UI_OFFERED_ALL;
+    s_p.schedule.count = UI_SCHEDULE_MAX;
+    for (int i = 0; i < UI_SCHEDULE_MAX; i++) {
+        s_p.schedule.entries[i] = (ui_schedule_entry_t){ .at_min = 600, .days = 0x7F, .action = UI_SCHED_PRESET,
+                                                          .preset = (uint8_t)i };
+    }
+    static char buf[UI_PRESETS_JSON_MAX];
+    size_t n = ui_presets_to_json(&s_p, buf, sizeof(buf));
+    TEST_ASSERT_TRUE_MESSAGE(n > 0, "the worst case must fit UI_PRESETS_JSON_MAX");
+    char size_msg[64];
+    snprintf(size_msg, sizeof(size_msg), "the largest presets.json with MQTT fields: %zu bytes", n);
+    TEST_MESSAGE(size_msg);
+    ui_presets_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(buf, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(s_p));
+}
+
 static void test_a_preset_counts_the_slots_its_layout_uses(void)
 {
     TEST_ASSERT_EQUAL_INT(6, ui_preset_slots(&s_p.presets[0])); /* Home: Classic */
@@ -655,6 +771,10 @@ int main(void)
     RUN_TEST(test_bad_split_trees_are_rejected_with_a_reason);
     RUN_TEST(test_a_full_set_of_split_presets_fits_the_save_buffer);
     RUN_TEST(test_the_deepest_tree_fits_the_nesting_limit);
+    RUN_TEST(test_mqtt_fields_name_their_keys);
+    RUN_TEST(test_mqtt_fields_survive_a_round_trip);
+    RUN_TEST(test_bad_mqtt_fields_are_rejected);
+    RUN_TEST(test_a_full_set_with_mqtt_fields_fits_the_save_buffer);
     RUN_TEST(test_a_preset_counts_the_slots_its_layout_uses);
     return UNITY_END();
 }

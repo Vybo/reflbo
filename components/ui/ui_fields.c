@@ -218,10 +218,55 @@ static void resolve_clock(const ui_context_t *ctx, ui_field_id_t field, ui_value
     }
 }
 
+void ui_mqtt_value(const ui_context_t *ctx, int i, ui_value_t *out)
+{
+    const ha_entry_t *e = &ctx->mqtt->entry[i];
+    out->kind = e->kind == HA_KIND_NUMBER ? UI_FK_NUMBER : UI_FK_TEXT; /* a time draws as words do (D40) */
+    out->label = e->label;
+    ha_freshness_t fresh = ha_store_freshness(ctx->mqtt, i, ctx->now);
+    if (fresh == HA_MISSING) {
+        return;
+    }
+    out->state = fresh == HA_STALE ? UI_VALUE_STALE : UI_VALUE_FRESH;
+    out->age_s = (uint32_t)ctx->now > e->updated ? (uint32_t)ctx->now - e->updated : 0;
+    if (e->kind == HA_KIND_TEXT) {
+        snprintf(out->text, sizeof(out->text), "%s", e->text);
+        return;
+    }
+    if (e->kind == HA_KIND_TIME) {
+        ui_when_text(ctx, (time_t)e->time, e->date_only, out->text, sizeof(out->text));
+        return;
+    }
+    lang_format_decimal(ctx->lang, e->number, e->decimals, out->text, sizeof(out->text));
+    if (e->decimals > 0) { /* the whole number, for a slot too narrow for the decimals (spec §5.3) */
+        int64_t scale = e->decimals == 1 ? 10 : e->decimals == 2 ? 100 : 1000; /* 64 bits: no overflow */
+        int64_t whole = ((int64_t)e->number + (e->number >= 0 ? scale / 2 : -scale / 2)) / scale;
+        lang_format_decimal(ctx->lang, (long)whole, 0, out->short_text, sizeof(out->short_text));
+    }
+    snprintf(out->unit, sizeof(out->unit), "%s", e->unit);
+}
+
+/* mqtt.<key> (spec §12.5): the mapping that names the key; a key no mapping names, or no store, is no
+ * field at all, so its slot stays empty. */
+static void resolve_mqtt(const ui_context_t *ctx, int k, ui_value_t *out)
+{
+    const ui_mqtt_keys_t *keys = ctx->mqtt_keys;
+    int i = ctx->mqtt != NULL && keys != NULL && k < keys->count ? ha_store_find(ctx->mqtt, keys->key[k]) : -1;
+    if (i < 0) {
+        out->field = UI_FIELD_NONE;
+        return;
+    }
+    ui_mqtt_value(ctx, i, out);
+}
+
 void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out)
 {
     memset(out, 0, sizeof(*out));
     out->field = field;
+    if (ui_field_is_mqtt(field)) {
+        resolve_mqtt(ctx, field - UI_FIELD_MQTT, out);
+        return;
+    }
     const ui_field_info_t *info = ui_field_info(field);
     if (info == NULL) {
         return;

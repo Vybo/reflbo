@@ -1116,7 +1116,7 @@ HA publishes `ha/statestream/<domain>/<object_id>/state` at QoS 1, retained. Wit
 
 ### 12.10 Testing on the board (owner, 2026-10-03, D32)
 
-- **The stable firmware** is the M6b build, git tag `stable-m6b`; its binaries are kept in `captures/stable/stable-m6b/` with `flash.sh <port>`, which writes the bootloader, partition table, OTA data and app, never the storage partition or NVS. It is the board's normal firmware: after every MQTT/HA test it is flashed back, and `version` must show its ELF hash (`dcb35a7e3`). After M6d's acceptance the M6d build takes its place as `stable-m6d` (D36).
+- **The stable firmware** is the M6d build, git tag `stable-m6d` (from 2026-10-06, after the owner's acceptance, D36, D39; before it the M6b build, `stable-m6b`, `dcb35a7e3`); its binaries are kept in `captures/stable/stable-m6d/` with `flash.sh <port>`, which writes the bootloader, partition table, OTA data and app, never the storage partition or NVS. It is the board's normal firmware: after every MQTT/HA test it is flashed back, and `version` must show its ELF hash (`112aa30d3`).
 - **Backup and restore.** Before a board test that changes its data, the configuration is saved with `GET /api/backup`; after the test, and after the stable firmware is back (its parser refuses M7-only content such as `mqtt.<key>` slots), it is restored with `POST /api/restore` and compared.
 - **Presets made under M6c** can have up to 24 cells, which `stable-m6b`'s parser refuses: it then loads `presets.json.bak` if that parses, else its built-ins, and a KEY switch or a cycle toggle saves `presets.json` over the M6c file. Restoring the backup taken before the test, after the stable firmware is back, brings them back (M6c review).
 - **Presets made under M6d** hold the Solar and Energy presets, whose layouts `stable-m6b`'s parser refuses as it refuses 24 cells; once a preset switch on M6d has saved, `presets.json.bak` holds them too. The way back is `captures/stable/before-m6d-backup.json`, taken under the M6c image before M6d's first flash (M6d's Task 12, Step 0): after flashing `stable-m6b`, restore it. It is kept until `stable-m6d` is tagged after M6d's acceptance (D36).
@@ -1525,3 +1525,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r40 | 2026-10-06 | Powers under 1 kW in watts (D38): §1.2, §5.1, §5.3 |
 | r41 | 2026-10-06 | The house's use from the inverter's phases and its backup port, as the owner's X3-Hybrid reports them (§11.6) |
 | r42 | 2026-10-06 | Solar as the SolaX app shows it (D39): §1.2, §11.6; the 5-minute history as a later option (§19) |
+| r43 | 2026-10-06 | `stable-m6d` is the stable firmware (§12.10) |

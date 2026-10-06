@@ -397,6 +397,12 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         s_fix_reading.pv_w = 0;
         s_fix_reading.load_w = 430;
         s_fix_reading.grid_w = 430;
+    } else if (strcmp(name, "energy_low") == 0) { /* under 1 kW in watts: the owner's evening (2026-10-06) */
+        *preset = fixture_preset("energy");
+        fixture_solar_ctx(ctx, true, false);
+        s_fix_reading.pv_w = 382;
+        s_fix_reading.load_w = 382;
+        s_fix_reading.grid_w = 0;
     } else if (strcmp(name, "energy_none") == 0) { /* before the first reading */
         *preset = fixture_preset("energy");
         fixture_solar_ctx(ctx, false, false);
@@ -413,6 +419,22 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
                                             UI_FIELD_EN_GRID,  UI_FIELD_EN_SELF, UI_FIELD_PV_TOMORROW };
         memcpy(preset->slots, k_slots, sizeof(k_slots));
         fixture_solar_ctx(ctx, true, false);
+    } else if (strcmp(name, "grid_solar_low") == 0) { /* every power under 1 kW: the flow in W */
+        fixture_dashboard("grid_solar", ctx, preset);
+        preset->slots[2] = UI_FIELD_EN_LOAD;
+        preset->slots[5] = UI_FIELD_PV_NOW;
+        s_fix_reading.pv_w = 382;
+        s_fix_reading.load_w = 382;
+        s_fix_reading.grid_w = 0;
+        s_fix_forecast.q[0][53] = 39; /* 390 W */
+    } else if (strcmp(name, "solar_evening") == 0) { /* 18:30: the stat rows in W */
+        *preset = fixture_preset("solar");
+        fixture_solar_ctx(ctx, true, false);
+        ctx->now = FIX_SOLAR_NOW + 5 * 3600 + 10 * 60;
+        ctx->local = fixture_local(18, 30, 0);
+        fixture_fill(&s_fix_ds, ctx->now);
+        fixture_forecast(&s_fix_ds, ctx->now - 3600);
+        ctx->solar = fixture_solar(ctx->now, true, false);
     } else if (strcmp(name, "weather_solar") == 0) { /* the chart in Weather's large slot, the flow beside */
         *preset = fixture_preset("weather");
         static const uint8_t k_slots[5] = { UI_FIELD_PV_CHART, UI_FIELD_WX_TODAY, UI_FIELD_EN_FLOW, UI_FIELD_EN_PV,
@@ -451,4 +473,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "split_xs_narrow", "home_energy", "grid_solar",
                                                     "weather_solar", "focus_solar", "solar", "solar_actual",
                                                     "solar_cs", "solar_none", "energy", "energy_battery",
-                                                    "energy_night_cs", "energy_none" };
+                                                    "energy_night_cs", "energy_none", "energy_low",
+                                                    "grid_solar_low", "solar_evening" };

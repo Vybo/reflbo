@@ -203,7 +203,7 @@ It runs only in sync mode Always on, while its view is on the screen, as it asks
 
 The Solar preset shows your PV system's forecast for the day, and the Energy preset what the house does with its power right now. Both are set up on the web page's Solar page, and their fields fit in any other layout too.
 
-<p><img src="images/panel/solar.png" width="400" alt="The Solar layout at 13:20: forecast today 27.4 kWh; now 4.06 kW, peak 4.12 kW at 12:45, 10.4 kWh still to come; the day's chart from 6 to 19 h, the morning's bars filled with what was produced, a line for the forecast, the afternoon outlined; Saturday 11.2 kWh cloudy, Sunday 21.4 kWh sunny"> <img src="images/panel/energy.png" width="400" alt="The Energy layout: SolaX at 13:17; solar 3.42 kW flowing to export 1.36 kW, the home 0.86 kW and the battery charging 1.20 kW at 64 %; today produced 16.2 kWh, 6.2 kWh to the grid, 0.6 kWh from it, 62 % own use"></p>
+<p><img src="images/panel/solar.png" width="400" alt="The Solar layout at 13:20: forecast today 27.4 kWh; now 4.06 kW, peak 4.12 kW at 12:45, 10.4 kWh still to come; the day's chart from 6 to 19 h, the morning's bars filled with what was produced, a line for the forecast, the afternoon outlined; Saturday 11.2 kWh cloudy, Sunday 21.4 kWh sunny"> <img src="images/panel/energy.png" width="400" alt="The Energy layout: SolaX at 13:17; solar 3.42 kW flowing to export 1.36 kW, the home 860 W and the battery charging 1.20 kW at 64 %; today produced 16.2 kWh, 6.2 kWh to the grid, 0.6 kWh from it, 62 % own use"></p>
 
 <p><img src="images/panel/weather-solar.png" width="400" alt="The Weather layout with the solar chart of 27.4 kWh in its large slot, today's weather of 18° and 9° with 60 % rain, the energy flow as a row of icons, and below the panels' 3.42 kW and the battery at 64 % charging"></p>
 
@@ -227,6 +227,8 @@ The house's energy comes from [SolaX Cloud](https://www.solaxcloud.com), where S
 - **SolaX Cloud, Token ID**: for older accounts that have a Token ID on solaxcloud.com's API page, with the registration number on the dongle's label. SolaX sends the totals to and from the grid since installation here, so the device needs a reading within an hour of midnight to start each day's count. Sync mode Always on brings one, and so does a sync time such as 00:05. Without one, the day's totals to and from the grid stay dashes.
 
 A reading comes with each sync, and every 5 minutes in sync mode Always on. A reading counts as fresh for 15 minutes. If the house's reading fails, the Sync page and the Solar page say why, but the sync itself doesn't count as failed: the next reading soon replaces it.
+
+Powers under 1 kW show in watts, as the SolaX app shows them; from 1 kW in kW. The Energy flow in a small slot uses one unit for all its numbers: W while every power is under 1 kW.
 
 The home battery shows when you set it to show, or by itself when the inverter is a hybrid or a reading has a charge above 0 %. On the Energy layout, arrows show where at least 20 W flow and dotted lines where less does. Own use is the share of the day's output that the house used itself.
 

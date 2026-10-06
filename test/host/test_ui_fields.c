@@ -402,13 +402,25 @@ static void test_the_forecast_fields_read_the_quarter_hour_now(void)
     TEST_ASSERT_EQUAL_STRING("12:45 PM", v.extra);
 }
 
-static void test_kilowatts_shorten_only_from_one_and_kilowatt_hours_from_ten(void)
+/* Under 1 kW a power is whole watts, as the SolaX app shows it (owner, 2026-10-06): "0.39 kW" said less than
+ * "390 W"; from 1 kW it is kW, shortened from 1 kW to one decimal and from 10 kW to none. */
+static void test_a_power_under_1_kw_is_watts_and_kilowatts_shorten_from_one(void)
 {
     with_solar();
     s_forecast.q[0][53] = 86;
     ui_value_t v = resolve(UI_FIELD_PV_NOW);
-    TEST_ASSERT_EQUAL_STRING("0.86", v.text);
+    TEST_ASSERT_EQUAL_STRING("860", v.text);
+    TEST_ASSERT_EQUAL_STRING("W", v.unit);
     TEST_ASSERT_EQUAL_STRING("", v.short_text);
+    s_forecast.q[0][53] = 99; /* 990 W */
+    v = resolve(UI_FIELD_PV_NOW);
+    TEST_ASSERT_EQUAL_STRING("990", v.text);
+    TEST_ASSERT_EQUAL_STRING("W", v.unit);
+    s_forecast.q[0][53] = 100; /* 1 kW */
+    v = resolve(UI_FIELD_PV_NOW);
+    TEST_ASSERT_EQUAL_STRING("1.00", v.text);
+    TEST_ASSERT_EQUAL_STRING("1.0", v.short_text);
+    TEST_ASSERT_EQUAL_STRING("kW", v.unit);
     s_forecast.q[0][53] = 1234; /* 12.34 kW: one decimal from 10 kW */
     v = resolve(UI_FIELD_PV_NOW);
     TEST_ASSERT_EQUAL_STRING("12.3", v.text);
@@ -434,7 +446,8 @@ static void test_after_midnight_tomorrow_is_today(void)
     s_ctx.local_day = FIX_DAY + 1;
     TEST_ASSERT_EQUAL_STRING("1.4", resolve(UI_FIELD_PV_TODAY).text);
     TEST_ASSERT_EQUAL_STRING("27.4", resolve(UI_FIELD_PV_TOMORROW).text); /* the third day's total */
-    TEST_ASSERT_EQUAL_STRING("0.00", resolve(UI_FIELD_PV_NOW).text);
+    TEST_ASSERT_EQUAL_STRING("0", resolve(UI_FIELD_PV_NOW).text);
+    TEST_ASSERT_EQUAL_STRING("W", resolve(UI_FIELD_PV_NOW).unit);
     s_ctx.now += 86400;
     s_ctx.local_day = FIX_DAY + 2;
     TEST_ASSERT_EQUAL(UI_VALUE_MISSING, resolve(UI_FIELD_PV_NOW).state); /* no quarter hours for that day */
@@ -476,14 +489,17 @@ static void test_the_house_now(void)
     TEST_ASSERT_EQUAL(UI_VALUE_FRESH, v.state);
     TEST_ASSERT_EQUAL_STRING("3.42", v.text);
     TEST_ASSERT_EQUAL_STRING("kW", v.unit);
-    TEST_ASSERT_EQUAL_STRING("0.86", resolve(UI_FIELD_EN_LOAD).text);
+    v = resolve(UI_FIELD_EN_LOAD);
+    TEST_ASSERT_EQUAL_STRING("860", v.text);
+    TEST_ASSERT_EQUAL_STRING("W", v.unit);
     v = resolve(UI_FIELD_EN_GRID); /* exporting: its label in M and up, an arrow up in S and XS */
     TEST_ASSERT_EQUAL_STRING("2.56", v.text);
     TEST_ASSERT_EQUAL_STRING("Export", v.label);
     TEST_ASSERT_EQUAL_INT(1, v.trend);
     s_reading.grid_w = 430;
     v = resolve(UI_FIELD_EN_GRID);
-    TEST_ASSERT_EQUAL_STRING("0.43", v.text);
+    TEST_ASSERT_EQUAL_STRING("430", v.text);
+    TEST_ASSERT_EQUAL_STRING("W", v.unit);
     TEST_ASSERT_EQUAL_STRING("Import", v.label);
     TEST_ASSERT_EQUAL_INT(-1, v.trend);
     s_reading.grid_w = -12; /* under 20 W flows nowhere */
@@ -512,7 +528,7 @@ static void test_the_home_battery(void)
     v = resolve(UI_FIELD_EN_BATTERY);
     TEST_ASSERT_EQUAL(DS_BAT_DISCHARGING, v.battery);
     TEST_ASSERT_EQUAL_INT(-1, v.trend); /* the arrow down */
-    TEST_ASSERT_EQUAL_STRING("0.80 kW", v.extra);
+    TEST_ASSERT_EQUAL_STRING("800 W", v.extra);
     s_reading.bat_w = 5;
     TEST_ASSERT_EQUAL_STRING("", resolve(UI_FIELD_EN_BATTERY).extra);
     s_reading.soc = -1; /* shown, but the reply has no charge */
@@ -580,7 +596,7 @@ int main(void)
     RUN_TEST(test_none_resolves_to_missing);
     RUN_TEST(test_numbers_with_decimals_carry_a_whole_number_form);
     RUN_TEST(test_the_forecast_fields_read_the_quarter_hour_now);
-    RUN_TEST(test_kilowatts_shorten_only_from_one_and_kilowatt_hours_from_ten);
+    RUN_TEST(test_a_power_under_1_kw_is_watts_and_kilowatts_shorten_from_one);
     RUN_TEST(test_after_midnight_tomorrow_is_today);
     RUN_TEST(test_the_forecast_goes_stale_after_its_wait);
     RUN_TEST(test_without_a_forecast_or_a_reading_the_fields_are_missing);

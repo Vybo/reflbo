@@ -23,24 +23,40 @@ static void kw_text(const lang_t *lang, int32_t w, char *out, size_t size)
     }
 }
 
+static long magnitude(int32_t w)
+{
+    return w < 0 ? -(long)w : w;
+}
+
+/* A power's number, and its unit as the return: whole W under 1 kW, as the SolaX app shows it (owner, 2026-10-06),
+ * then kW: "2.31", "12.3" from 10 kW. */
+static const char *power_text(const lang_t *lang, int32_t w, char *out, size_t size)
+{
+    if (magnitude(w) < 1000) {
+        snprintf(out, size, "%ld", magnitude(w));
+        return "W";
+    }
+    kw_text(lang, w, out, size);
+    return "kW";
+}
+
 /* "18.4" kWh from Wh. */
 static void kwh_text(const lang_t *lang, uint32_t wh, char *out, size_t size)
 {
     lang_format_decimal(lang, (long)((wh + 50) / 100), 1, out, size);
 }
 
-/* A power and its shorter form where a number doesn't fit (spec §5.1): from 1 kW, one decimal, from 10 kW whole;
- * below 1 kW it would lose most of the value. */
+/* A power, in W under 1 kW, and its shorter form where a number doesn't fit (spec §5.1): from 1 kW, one decimal,
+ * from 10 kW whole; whole watts have none. */
 static void set_kw(const lang_t *lang, int32_t w, ui_value_t *out)
 {
-    kw_text(lang, w, out->text, sizeof(out->text));
-    long a = w < 0 ? -(long)w : w;
+    snprintf(out->unit, sizeof(out->unit), "%s", power_text(lang, w, out->text, sizeof(out->text)));
+    long a = magnitude(w);
     if (a >= 10000) {
         snprintf(out->short_text, sizeof(out->short_text), "%ld", (a + 500) / 1000);
     } else if (a >= 1000) {
         lang_format_decimal(lang, (a + 50) / 100, 1, out->short_text, sizeof(out->short_text));
     }
-    snprintf(out->unit, sizeof(out->unit), "kW");
 }
 
 /* An energy and its shorter form: whole kWh from 10 kWh. */
@@ -166,8 +182,8 @@ static void resolve_house(const ui_context_t *ctx, const ui_solar_t *s, ui_field
         snprintf(out->unit, sizeof(out->unit), "%%");
         if (flow_dir(r->bat_w) != 0) {
             char t[16];
-            kw_text(lang, r->bat_w, t, sizeof(t));
-            snprintf(out->extra, sizeof(out->extra), "%s kW", t);
+            const char *unit = power_text(lang, r->bat_w, t, sizeof(t));
+            snprintf(out->extra, sizeof(out->extra), "%s %s", t, unit);
         }
         break;
     case UI_FIELD_EN_YIELD:
@@ -487,8 +503,25 @@ static void soc_fit(int soc, const gfx_font_t *f, int max_w, char *out, size_t s
     }
 }
 
+/* The flow's unit, its heading's: W while every power it shows is under 1 kW, else kW. */
+static bool flow_in_watts(const energy_reading_t *e)
+{
+    return magnitude(e->pv_w) < 1000 && magnitude(e->load_w) < 1000 && magnitude(e->grid_w) < 1000;
+}
+
+/* A power as the flow shows it within `max_w` px, in the flow's unit: "382" W, or "2.31" kW or its shorter form. */
+static void flow_text(const lang_t *lang, int32_t w, bool watts, const gfx_font_t *f, int max_w, char *out,
+                      size_t size)
+{
+    if (watts) {
+        snprintf(out, size, "%ld", magnitude(w));
+    } else {
+        kw_fit(lang, w, f, max_w, out, size);
+    }
+}
+
 /* energy.flow, tall: the panels above a junction, the grid left, the house right, the battery under it. */
-static void flow_diagram(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *s, const lang_t *lang)
+static void flow_diagram(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *s, const lang_t *lang, bool watts)
 {
     const energy_reading_t *e = s->reading;
     char t[16];
@@ -500,7 +533,7 @@ static void flow_diagram(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *
     int gx = r.x + 22, hx = r.x + r.w - 22;
     const gfx_font_t *vf = &gfx_font_sans_bold_16;
     gfx_bitmap(fb, cx - 12, py, &gfx_icon_solar_24, GFX_BLACK);
-    kw_fit(lang, e->pv_w, vf, r.x + r.w - 2 - (cx + 16), t, sizeof(t));
+    flow_text(lang, e->pv_w, watts, vf, r.x + r.w - 2 - (cx + 16), t, sizeof(t));
     gfx_text(fb, vf, cx + 16, py + 18, t, GFX_BLACK);
     flow_line(fb, cx, py + 26, cx, jy - 4, flow_dir(e->pv_w), 2, 4);
     gfx_bitmap(fb, gx - 12, jy - 12, &gfx_icon_grid_24, GFX_BLACK);
@@ -509,9 +542,9 @@ static void flow_diagram(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *
     flow_line(fb, cx + 4, jy, hx - 15, jy, flow_dir(e->load_w), 2, 4);
     gfx_fill_circle(fb, cx, jy, 3, GFX_BLACK);
     int side_w = 2 * (gx - r.x) - 4; /* the grid's and the house's values, centred under them, clear of the edges */
-    kw_fit(lang, e->grid_w, vf, side_w, t, sizeof(t));
+    flow_text(lang, e->grid_w, watts, vf, side_w, t, sizeof(t));
     centred(fb, vf, gx, jy + 12 + 17, t);
-    kw_fit(lang, e->load_w, vf, side_w, t, sizeof(t));
+    flow_text(lang, e->load_w, watts, vf, side_w, t, sizeof(t));
     centred(fb, vf, hx, jy + 12 + 17, t);
     if (bat) {
         int by = jy + 24;
@@ -523,14 +556,14 @@ static void flow_diagram(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *
 }
 
 /* energy.flow, short: the panels, the house, the grid and the battery in a row, arrows between. */
-static void flow_row(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *s, const lang_t *lang)
+static void flow_row(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *s, const lang_t *lang, bool watts)
 {
     const energy_reading_t *e = s->reading;
     bool bat = s->battery && e->soc >= 0 && r.w >= 180;
     int n = bat ? 4 : 3, col = (r.w - 8) / n;
     int iy = top + (r.y + r.h - top - 24 - 20) / 2;
     const gfx_bitmap_t *icons[3] = { &gfx_icon_solar_24, &gfx_icon_house_24, &gfx_icon_grid_24 };
-    int32_t watts[3] = { e->pv_w, e->load_w, e->grid_w };
+    int32_t power[3] = { e->pv_w, e->load_w, e->grid_w };
     const gfx_font_t *vf = &gfx_font_sans_bold_16;
     for (int i = 0; i < n; i++) {
         int cx = r.x + 4 + col * i + col / 2;
@@ -540,7 +573,7 @@ static void flow_row(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *s, c
             soc_fit(e->soc, vf, col - 2, t, sizeof(t));
         } else {
             gfx_bitmap(fb, cx - 12, iy, icons[i], GFX_BLACK);
-            kw_fit(lang, watts[i], vf, col - 2, t, sizeof(t));
+            flow_text(lang, power[i], watts, vf, col - 2, t, sizeof(t));
         }
         centred(fb, vf, cx, iy + 24 + 17, t);
     }
@@ -561,11 +594,12 @@ static void flow_row(gfx_fb_t *fb, gfx_rect_t r, int top, const ui_solar_t *s, c
 static void draw_flow_widget(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, const lang_t *lang)
 {
     const gfx_font_t *lf = size == UI_SIZE_M ? &gfx_font_sans_12 : &gfx_font_sans_16;
-    int top = heading(fb, r, lf, v->label, "kW");
+    bool watts = flow_in_watts(v->solar->reading);
+    int top = heading(fb, r, lf, v->label, watts ? "W" : "kW");
     if (r.y + r.h - top >= 76) {
-        flow_diagram(fb, r, top, v->solar, lang);
+        flow_diagram(fb, r, top, v->solar, lang, watts);
     } else {
-        flow_row(fb, r, top, v->solar, lang);
+        flow_row(fb, r, top, v->solar, lang, watts);
     }
 }
 
@@ -605,12 +639,15 @@ static int stat_room(int x, int right, const char *label, const char *unit)
     return right - x - 8 - gfx_text_width(&gfx_font_sans_16, label) - gfx_text_width(&gfx_font_sans_bold_16, unit);
 }
 
-/* A stat row's power: "4.12 kW", its number shorter where it wouldn't fit ("200 kW"). */
+/* A stat row's power: "390 W", "4.12 kW", a kW number shorter where it wouldn't fit ("200 kW"). */
 static void stat_kw(const lang_t *lang, int32_t w, int x, int right, const char *label, char *out, size_t size)
 {
     char n[16];
-    kw_fit(lang, w, &gfx_font_sans_bold_16, stat_room(x, right, label, " kW"), n, sizeof(n));
-    snprintf(out, size, "%s kW", n);
+    const char *unit = power_text(lang, w, n, sizeof(n));
+    if (strcmp(unit, "kW") == 0) {
+        kw_fit(lang, w, &gfx_font_sans_bold_16, stat_room(x, right, label, " kW"), n, sizeof(n));
+    }
+    snprintf(out, size, "%s %s", n, unit);
 }
 
 /* A stat row's energy: "18.4 kWh", whole kWh where it wouldn't fit ("1333 kWh"); a dash without one. */
@@ -770,9 +807,9 @@ bool ui_draw_energy_layout(gfx_fb_t *fb, gfx_rect_t a, const ui_context_t *ctx)
     int gx = a.x + 56, hx = a.x + a.w - 56;
     /* the panels, top centre, the power beside them */
     gfx_bitmap(fb, cx - 24, a.y + 4, &gfx_icon_solar_48, GFX_BLACK);
-    kw_text(lang, e->pv_w, t, sizeof(t));
+    const char *unit = power_text(lang, e->pv_w, t, sizeof(t));
     int pen = gfx_text(fb, &gfx_font_sans_bold_28, cx + 34, a.y + 44, t, GFX_BLACK);
-    gfx_text(fb, &gfx_font_sans_16, pen + 3, a.y + 44, "kW", GFX_BLACK);
+    gfx_text(fb, &gfx_font_sans_16, pen + 3, a.y + 44, unit, GFX_BLACK);
     gfx_text(fb, &gfx_font_sans_16, cx + 34, a.y + 18, lang_str(lang, LS_EN_PV), GFX_BLACK);
     /* when the inverter's reading came */
     char when[16];
@@ -787,12 +824,12 @@ bool ui_draw_energy_layout(gfx_fb_t *fb, gfx_rect_t a, const ui_context_t *ctx)
     /* the grid, left; the house, right */
     gfx_bitmap(fb, gx - 24, jy - 24, &gfx_icon_grid_48, GFX_BLACK);
     gfx_bitmap(fb, hx - 24, jy - 24, &gfx_icon_house_48, GFX_BLACK);
-    kw_text(lang, e->grid_w, t, sizeof(t));
-    snprintf(v, sizeof(v), "%s kW", t);
+    unit = power_text(lang, e->grid_w, t, sizeof(t));
+    snprintf(v, sizeof(v), "%s %s", t, unit);
     int gd = flow_dir(e->grid_w);
     node_text(fb, gx, jy + 26, lang_str(lang, gd < 0 ? LS_EN_EXPORTING : gd > 0 ? LS_EN_IMPORTING : LS_EN_GRID), v);
-    kw_text(lang, e->load_w, t, sizeof(t));
-    snprintf(v, sizeof(v), "%s kW", t);
+    unit = power_text(lang, e->load_w, t, sizeof(t));
+    snprintf(v, sizeof(v), "%s %s", t, unit);
     node_text(fb, hx, jy + 26, lang_str(lang, LS_EN_LOAD), v);
     int totals_y = a.y + (bat ? 222 : 176);
     if (bat) { /* the battery, below the junction: its state and power left of it, its charge right */
@@ -803,8 +840,8 @@ bool ui_draw_energy_layout(gfx_fb_t *fb, gfx_rect_t a, const ui_context_t *ctx)
         gfx_text(fb, &gfx_font_sans_bold_28, cx + 40, by + 24, t, GFX_BLACK);
         int bd = flow_dir(e->bat_w);
         const char *state = lang_str(lang, bd > 0 ? LS_EN_CHARGING : bd < 0 ? LS_EN_DISCHARGING : LS_EN_BATTERY);
-        kw_text(lang, e->bat_w, t, sizeof(t));
-        snprintf(v, sizeof(v), "%s kW", t);
+        unit = power_text(lang, e->bat_w, t, sizeof(t));
+        snprintf(v, sizeof(v), "%s %s", t, unit);
         int rx = cx - 40;
         gfx_text(fb, &gfx_font_sans_16, rx - gfx_text_width(&gfx_font_sans_16, state), by + 10, state, GFX_BLACK);
         gfx_text(fb, &gfx_font_sans_bold_20, rx - gfx_text_width(&gfx_font_sans_bold_20, v), by + 32, v, GFX_BLACK);

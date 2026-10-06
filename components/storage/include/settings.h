@@ -38,6 +38,8 @@ typedef enum {
 #define SETTINGS_SYNC_TIMES_MAX 8
 #define SETTINGS_NTP_MAX 2
 #define SETTINGS_HOST_LEN 64
+#define SETTINGS_MQTT_USER_LEN 64   /* mqtt.user, up to 63 bytes without control characters */
+#define SETTINGS_MQTT_PREFIX_LEN 32 /* mqtt.discovery_prefix, up to 31 bytes */
 #define SETTINGS_FILE_MAX 4096 /* settings.json as the app reads and writes it */
 
 /* sync.steps (spec §9.3, D35): the data steps that run, as bits. The time always runs. */
@@ -117,6 +119,12 @@ typedef struct {
     uint8_t energy_source;         /* settings_energy_source_t */
     uint8_t energy_battery;        /* settings_energy_battery_t */
     uint8_t energy_region;         /* settings_energy_region_t: the Developer API's */
+    bool mqtt_enabled;                          /* MQTT and Home Assistant (spec §12.1, D32) */
+    char mqtt_host[SETTINGS_HOST_LEN];          /* the broker: a host name or an address; "" for none */
+    uint16_t mqtt_port;                         /* 1..65535 */
+    char mqtt_user[SETTINGS_MQTT_USER_LEN];     /* "" logs in without a user */
+    bool mqtt_discovery;                        /* publish Home Assistant's discovery configs */
+    char mqtt_prefix[SETTINGS_MQTT_PREFIX_LEN]; /* their topics' first part: "homeassistant" */
 } settings_t;
 
 /* The sync's and the NTP servers' defaults (spec §14.3): times mode at 05:30, a 60 min interval,
@@ -141,6 +149,8 @@ void settings_radar_defaults(settings_t *out);
 /* The steps', the PV forecast's and the house's defaults (spec §14.3): every step on; no source; one
  * plane of 5 kWp tilted 35° to the south, 14 % losses, no inverter limit; the battery on auto. */
 void settings_solar_defaults(settings_t *out);
+/* MQTT's defaults (spec §14.3, D32): off, no broker or user, port 1883, discovery on under "homeassistant". */
+void settings_mqtt_defaults(settings_t *out);
 /* A step's name in sync.steps: "weather", "air", "radar", "solar", "energy". */
 const char *settings_step_name(settings_step_t step);
 /* Forecast.Solar takes a second plane only with a key (spec §11.5): false with the reason. */
@@ -157,6 +167,7 @@ typedef enum {
     SETTINGS_SECRET_SOLAX_SN,      /* energy.solax_sn */
     SETTINGS_SECRET_SOLAX_CLIENT_ID,     /* energy.solax_client_id: the Developer API's application (D37) */
     SETTINGS_SECRET_SOLAX_CLIENT_SECRET, /* energy.solax_client_secret */
+    SETTINGS_SECRET_MQTT_PASS,           /* mqtt.password: the broker's (spec §12.1, D32) */
     SETTINGS_SECRET_COUNT,
 } settings_secret_t;
 #define SETTINGS_SECRET_LEN 64

@@ -287,7 +287,61 @@ static void read_solar(const cJSON *solar, const cJSON *energy, settings_t *out)
     out->energy_battery = choice(child(energy, "battery"), k_batteries, sizeof(k_batteries) / sizeof(k_batteries[0]),
                                  out->energy_battery);
     out->energy_region = choice(child(energy, "region"), k_regions, sizeof(k_regions) / sizeof(k_regions[0]),
-                                SETTINGS_REGION_EU);
+                                out->energy_region);
+}
+
+/* Text without control characters (UTF-8 is fine): what a broker takes as a user name. */
+static bool printable(const char *s)
+{
+    for (; *s != '\0'; s++) {
+        if ((unsigned char)*s < ' ' || *s == 0x7F) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* mqtt.discovery_prefix: 1-31 bytes of printable ASCII without wildcards, a leading or trailing "/". */
+static bool topic_prefix(const char *s)
+{
+    size_t n = strlen(s);
+    if (n == 0 || n >= SETTINGS_MQTT_PREFIX_LEN || s[0] == '/' || s[n - 1] == '/') {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] <= ' ' || s[i] > '~' || s[i] == '+' || s[i] == '#') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* mqtt.* (spec §12.1, §14.3): each value on its own; "" empties the host and the user. */
+static void read_mqtt(const cJSON *mqtt, settings_t *out)
+{
+    read_bool(mqtt, "enabled", &out->mqtt_enabled);
+    read_bool(mqtt, "discovery", &out->mqtt_discovery);
+    const cJSON *host = child(mqtt, "host"), *user = child(mqtt, "user"), *prefix = child(mqtt, "discovery_prefix");
+    if (cJSON_IsString(host) && (host->valuestring[0] == '\0' || host_name(host->valuestring))) {
+        snprintf(out->mqtt_host, sizeof(out->mqtt_host), "%s", host->valuestring);
+    }
+    if (cJSON_IsString(user) && strlen(user->valuestring) < sizeof(out->mqtt_user) && printable(user->valuestring)) {
+        snprintf(out->mqtt_user, sizeof(out->mqtt_user), "%s", user->valuestring);
+    }
+    if (cJSON_IsString(prefix) && topic_prefix(prefix->valuestring)) {
+        snprintf(out->mqtt_prefix, sizeof(out->mqtt_prefix), "%s", prefix->valuestring);
+    }
+    out->mqtt_port = (uint16_t)read_scaled(mqtt, "port", out->mqtt_port, 1, 1, 65535);
+}
+
+void settings_mqtt_defaults(settings_t *out)
+{
+    out->mqtt_enabled = false;
+    out->mqtt_host[0] = '\0';
+    out->mqtt_port = 1883;
+    out->mqtt_user[0] = '\0';
+    out->mqtt_discovery = true;
+    snprintf(out->mqtt_prefix, sizeof(out->mqtt_prefix), "%s", "homeassistant");
 }
 
 void settings_solar_defaults(settings_t *out)
@@ -432,6 +486,7 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
     read_radar(child(root, "radar"), out); /* after the location, which its centres may follow */
     read_steps(child(child(root, "sync"), "steps"), out);
     read_solar(child(root, "solar"), child(root, "energy"), out);
+    read_mqtt(child(root, "mqtt"), out);
     cJSON_Delete(root);
     return true;
 }
@@ -575,6 +630,14 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     put(energy, "source", cJSON_CreateString(k_energy_sources[energy_source]));
     put(energy, "battery", cJSON_CreateString(k_batteries[energy_battery]));
     put(energy, "region", cJSON_CreateString(k_regions[energy_region]));
+    cJSON *mqtt = object_at(root, "mqtt");
+    put(mqtt, "enabled", cJSON_CreateBool(s->mqtt_enabled));
+    put(mqtt, "host", cJSON_CreateString(s->mqtt_host));
+    put(mqtt, "port", cJSON_CreateNumber(s->mqtt_port));
+    put(mqtt, "user", cJSON_CreateString(s->mqtt_user));
+    put(mqtt, "discovery", cJSON_CreateBool(s->mqtt_discovery));
+    put(mqtt, "discovery_prefix", cJSON_CreateString(s->mqtt_prefix));
+    cJSON_DeleteItemFromObjectCaseSensitive(mqtt, "password"); /* a secret, in NVS (spec §12.1) */
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;
@@ -630,6 +693,7 @@ size_t settings_patch(const char *base_json, const char *patch, char *out, size_
 static const char *const k_secret_keys[SETTINGS_SECRET_COUNT] = {
     "fs_key", "solcast_key", "solcast_site1", "solcast_site2", "solax_token", "solax_sn",
     "solax_client_id", "solax_secret", /* NVS keys have 15 characters at most */
+    "mqtt_pass",
 };
 
 const char *settings_secret_key(settings_secret_t secret)
@@ -637,9 +701,12 @@ const char *settings_secret_key(settings_secret_t secret)
     return (unsigned)secret < SETTINGS_SECRET_COUNT ? k_secret_keys[secret] : "";
 }
 
-/* Letters and digits, and those of `extra`. */
+/* Letters and digits, and those of `extra`; with no `extra`, any text without control characters. */
 static bool plain_text(const char *s, const char *extra)
 {
+    if (extra == NULL) {
+        return printable(s);
+    }
     for (; *s != '\0'; s++) {
         bool letter = (*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') || (*s >= '0' && *s <= '9');
         if (!letter && strchr(extra, *s) == NULL) {
@@ -699,7 +766,7 @@ static bool take_sites(cJSON *solar, settings_secrets_t *secrets, char *err, siz
     return ok;
 }
 
-/* The keys of every "solar" and "energy" object, and the flags a GET adds ("keys"), out of `root`. */
+/* The keys of every "solar", "energy" and "mqtt" object, and the flags a GET adds ("keys"), out of `root`. */
 static bool take_all(cJSON *root, settings_secrets_t *secrets, char *err, size_t err_size)
 {
     static const char k_alnum[] = "letters and digits only";
@@ -708,11 +775,17 @@ static bool take_all(cJSON *root, settings_secrets_t *secrets, char *err, size_t
     for (cJSON *c = root->child; ok && c != NULL; c = c->next) {
         bool solar = c->string != NULL && strcmp(c->string, "solar") == 0;
         bool energy = c->string != NULL && strcmp(c->string, "energy") == 0;
-        if (!cJSON_IsObject(c) || !(solar || energy)) {
+        bool mqtt = c->string != NULL && strcmp(c->string, "mqtt") == 0;
+        if (!cJSON_IsObject(c) || !(solar || energy || mqtt)) {
             continue;
         }
         for (cJSON *flags; (flags = cJSON_DetachItemFromObjectCaseSensitive(c, "keys")) != NULL;) {
             cJSON_Delete(flags);
+        }
+        if (mqtt) { /* the broker's password: any characters but control ones */
+            ok = take(c, "password", "mqtt.password", NULL, "no control characters", secrets,
+                      SETTINGS_SECRET_MQTT_PASS, err, err_size);
+            continue;
         }
         ok = solar ? take(c, "fs_key", "solar.fs_key", "", k_alnum, secrets, SETTINGS_SECRET_FS_KEY, err, err_size) &&
                          take(c, "solcast_key", "solar.solcast_key", "-_", "letters, digits, - and _ only", secrets,

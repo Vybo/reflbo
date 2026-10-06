@@ -457,6 +457,8 @@ static void get_settings(uint8_t *out, size_t size, webui_reply_t *reply)
     cJSON_AddBoolToObject(keys, "solax_sn", app_secret_set(SETTINGS_SECRET_SOLAX_SN));
     cJSON_AddBoolToObject(keys, "solax_client_id", app_secret_set(SETTINGS_SECRET_SOLAX_CLIENT_ID));
     cJSON_AddBoolToObject(keys, "solax_client_secret", app_secret_set(SETTINGS_SECRET_SOLAX_CLIENT_SECRET));
+    keys = cJSON_AddObjectToObject(cJSON_GetObjectItemCaseSensitive(o, "mqtt"), "keys");
+    cJSON_AddBoolToObject(keys, "password", app_secret_set(SETTINGS_SECRET_MQTT_PASS)); /* never the password */
     reply_cjson(reply, out, size, o);
 }
 

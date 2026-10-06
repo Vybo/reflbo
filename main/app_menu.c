@@ -206,7 +206,7 @@ static void build_model(void)
     if (bat.state == UI_VALUE_MISSING) {
         snprintf(s_info[0], sizeof(s_info[0]), "\xE2\x80\x94");
     } else {
-        snprintf(s_info[0], sizeof(s_info[0]), "%s %% \xC2\xB7 %s", bat.text, bat.extra);
+        snprintf(s_info[0], sizeof(s_info[0]), "%.8s %% \xC2\xB7 %s", bat.text, bat.extra); /* "87": 3 digits */
     }
     char sha[8];
     esp_app_get_elf_sha256(sha, sizeof(sha));

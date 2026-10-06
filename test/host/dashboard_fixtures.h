@@ -391,6 +391,16 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         n = fixture_rows(tree, n, 2, 6, 0);
         fixture_split(preset, tree, (size_t)n, k_fields, sizeof(k_fields));
         fixture_mqtt(ctx);
+    } else if (strcmp(name, "home_mqtt_failed") == 0) { /* M7: the last MQTT session failed (spec §5.2) */
+        *preset = fixture_preset("home");
+        ctx->mqtt_failed = true;
+        ctx->wifi = UI_WIFI_ON;
+    } else if (strcmp(name, "message_fields") == 0) { /* ha.message, wrapped, in an L and an M slot */
+        *preset = fixture_preset("weather");
+        preset->slots[0] = UI_FIELD_HA_MESSAGE;
+        preset->slots[1] = UI_FIELD_HA_MESSAGE;
+        fixture_mqtt(ctx);
+        ha_store_set_message(&s_fix_mqtt, FIX_MESSAGE_EN, FIX_NOW - 300);
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -504,4 +514,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "solar_cs", "solar_none", "energy", "energy_battery",
                                                     "energy_night_cs", "energy_none", "energy_low",
                                                     "grid_solar_low", "solar_evening", "mqtt_grid",
-                                                    "mqtt_home_cs", "mqtt_split_xs" };
+                                                    "mqtt_home_cs", "mqtt_split_xs", "home_mqtt_failed",
+                                                    "message_fields" };

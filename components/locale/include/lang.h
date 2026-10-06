@@ -227,6 +227,7 @@ typedef enum {
     LS_NO_SOLAR,
     LS_NO_ENERGY,
     LS_M_SYNC_STEPS, /* Sync ▸ Steps (M6d, D35) */
+    LS_MESSAGE,      /* ha.message: Home Assistant's message (M7, spec §12.7) */
     LS_COUNT,
 } lang_str_t;
 

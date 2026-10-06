@@ -15,10 +15,12 @@ sync           sync                  16
 sync_failed    cloud_off             16
 wifi           wifi                  16
 wifi_off       wifi_off              16
+mqtt_off       link_off              16
 air            air                   16 24 48
 particles      blur_on               16 24 48
 uv             light_mode            16 24 48
 pollen         local_florist         16 24 48
+message        chat                  16 24 48
 # The PV forecast and the house's energy (M6d, D35, D36): a sun for the forecast, panels for what they
 # make, the house, the grid's meter and a leaf for own use.
 forecast       wb_sunny              16 24 48

@@ -10,6 +10,9 @@
 
 /* A short message over whatever is on screen, for about 3 s: "Preset: Indoor". */
 void ui_draw_toast(gfx_fb_t *fb, const char *text);
+/* Home Assistant's message across the bottom of the dashboard (spec §12.7), in one line cut with an
+ * ellipsis, while the store says its banner shows; nothing otherwise. */
+void ui_draw_message_banner(gfx_fb_t *fb, const ui_context_t *ctx);
 /* The last screen before the battery gives out (spec §8): nothing else updates after it. */
 void ui_draw_critical(gfx_fb_t *fb, const ui_context_t *ctx);
 /* The first run (spec §5.5): what the buttons do, and the clock if the time is valid. */

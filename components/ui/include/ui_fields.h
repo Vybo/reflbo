@@ -85,6 +85,7 @@ typedef enum {
     UI_FIELD_EN_SELF,
     UI_FIELD_PV_CHART, /* M6d: the day's forecast and the readings, as bars */
     UI_FIELD_EN_FLOW,  /* M6d: the house's energy flow now */
+    UI_FIELD_HA_MESSAGE, /* M7 (D32): Home Assistant's message */
     UI_FIELD_COUNT,    /* the built-in fields; the MQTT fields follow */
 } ui_field_id_t;
 
@@ -161,6 +162,7 @@ typedef struct {
     const ui_solar_t *solar; /* M6d: the PV forecast and the house's energy; NULL for none */
     const ha_store_t *mqtt;  /* M7: the MQTT fields' values and the message; NULL for none */
     const ui_mqtt_keys_t *mqtt_keys; /* the keys of the presets drawn; NULL for none */
+    bool mqtt_failed;        /* the last MQTT session failed: the status bar's mark (spec §5.2) */
 } ui_context_t;
 
 typedef enum {
@@ -175,7 +177,7 @@ typedef struct {
     ui_value_state_t state;
     uint32_t age_s;    /* how old a stale value is */
     const char *label; /* from the language pack */
-    char text[48];     /* the value: "23.4", "20:48", "Friday 25 September", a name */
+    char text[HA_MESSAGE_LEN]; /* the value: "23.4", "20:48", "Friday 25 September", a name, the message */
     char unit[8];      /* "°C", "%", "d", or the AM/PM suffix of a time */
     char extra[24];    /* secondary text: the seconds, the medium date, the illumination, the voltage */
     char short_text[16]; /* a shorter form: the short phase name, or a number without its decimals */

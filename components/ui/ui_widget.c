@@ -8,6 +8,7 @@
 
 #define PLACEHOLDER "\xE2\x80\x94" /* em dash */
 #define ELLIPSIS "\xE2\x80\xA6"
+#define FIT_LEN (sizeof(((ui_value_t *)0)->text) + 4) /* a value's text as drawn: the message, cut with an ellipsis */
 #define ARROW_UP "\xE2\x86\x91"
 #define ARROW_DOWN "\xE2\x86\x93"
 #define PI 3.14159265358979323846
@@ -70,6 +71,9 @@ static const gfx_bitmap_t *field_icon(ui_field_id_t field, int size)
         break;
     case UI_FIELD_DATE_HOLIDAY:
         s16 = &gfx_icon_celebration_16, s24 = &gfx_icon_celebration_24, s48 = &gfx_icon_celebration_48;
+        break;
+    case UI_FIELD_HA_MESSAGE:
+        s16 = &gfx_icon_message_16, s24 = &gfx_icon_message_24, s48 = &gfx_icon_message_48;
         break;
     case UI_FIELD_WX_NOW:
     case UI_FIELD_WX_TODAY:
@@ -238,7 +242,7 @@ void ui_split_two_lines(const gfx_font_t *font, const char *text, int max_w, cha
         gfx_text_ellipsize(font, text, max_w, line1, size);
         return;
     }
-    char first[96];
+    char first[128]; /* the message's 96 bytes too */
     snprintf(first, sizeof(first), "%s", text ? text : "");
     for (char *space = strrchr(first, ' '); space != NULL; space = strrchr(first, ' ')) {
         *space = '\0';
@@ -422,7 +426,7 @@ static void draw_small_beside(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     int pad = r.w < 150 ? 6 : 14, gap = r.w < 150 ? 6 : 10;
     int sym_y = r.y + (r.h - f->icon) / 2;
     int label_w = r.w * 2 / 5; /* an MQTT field's label: up to two fifths of the cell */
-    char fit[48];
+    char fit[FIT_LEN];
     if (!numeric(v)) {
         const gfx_font_t *vf = v->state == UI_VALUE_MISSING ? f->value : f->text;
         const char *forms[3] = { display_text(v, UI_SIZE_S), "", "" };
@@ -499,7 +503,7 @@ static void draw_small(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
         shown.unit[0] = '\0';
         shown.trend = 0;
     }
-    char fit[48];
+    char fit[FIT_LEN];
     /* a name on two lines ends 84 px down: it stacks from 86 px, its tails 2 px clear */
     bool two_lines = !numeric(v) && v->kind != UI_FK_MOON && gfx_text_width(vf, value) > r.w - 8;
     if (r.w < 150 && r.h >= (two_lines ? 86 : 80)) { /* narrow and tall: symbol above, value below, the arrow beside */
@@ -736,7 +740,7 @@ static void draw_tiny_line(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     int sym_w, sym_h;
     tiny_symbol_size(v, sym, label_w, &sym_w, &sym_h);
     int cy = r.y + r.h / 2, top = cy - sym_h / 2;
-    char fit[48];
+    char fit[FIT_LEN];
     if (numeric(v)) {
         for (int with = sym_w > 0; with >= 0; with--) {
             bool centre = v->kind == UI_FK_TIME || (sym_w > 0 && !with); /* alone, or its symbol given up */
@@ -795,7 +799,7 @@ static void draw_tiny_stacked(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
 {
     int sym = r.h >= 60 ? 24 : 16;
     int cx = r.x + r.w / 2;
-    char fit[48];
+    char fit[FIT_LEN];
     if (v->kind == UI_FK_DATE && v->state != UI_VALUE_MISSING) { /* "Fri" over "25", "Pá" over "25." */
         char wd[16];
         snprintf(wd, sizeof(wd), "%s", v->short_text);
@@ -876,6 +880,59 @@ static void draw_tiny(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v)
     }
 }
 
+#define WRAP_LINES 8
+
+/* How much of `p` its next line takes: the longest run of whole words that fits `max_w`, a word wider than a
+ * line alone, or the rest on the last line. */
+static size_t wrap_take(const gfx_font_t *f, const char *p, int max_w, bool last, char *part, size_t part_size)
+{
+    if (last || gfx_text_width(f, p) <= max_w) {
+        return strlen(p);
+    }
+    size_t fit = 0;
+    for (size_t i = 1; p[i - 1] != '\0'; i++) {
+        if (p[i] == ' ' || p[i] == '\0') {
+            snprintf(part, part_size, "%.*s", (int)i, p);
+            if (gfx_text_width(f, part) > max_w) {
+                break;
+            }
+            fit = i;
+        }
+    }
+    return fit > 0 ? fit : strcspn(p, " ");
+}
+
+/* A text wider than the body over as many lines as its height holds, broken at spaces, centred; the last
+ * line takes the rest, cut with an ellipsis, as does a word wider than a line. Two passes, counting the lines
+ * and then drawing them, so no line is kept: the app task's stack is small. */
+static void draw_wrapped(gfx_fb_t *fb, const gfx_font_t *f, gfx_rect_t body, const char *text)
+{
+    int max_w = body.w - 12, max_lines = (body.h - 4) / f->line_height;
+    max_lines = max_lines < 1 ? 1 : max_lines > WRAP_LINES ? WRAP_LINES : max_lines;
+    char part[HA_MESSAGE_LEN], line[HA_MESSAGE_LEN + 4];
+    int top = body.y;
+    for (int pass = 0; pass < 2; pass++) {
+        const char *p = text;
+        int n = 0;
+        while (*p != '\0' && n < max_lines) {
+            while (*p == ' ') {
+                p++;
+            }
+            size_t take = wrap_take(f, p, max_w, n == max_lines - 1, part, sizeof(part));
+            if (pass == 1) {
+                snprintf(part, sizeof(part), "%.*s", (int)take, p);
+                gfx_text_ellipsize(f, part, max_w, line, sizeof(line));
+                gfx_text_in_rect(fb, f, (gfx_rect_t){ body.x, (int16_t)(top + n * f->line_height), body.w,
+                                                      (int16_t)f->line_height },
+                                 GFX_ALIGN_CENTER, line, GFX_BLACK);
+            }
+            p += take;
+            n++;
+        }
+        top = body.y + (body.h - n * f->line_height) / 2;
+    }
+}
+
 static void draw_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v)
 {
     const ui_fonts_t *f = &k_fonts[size];
@@ -893,7 +950,7 @@ static void draw_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_v
         top += f->label->line_height;
     }
     gfx_rect_t body = { r.x, (int16_t)top, r.w, (int16_t)(r.y + r.h - top) };
-    char fit[48];
+    char fit[FIT_LEN];
     const char *value = display_text(v, size);
 
     if (v->kind == UI_FK_MOON && v->state != UI_VALUE_MISSING) { /* disc, then the phase name */
@@ -913,6 +970,10 @@ static void draw_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_v
             if (gfx_text_width(tf, value) > body.w - 12) {
                 value = v->extra; /* the medium form: "Fri 25 Sep" */
             }
+        }
+        if (v->kind == UI_FK_TEXT && v->state != UI_VALUE_MISSING && gfx_text_width(tf, value) > body.w - 12) {
+            draw_wrapped(fb, tf, body, value); /* a message, or an MQTT text (M7) */
+            return;
         }
         gfx_text_ellipsize(tf, value, body.w - 12, fit, sizeof(fit));
         gfx_text_in_rect(fb, tf, body, GFX_ALIGN_CENTER, fit, GFX_BLACK);

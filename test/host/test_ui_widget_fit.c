@@ -280,6 +280,11 @@ static ui_context_t split_context(int variant)
     if (variant == 2) {
         s_fix_forecast.fetched = (uint32_t)(FIX_NOW - 50 * 3600);
     }
+    if (variant != 3) { /* the longest message, stale in the stale set */
+        fixture_mqtt(&ctx);
+        ha_store_set_message(&s_fix_mqtt, ctx.lang == lang_get("cs") ? FIX_MESSAGE_CS : FIX_MESSAGE_EN,
+                             variant == 2 ? FIX_NOW - 2 * 86400 : FIX_NOW - 60);
+    }
     return ctx;
 }
 
@@ -1080,6 +1085,24 @@ static void test_mqtt_labels_stand_where_icons_would(void)
     TEST_ASSERT_TRUE(inked(r.x + 2, r.x + r.w - 3, r.y + 2, r.y + r.h - 3));
 }
 
+/* The message keeps its 96 bytes wherever they fit (spec §12.7): on one line of a wide XS cell it shows whole,
+ * in the small face after its symbol, not cut where a 48-byte buffer would end. */
+static void test_a_long_message_shows_whole_where_it_fits(void)
+{
+    static const char k_text[] = "Washer done. Dryer free till 21:30, window still open";
+    ui_context_t ctx = split_context(0);
+    ha_store_set_message(&s_fix_mqtt, k_text, FIX_NOW - 60);
+    gfx_rect_t r = { 0, 278, 400, 22 };
+    int x = r.x + 3 + 16 + 3, w = gfx_text_width(&gfx_font_sans_12, k_text);
+    TEST_ASSERT_TRUE(strlen(k_text) > 48 && x + w <= r.x + r.w - 4);
+    TEST_ASSERT_TRUE(gfx_text_width(&gfx_font_sans_bold_16, k_text) > r.x + r.w - 4 - x);
+    gfx_fb_init(&s_fb, s_buf, 400, 300);
+    gfx_clear(&s_fb, GFX_WHITE);
+    ui_draw_cell(&s_fb, r, &ctx, UI_FIELD_HA_MESSAGE, UI_STALE_STALE);
+    TEST_ASSERT_FALSE(has_ellipsis(r));
+    TEST_ASSERT_TRUE(inked(x + w - 8, x + w, r.y, r.y + r.h - 1)); /* its last letters */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1106,5 +1129,6 @@ int main(void)
     RUN_TEST(test_mqtt_fields_fit_every_cell_a_split_can_make);
     RUN_TEST(test_mqtt_fields_fit_every_xs_and_short_s_cell);
     RUN_TEST(test_mqtt_labels_stand_where_icons_would);
+    RUN_TEST(test_a_long_message_shows_whole_where_it_fits);
     return UNITY_END();
 }

@@ -228,7 +228,7 @@ The house's energy comes from [SolaX Cloud](https://www.solaxcloud.com), where S
 
 A reading comes with each sync, and every 5 minutes in sync mode Always on. A reading counts as fresh for 15 minutes. If the house's reading fails, the Sync page and the Solar page say why, but the sync itself doesn't count as failed: the next reading soon replaces it.
 
-Powers under 1 kW show in watts, as the SolaX app shows them; from 1 kW in kW. The Energy flow in a small slot uses one unit for all its numbers: W while every power is under 1 kW.
+Powers under 1 kW show in watts, as the SolaX app shows them; from 1 kW in kW. With the Developer API, Solar is the app's figure too: what the panels give through the inverter, a few percent under their own DC power. The Energy flow in a small slot uses one unit for all its numbers: W while every power is under 1 kW.
 
 The home battery shows when you set it to show, or by itself when the inverter is a hybrid or a reading has a charge above 0 %. On the Energy layout, arrows show where at least 20 W flow and dotted lines where less does. Own use is the share of the day's output that the house used itself.
 

@@ -240,7 +240,7 @@ static void test_a_hybrids_phases_are_its_output_and_the_house_draws_them_and_th
     energy_dev_today_t today = { .found = false };
     energy_reading_t r;
     TEST_ASSERT_TRUE(energy_dev_reading(&now, &today, 0, &r));
-    TEST_ASSERT_EQUAL_INT32(1471, r.pv_w);
+    TEST_ASSERT_EQUAL_INT32(1397, r.pv_w); /* the app's figure: what the inverter gives, not the panels' 1471 W DC */
     TEST_ASSERT_EQUAL_INT32(1358, r.grid_w); /* importing */
     TEST_ASSERT_EQUAL_INT32(2755, r.load_w);
     TEST_ASSERT_EQUAL_UINT32((uint32_t)local(2026, 10, 6, 11, 27) + 38, r.at);
@@ -260,6 +260,29 @@ static void test_the_backup_ports_power_is_the_houses_too(void)
     TEST_ASSERT_TRUE(energy_dev_reading(&now, NULL, 1791205100, &r));
     TEST_ASSERT_EQUAL_INT32(382, r.load_w);
     TEST_ASSERT_EQUAL_INT32(0, r.grid_w);
+}
+
+/* Solar is what the panels give through the inverter, as the SolaX app shows it (owner, 2026-10-06): its output and a
+ * battery's charge, at most what the panels deliver; nothing at night while a battery discharges through it; without
+ * the inverter's output, the panels' DC power. */
+static void test_solar_is_the_panels_power_through_the_inverter(void)
+{
+    energy_reading_t r;
+    energy_dev_now_t charging = { .have_pv = true, .have_ac = true, .have_bat = true, .pv_w = 3420, .ac_w = 2200,
+                                  .bat_w = 1000 };
+    TEST_ASSERT_TRUE(energy_dev_reading(&charging, NULL, 1791205100, &r));
+    TEST_ASSERT_EQUAL_INT32(3200, r.pv_w);
+    energy_dev_now_t night = { .have_pv = true, .have_ac = true, .have_bat = true, .pv_w = 0, .ac_w = 600,
+                               .bat_w = -600 };
+    TEST_ASSERT_TRUE(energy_dev_reading(&night, NULL, 1791205100, &r));
+    TEST_ASSERT_EQUAL_INT32(0, r.pv_w);
+    TEST_ASSERT_EQUAL_INT32(600, r.load_w);
+    energy_dev_now_t odd = { .have_pv = true, .have_ac = true, .pv_w = 900, .ac_w = 1400 }; /* never past the panels */
+    TEST_ASSERT_TRUE(energy_dev_reading(&odd, NULL, 1791205100, &r));
+    TEST_ASSERT_EQUAL_INT32(900, r.pv_w);
+    energy_dev_now_t dc = { .have_pv = true, .pv_w = 900 };
+    TEST_ASSERT_TRUE(energy_dev_reading(&dc, NULL, 1791205100, &r));
+    TEST_ASSERT_EQUAL_INT32(900, r.pv_w);
 }
 
 /* SolaX's dataTime in the forms a reply may take: ISO 8601 with its zone, with or without the offset's colon; the
@@ -471,6 +494,7 @@ int main(void)
     RUN_TEST(test_the_meter_stands_for_the_grid_and_the_battery_for_itself);
     RUN_TEST(test_a_hybrids_phases_are_its_output_and_the_house_draws_them_and_the_grid);
     RUN_TEST(test_the_backup_ports_power_is_the_houses_too);
+    RUN_TEST(test_solar_is_the_panels_power_through_the_inverter);
     RUN_TEST(test_the_data_time_in_its_forms);
     RUN_TEST(test_a_data_time_it_cant_read_refuses_the_reply);
     RUN_TEST(test_todays_row_of_the_month);

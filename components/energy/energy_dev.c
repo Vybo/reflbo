@@ -518,14 +518,18 @@ bool energy_dev_reading(const energy_dev_now_t *now, const energy_dev_today_t *t
     }
     memset(out, 0, sizeof(*out));
     out->at = now->at != 0 ? now->at : fallback_at;
-    double pv = now->have_pv ? now->pv_w : now->ac_w;
     double feed = now->have_grid ? now->feed_w : 0, bat = now->have_bat ? now->bat_w : 0;
+    double dc = now->have_pv ? now->pv_w : now->ac_w;
+    /* solar as the SolaX app shows it (owner, D39): what the panels give through the inverter, its output and a
+     * battery's charge, at most what they deliver; without the inverter's output, their DC power */
+    double pv = now->have_ac ? now->ac_w + bat : dc;
+    pv = now->have_pv && pv > dc ? dc : pv;
     out->pv_w = watts(pv < 0 ? 0 : pv);
     out->grid_w = watts(-feed);
     out->bat_w = watts(bat);
     double eps = now->have_eps ? now->eps_w : 0;
     /* the house: the inverter's output, which nets the battery, and its backup port's, with what the grid brings */
-    double load = now->have_ac ? now->ac_w + eps - feed : pv - bat - feed;
+    double load = now->have_ac ? now->ac_w + eps - feed : dc - bat - feed;
     out->load_w = watts(load < 0 ? 0 : load);
     out->soc = now->have_soc ? (int16_t)lround(now->soc < 0 ? 0 : now->soc > 100 ? 100 : now->soc) : -1;
     out->today = true;

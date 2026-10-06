@@ -89,7 +89,8 @@ bool energy_dev_parse_today(const char *json, size_t len, int year, int month, i
  * a rate limit (429), a server's error, or a reply without a code or with the OK one, is not. */
 bool energy_dev_refused(int http_status, const char *json, size_t len);
 
-/* The reading in our signs from what came: the time is the newest dataTime, else `fallback_at`; with today's row
+/* The reading in our signs from what came: solar is the inverter's output and a battery's charge, at most the panels'
+ * DC power, or that without the output (D39); the time is the newest dataTime, else `fallback_at`; with today's row
  * its totals are today's (`today`), and without one they are missing for the day. False without the panels' or the
  * inverter's power. */
 bool energy_dev_reading(const energy_dev_now_t *now, const energy_dev_today_t *today, uint32_t fallback_at,

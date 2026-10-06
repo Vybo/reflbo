@@ -220,6 +220,66 @@ static void test_the_meter_stands_for_the_grid_and_the_battery_for_itself(void)
     TEST_ASSERT_EQUAL_UINT32((uint32_t)local(2026, 10, 5, 13, 20), now.at); /* the newest */
 }
 
+/* SolaX's dataTime in the forms a reply may take: ISO 8601 with its zone, with or without the offset's colon; the
+ * plant's local time with a space or with slashes; seconds or milliseconds since 1970. */
+static void test_the_data_time_in_its_forms(void)
+{
+    time_t want = local(2026, 10, 5, 13, 17) + 2;
+    char seconds[24], millis[24];
+    snprintf(seconds, sizeof(seconds), "%lld", (long long)want);
+    snprintf(millis, sizeof(millis), "\"%lld000\"", (long long)want);
+    const char *const k_times[] = { "\"2026-10-05T13:17:02+02:00\"", "\"2026-10-05T19:17:02+0800\"",
+                                    "\"2026-10-05T11:17:02Z\"", "\"2026-10-05 13:17:02\"", "\"2026/10/05 13:17:02\"",
+                                    seconds, millis };
+    for (size_t i = 0; i < sizeof(k_times) / sizeof(k_times[0]); i++) {
+        char json[256];
+        snprintf(json, sizeof(json), "{\"code\":10000,\"result\":[{\"MPPTTotalInputPower\":3420,\"dataTime\":%s}]}",
+                 k_times[i]);
+        energy_dev_now_t now;
+        memset(&now, 0, sizeof(now));
+        TEST_ASSERT_TRUE_MESSAGE(energy_dev_parse_realtime(json, strlen(json), ENERGY_DEV_INVERTER, 1, &now, s_err,
+                                                           sizeof(s_err)),
+                                 k_times[i]);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)want, now.at, k_times[i]);
+    }
+}
+
+/* A dataTime the step can't read refuses the reply: a reading of unknown age would look fresh for ever (the sync's
+ * clock would date it), and a dongle that stopped uploading would never show as stale. None at all, null or empty,
+ * leaves the sync's clock to date the reading. A refused battery or meter leaves the values gathered so far alone. */
+static void test_a_data_time_it_cant_read_refuses_the_reply(void)
+{
+    const char *const k_times[] = { "\"soon\"", "20261005", "\"2026-13-05 13:17:02\"", "\"05.10.2026 13:17\"", "true" };
+    for (size_t i = 0; i < sizeof(k_times) / sizeof(k_times[0]); i++) {
+        char json[256];
+        snprintf(json, sizeof(json), "{\"code\":10000,\"result\":[{\"MPPTTotalInputPower\":3420,\"dataTime\":%s}]}",
+                 k_times[i]);
+        energy_dev_now_t now;
+        memset(&now, 0, sizeof(now));
+        TEST_ASSERT_FALSE_MESSAGE(energy_dev_parse_realtime(json, strlen(json), ENERGY_DEV_INVERTER, 1, &now, s_err,
+                                                            sizeof(s_err)),
+                                  k_times[i]);
+        TEST_ASSERT_EQUAL_STRING("unreadable dataTime", s_err);
+    }
+    const char *const k_none[] = { "null", "\"\"" };
+    for (size_t i = 0; i < sizeof(k_none) / sizeof(k_none[0]); i++) {
+        char json[256];
+        snprintf(json, sizeof(json), "{\"code\":10000,\"result\":[{\"MPPTTotalInputPower\":3420,\"dataTime\":%s}]}",
+                 k_none[i]);
+        energy_dev_now_t now;
+        memset(&now, 0, sizeof(now));
+        TEST_ASSERT_TRUE_MESSAGE(energy_dev_parse_realtime(json, strlen(json), ENERGY_DEV_INVERTER, 1, &now, s_err,
+                                                           sizeof(s_err)),
+                                 k_none[i]);
+        TEST_ASSERT_EQUAL_UINT32(0, now.at);
+    }
+    energy_dev_now_t now = { .have_soc = true, .soc = 64 };
+    const char *battery = "{\"code\":10000,\"result\":[{\"batterySOC\":12,\"dataTime\":\"soon\"}]}";
+    TEST_ASSERT_FALSE(energy_dev_parse_realtime(battery, strlen(battery), ENERGY_DEV_BATTERY, 1, &now, s_err,
+                                                sizeof(s_err)));
+    TEST_ASSERT_EQUAL_DOUBLE(64, now.soc);
+}
+
 /* --- today's totals --- */
 
 static void test_todays_row_of_the_month(void)
@@ -332,6 +392,28 @@ static void test_replies_that_say_they_failed(void)
     }
 }
 
+/* A refusal is SolaX turning a request down: a kept token or plant may be stale, so one more try after a new login
+ * can help (spec §11.6). A timeout or the radio's budget (no reply), a rate limit, a server's error, or a reply that
+ * answered as it should but held nothing is not one: trying again at once wouldn't help. */
+static void test_a_refusal_is_401_403_or_a_reply_with_another_code(void)
+{
+    const char *bad = "{\"code\":10401,\"message\":\"access token is invalid\"}";
+    const char *bad_text = "{\"code\":\"10402\"}";
+    const char *empty = "{\"code\":10000,\"result\":[]}";
+    const char *no_code = "{\"message\":\"success\"}";
+    TEST_ASSERT_TRUE(energy_dev_refused(401, "", 0));
+    TEST_ASSERT_TRUE(energy_dev_refused(403, NULL, 0));
+    TEST_ASSERT_TRUE(energy_dev_refused(200, bad, strlen(bad)));
+    TEST_ASSERT_TRUE(energy_dev_refused(200, bad_text, strlen(bad_text)));
+    TEST_ASSERT_FALSE(energy_dev_refused(429, bad, strlen(bad))); /* a rate limit: another try at once makes it worse */
+    TEST_ASSERT_FALSE(energy_dev_refused(500, bad, strlen(bad)));
+    TEST_ASSERT_FALSE(energy_dev_refused(0, "", 0));  /* no reply */
+    TEST_ASSERT_FALSE(energy_dev_refused(-1, "", 0)); /* a kept connection that brought nothing */
+    TEST_ASSERT_FALSE(energy_dev_refused(200, empty, strlen(empty)));
+    TEST_ASSERT_FALSE(energy_dev_refused(200, "not json", 8));
+    TEST_ASSERT_FALSE(energy_dev_refused(200, no_code, strlen(no_code)));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -345,10 +427,13 @@ int main(void)
     RUN_TEST(test_the_inverter_gives_the_panels_its_output_and_the_grid);
     RUN_TEST(test_without_a_total_the_mppts_add_up_and_a_commercial_plant_is_in_kw);
     RUN_TEST(test_the_meter_stands_for_the_grid_and_the_battery_for_itself);
+    RUN_TEST(test_the_data_time_in_its_forms);
+    RUN_TEST(test_a_data_time_it_cant_read_refuses_the_reply);
     RUN_TEST(test_todays_row_of_the_month);
     RUN_TEST(test_a_rows_day_in_its_other_forms);
     RUN_TEST(test_the_reading_in_our_signs_with_todays_totals);
     RUN_TEST(test_the_reading_without_the_statistics_or_a_battery);
     RUN_TEST(test_replies_that_say_they_failed);
+    RUN_TEST(test_a_refusal_is_401_403_or_a_reply_with_another_code);
     return UNITY_END();
 }

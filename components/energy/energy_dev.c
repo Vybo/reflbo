@@ -2,6 +2,7 @@
 
 #include "energy_dev.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -298,15 +299,41 @@ bool energy_dev_parse_device(const char *json, size_t len, energy_dev_device_t d
     return ok;
 }
 
-/* A time a reply gives: ISO 8601 with its zone, or local without one; or seconds or ms since 1970. */
+/* ISO 8601 text from the forms SolaX may send: slashes in the date ("2026/10/05 13:17:02") become dashes, and an
+ * offset without its colon ("+0800") gets one; false for text too long to be a time. */
+static bool iso_text(const char *in, char *out, size_t size)
+{
+    size_t n = strlen(in);
+    if (n + 2 > size) {
+        return false;
+    }
+    memcpy(out, in, n + 1);
+    if (n >= 10 && out[4] == '/' && out[7] == '/') {
+        out[4] = out[7] = '-';
+    }
+    bool digits = n >= 16 && isdigit((unsigned char)out[n - 4]) && isdigit((unsigned char)out[n - 3]) &&
+                  isdigit((unsigned char)out[n - 2]) && isdigit((unsigned char)out[n - 1]);
+    if (digits && (out[n - 5] == '+' || out[n - 5] == '-')) {
+        memmove(&out[n - 1], &out[n - 2], 3); /* "00" and the NUL, one place on */
+        out[n - 2] = ':';
+    }
+    return true;
+}
+
+/* A time a reply gives: ISO 8601 with its zone (with or without the offset's colon), or the plant's local time
+ * without one, with a space or slashes; or seconds or ms since 1970, from 2001 on. 0 for one it can't read. */
 static uint32_t reply_time(const cJSON *item)
 {
     time_t t = 0;
     double v;
-    if (cJSON_IsString(item) && timekeeping_parse_iso8601(item->valuestring, &t)) {
+    char text[40];
+    if (cJSON_IsString(item) && iso_text(item->valuestring, text, sizeof(text)) &&
+        timekeeping_parse_iso8601(text, &t)) {
         /* parsed */
-    } else if (number(item, &v) && v > 0) {
+    } else if (number(item, &v) && v >= 1e9) { /* a smaller number is no time of this century ("20261005") */
         t = (time_t)(v > 1e11 ? v / 1000.0 : v);
+    } else {
+        t = 0;
     }
     return t > 0 && (double)t < 4294967296.0 ? (uint32_t)t : 0;
 }
@@ -344,6 +371,13 @@ bool energy_dev_parse_realtime(const char *json, size_t len, energy_dev_device_t
         cJSON_Delete(root);
         return fail(err, err_size, "no data");
     }
+    const cJSON *when = member(entry, "dataTime");
+    bool timed = when != NULL && !cJSON_IsNull(when) && !(cJSON_IsString(when) && when->valuestring[0] == '\0');
+    uint32_t at = timed ? reply_time(when) : 0;
+    if (timed && at == 0) { /* of unknown age, a reading would look fresh for ever: nothing of it is taken */
+        cJSON_Delete(root);
+        return fail(err, err_size, "unreadable dataTime");
+    }
     double k = business == 4 ? 1000.0 : 1.0; /* a commercial plant's power in kW */
     double v;
     if (device == ENERGY_DEV_INVERTER) {
@@ -376,7 +410,6 @@ bool energy_dev_parse_realtime(const char *json, size_t len, energy_dev_device_t
         now->bat_w = v * k;
         now->have_bat = true;
     }
-    uint32_t at = reply_time(member(entry, "dataTime"));
     now->at = at > now->at ? at : now->at;
     cJSON_Delete(root);
     return true;
@@ -429,6 +462,21 @@ bool energy_dev_parse_today(const char *json, size_t len, int year, int month, i
     }
     cJSON_Delete(root);
     return true;
+}
+
+bool energy_dev_refused(int http_status, const char *json, size_t len)
+{
+    if (http_status == 401 || http_status == 403) {
+        return true;
+    }
+    if (http_status != 200 || json == NULL || len == 0 || util_json_depth(json) > DEPTH_MAX) {
+        return false;
+    }
+    cJSON *root = cJSON_ParseWithLength(json, len);
+    double code;
+    bool refused = cJSON_IsObject(root) && number_at(root, "code", &code) && code != CODE_OK && code != CODE_TOKEN_OK;
+    cJSON_Delete(root);
+    return refused;
 }
 
 static int32_t watts(double v)

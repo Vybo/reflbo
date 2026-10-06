@@ -371,7 +371,7 @@ static void step_energy_token(void)
 #define DEV_RAW_MAX 2048 /* each last data reply kept for `energy raw` */
 EXT_RAM_BSS_ATTR static char s_dev_raw[SYNC_ENERGY_RAW_COUNT][DEV_RAW_MAX];
 static fetch_session_t s_dev; /* one connection for the step's requests, all to one host */
-static int s_dev_status;      /* the last request's HTTP status; 0 without a reply */
+static bool s_dev_refused;    /* SolaX refused the last request: a kept token or plant may be stale */
 
 const char *sync_energy_raw(int which)
 {
@@ -383,6 +383,7 @@ const char *sync_energy_raw(int which)
 static bool dev_request(const char *path, const char *body, bool json, const char *bearer,
                         char detail[SYNC_DETAIL_LEN])
 {
+    s_dev_refused = false; /* only a refusal retries: never a timeout or the radio's budget */
     char url[ENERGY_DEV_URL_MAX];
     if (energy_dev_url(url, sizeof(url), (energy_dev_region_t)s_req.energy.region, path) == 0) {
         snprintf(detail, SYNC_DETAIL_LEN, "bad region");
@@ -396,15 +397,23 @@ static bool dev_request(const char *path, const char *body, bool json, const cha
     size_t len;
     int status = 0;
     s_dev.bearer = bearer;
-    s_dev_status = 0;
+    const char *type = json ? "application/json" : "application/x-www-form-urlencoded";
     esp_err_t err = body == NULL ? fetch_get(&s_dev, url, s_body, sizeof(s_body), &len, budget, &status)
-                                 : fetch_post(&s_dev, url, json ? "application/json" : "application/x-www-form-urlencoded",
-                                              body, s_body, sizeof(s_body), &len, budget, &status);
-    s_dev_status = status;
+                                 : fetch_post(&s_dev, url, type, body, s_body, sizeof(s_body), &len, budget, &status);
     if (err != ESP_OK) {
+        s_dev_refused = energy_dev_refused(status, s_body, strlen(s_body));
         http_detail(err, status, detail);
     }
     return err == ESP_OK;
+}
+
+/* A reply's parser's result: one that didn't parse was refused when SolaX's own code says so. */
+static bool dev_parsed(bool ok)
+{
+    if (!ok) {
+        s_dev_refused = energy_dev_refused(200, s_body, strlen(s_body));
+    }
+    return ok;
 }
 
 /* The access token for the application's client credentials, into the request for this step and the report for the
@@ -440,7 +449,7 @@ static bool dev_find(sync_energy_req_t *q, char detail[SYNC_DETAIL_LEN])
         site.business = (uint8_t)business;
         energy_dev_plants_path(path, sizeof(path), business);
         if (!dev_request(path, NULL, false, q->access, detail) ||
-            !energy_dev_parse_plant(s_body, strlen(s_body), &site, detail, SYNC_DETAIL_LEN)) {
+            !dev_parsed(energy_dev_parse_plant(s_body, strlen(s_body), &site, detail, SYNC_DETAIL_LEN))) {
             return false;
         }
     }
@@ -451,8 +460,8 @@ static bool dev_find(sync_energy_req_t *q, char detail[SYNC_DETAIL_LEN])
     for (int d = ENERGY_DEV_INVERTER; d <= ENERGY_DEV_METER; d++) {
         if (energy_dev_devices_path(path, sizeof(path), &site, (energy_dev_device_t)d) == 0 ||
             !dev_request(path, NULL, false, q->access, detail) ||
-            !energy_dev_parse_device(s_body, strlen(s_body), (energy_dev_device_t)d, &site, detail,
-                                     SYNC_DETAIL_LEN)) {
+            !dev_parsed(energy_dev_parse_device(s_body, strlen(s_body), (energy_dev_device_t)d, &site, detail,
+                                                SYNC_DETAIL_LEN))) {
             return false;
         }
     }
@@ -475,7 +484,7 @@ static bool dev_read(sync_energy_req_t *q, uint32_t now, char detail[SYNC_DETAIL
     static const char *const k_names[] = { "inverter", "battery", "meter" };
     energy_dev_now_t vals;
     memset(&vals, 0, sizeof(vals));
-    char path[ENERGY_DEV_URL_MAX], why[SYNC_DETAIL_LEN];
+    char path[ENERGY_DEV_URL_MAX], why[SYNC_DETAIL_LEN] = "";
     for (int d = ENERGY_DEV_INVERTER; d <= ENERGY_DEV_METER; d++) {
         char *err = d == ENERGY_DEV_INVERTER ? detail : why;
         if (q->site.sn[d - 1][0] == '\0') {
@@ -485,8 +494,8 @@ static bool dev_read(sync_energy_req_t *q, uint32_t now, char detail[SYNC_DETAIL
                   dev_request(path, NULL, false, q->access, err);
         if (ok) {
             util_json_text(s_dev_raw[d - 1], DEV_RAW_MAX, s_body);
-            ok = energy_dev_parse_realtime(s_body, strlen(s_body), (energy_dev_device_t)d, q->site.business, &vals,
-                                           err, SYNC_DETAIL_LEN);
+            ok = dev_parsed(energy_dev_parse_realtime(s_body, strlen(s_body), (energy_dev_device_t)d, q->site.business,
+                                                      &vals, err, SYNC_DETAIL_LEN));
         }
         if (!ok && d == ENERGY_DEV_INVERTER) {
             return false;
@@ -509,8 +518,12 @@ static bool dev_read(sync_energy_req_t *q, uint32_t now, char detail[SYNC_DETAIL
         }
     }
     if (!energy_dev_reading(&vals, &today, now, &s_report.energy)) {
+        s_dev_refused = false; /* answered, without the values: another login wouldn't bring them */
         snprintf(detail, SYNC_DETAIL_LEN, "no data");
         return false;
+    }
+    if (vals.at == 0) {
+        ESP_LOGI(TAG, "energy: no dataTime in SolaX's replies; the sync's clock dates the reading");
     }
     return true;
 }
@@ -527,7 +540,7 @@ static bool dev_steps(sync_energy_req_t *q, uint32_t now, char detail[SYNC_DETAI
     if ((found || dev_find(q, detail)) && dev_read(q, now, detail)) {
         return true;
     }
-    if (!(kept || found) || s_dev_status == 0) {
+    if (!(kept || found) || !s_dev_refused) {
         return false;
     }
     if (kept) {

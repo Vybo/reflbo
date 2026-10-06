@@ -83,6 +83,11 @@ bool energy_dev_parse_realtime(const char *json, size_t len, energy_dev_device_t
 bool energy_dev_parse_today(const char *json, size_t len, int year, int month, int day, energy_dev_today_t *today,
                             char *err, size_t err_size);
 
+/* Whether a failed request was SolaX refusing it: HTTP 401 or 403, or a reply whose `code` isn't the OK one, so a kept
+ * token or plant may be stale and one more try after a new login can help. No reply (a timeout, the radio's budget),
+ * a rate limit (429), a server's error, or a reply without a code or with the OK one, is not. */
+bool energy_dev_refused(int http_status, const char *json, size_t len);
+
 /* The reading in our signs from what came: the time is the newest dataTime, else `fallback_at`; with today's row
  * its totals are today's (`today`), and without one they are missing for the day. False without the panels' or the
  * inverter's power. */

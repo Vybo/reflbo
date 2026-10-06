@@ -148,6 +148,20 @@ static void test_a_step_runs_nothing_late(void)
     TEST_ASSERT_EQUAL_INT(0, order[0]);
 }
 
+/* M7: the longest night the schedule starts (HA's sensors outlast it, spec §12.3); none while it is off. */
+static void test_the_longest_night(void)
+{
+    ui_schedule_t s = { .enabled = true, .count = 3 };
+    s.entries[0] = (ui_schedule_entry_t){ .at_min = 22 * 60, .days = 0x7F, .action = UI_SCHED_NIGHT,
+                                          .until_min = 22 * 60 + 30 };
+    s.entries[1] = (ui_schedule_entry_t){ .at_min = 23 * 60, .days = 0x1F, .action = UI_SCHED_NIGHT,
+                                          .until_min = 6 * 60 + 30 };
+    s.entries[2] = (ui_schedule_entry_t){ .at_min = 6 * 60, .days = 0x7F, .action = UI_SCHED_PRESET, .preset = 0 };
+    TEST_ASSERT_EQUAL_UINT32(7 * 3600 + 1800, ui_schedule_longest_night_s(&s));
+    s.enabled = false;
+    TEST_ASSERT_EQUAL_UINT32(0, ui_schedule_longest_night_s(&s));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -157,5 +171,6 @@ int main(void)
     RUN_TEST(test_dst_changes_run_an_entry_once);
     RUN_TEST(test_an_entry_at_the_nights_end_minute_runs);
     RUN_TEST(test_a_step_runs_nothing_late);
+    RUN_TEST(test_the_longest_night);
     return UNITY_END();
 }

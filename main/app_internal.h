@@ -33,6 +33,8 @@ typedef struct {
     uint8_t last_result[SYNC_STEP_COUNT]; /* sync_step_result_t */
     uint8_t last_failed_step;   /* the first step that failed; SYNC_STEP_COUNT if none */
     char last_detail[SYNC_STEP_COUNT][SYNC_DETAIL_LEN]; /* why each step failed, kept or was skipped */
+    uint32_t last_ok_at;        /* when the last sync that worked started (UTC); 0 = none: HA's Last sync (M7) */
+    bool sched_failed;          /* a scheduled sync failed, and none worked since: the crossed-out cloud (spec §5.2) */
 } app_sync_state_t;
 
 /* The PV forecast and the house's energy (main/app_solar.c, spec §11.5, §11.6): kept through deep sleep
@@ -162,7 +164,8 @@ void app_sync_toggle_always(void);
 bool app_sync_active(void);      /* a sync or a radar-only refresh runs */
 bool app_sync_refreshing(void);  /* what runs is a refresh or a check (spec §9.3): not shown as a sync */
 bool app_sync_running(void);     /* a sync runs, or waits for a refresh to end: what the screens show */
-bool app_sync_failed(void);      /* the last sync failed a step */
+bool app_sync_failed(void);      /* the last sync failed a step, the house's energy and MQTT aside (D36, D32) */
+bool app_sync_mark_failed(void); /* the status bar's crossed-out cloud: a scheduled sync failed (spec §5.2) */
 bool app_sync_holds_wifi(void);  /* sync mode `always` keeps Wi-Fi now */
 bool app_sync_wifi_pending(void); /* Wi-Fi is on, but nothing needs it: awake until it is off */
 void app_sync_wifi_check(void);   /* turns that Wi-Fi off, once a web reply has gone out */
@@ -271,6 +274,17 @@ void app_clock_moved(int64_t delta_s);
 int64_t app_uptime_ms(void); /* milliseconds since boot, unmoved by clock changes: toasts, menu */
 /* Logs, NVS and the console, as a board that stays awake has them (spec §3.3): a sync needs NVS. */
 void app_alive(void);
+
+/* MQTT and Home Assistant (main/app_mqtt.c, spec §12, D32). */
+bool app_mqtt_on(void);      /* on, with a broker */
+void app_mqtt_prepare(void); /* as a sync starts: the client, and the session's settings */
+esp_err_t app_mqtt_sync_step(int budget_ms, char *detail, size_t size); /* sync_request_t.mqtt */
+void app_mqtt_tick(void);    /* sync mode `always`'s connection and state; call from the app loop */
+int64_t app_mqtt_deadline_ms(void); /* app_uptime_ms() of its next look at the state; 0 when it keeps none */
+void app_mqtt_settings_changed(const settings_t *before); /* a kept connection starts again with them */
+void app_mqtt_password_changed(void);
+bool app_mqtt_failed(void);  /* the status bar's MQTT mark (spec §5.2) */
+void app_mqtt_summary(char *out, size_t size); /* Info ▸ MQTT: "Off", "12:05 OK", "Connected" */
 
 /* The `field`, `preset` and `night` console commands (main/app_cmds.c); call after diag_start(). */
 void app_register_commands(void);

@@ -49,10 +49,10 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      13 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
+#define SNAP_VERSION      14 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
                                    9: 24 cells (M6c); 10: the solar state and the sync's two steps (M6d);
                                    11: the Developer API's plant (D37); 12: MQTT's settings (M7);
-                                   13: the presets' MQTT keys (M7) */
+                                   13: the presets' MQTT keys (M7); 14: the MQTT step, the last good sync (M7) */
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */
@@ -706,6 +706,7 @@ static void app_task(void *arg)
             }
             app_config_tick();
             app_sync_wifi_check();
+            app_mqtt_tick();
             app_ui_toast_expire();
             app_radar_loop_tick();
             bool busy = pending || app_menu_is_open() || app_ui_toast_active();
@@ -747,7 +748,8 @@ static void app_task(void *arg)
             int64_t mono = app_uptime_ms();
             const int64_t deadlines[] = { app_menu_deadline_ms(), app_ui_toast_until_ms(),
                                           app_ui_night() ? s_peek_until_ms : 0, app_config_redraw_ms(),
-                                          s_ota_pending ? OTA_VERIFY_MS : 0, app_radar_loop_deadline_ms() };
+                                          s_ota_pending ? OTA_VERIFY_MS : 0, app_radar_loop_deadline_ms(),
+                                          app_mqtt_deadline_ms() };
             for (size_t i = 0; i < sizeof(deadlines) / sizeof(deadlines[0]); i++) {
                 if (deadlines[i] != 0 && deadlines[i] - mono < wait_ms) {
                     wait_ms = deadlines[i] - mono;

@@ -121,7 +121,12 @@ bool app_sync_running(void)
 bool app_sync_failed(void)
 {
     const app_sync_state_t *s = st();
-    return s->last_at != 0 && sync_report_failed(s->last_result); /* not for the house's energy (D36) */
+    return s->last_at != 0 && sync_report_failed(s->last_result); /* not for the house's energy or MQTT (D36, D32) */
+}
+
+bool app_sync_mark_failed(void)
+{
+    return st()->sched_failed;
 }
 
 /* Wi-Fi is off: netmgr isn't up yet (a routine wake), or it says so. */
@@ -274,8 +279,17 @@ static void apply(void *arg)
     save_summary(r, started);
     bool ok = !app_sync_failed();
     sync_history_record(&st()->history, s_started_by, ok, now);
-    ESP_LOGI(TAG, "sync %s%s%s", ok ? "done" : "failed at ", ok ? "" : sync_step_name(st()->last_failed_step),
-             ok ? "" : st()->last_detail[st()->last_failed_step]);
+    if (ok) {
+        st()->last_ok_at = (uint32_t)started;
+        st()->sched_failed = false;
+    } else if (s_started_by.at != 0) {
+        st()->sched_failed = true; /* spec §5.2: a scheduled sync's, not one on demand (M5 review) */
+    }
+    ESP_LOGI(TAG, "sync %s%s%s%s", ok ? "done" : "failed at ", ok ? "" : sync_step_name(st()->last_failed_step),
+             ok ? "" : ": ", ok ? "" : st()->last_detail[st()->last_failed_step]); /* "failed at weather: HTTP 503" */
+    if (r->result[SYNC_STEP_MQTT] == SYNC_STEP_FAILED) {
+        ESP_LOGW(TAG, "MQTT: %s", r->detail[SYNC_STEP_MQTT]);
+    }
     s_active = false; /* the report is applied: the next sync may overwrite it */
     release_wifi();
     app_sync_schedule();
@@ -311,6 +325,10 @@ static esp_err_t start(bool manual, sync_due_t due)
     memcpy(req.ntp, set->ntp, sizeof(req.ntp));
     app_radar_request(&req.radar);
     app_solar_request(&req.solar, &req.energy);
+    if (app_mqtt_on()) { /* M7 (spec §9.3 step 8) */
+        app_mqtt_prepare();
+        req.mqtt = app_mqtt_sync_step;
+    }
     esp_err_t err = sync_start(&req, done);
     if (err == ESP_OK) {
         s_active = true;
@@ -541,7 +559,7 @@ void app_sync_summary(char *out, size_t size)
     lang_format_time(local.tm_hour, local.tm_min, 0, app_settings()->clock_24h, false, when, sizeof(when), &suffix);
     static const lang_str_t k_steps[SYNC_STEP_COUNT] = { LS_SYNC_STEP_WIFI,  LS_SYNC_STEP_TIME,  LS_SYNC_STEP_WEATHER,
                                                          LS_SYNC_STEP_AIR,   LS_SYNC_STEP_RADAR, LS_SYNC_STEP_SOLAR,
-                                                         LS_SYNC_STEP_ENERGY };
+                                                         LS_SYNC_STEP_ENERGY, LS_SYNC_STEP_MQTT };
     if (s->last_failed_step >= SYNC_STEP_COUNT) {
         snprintf(out, size, "%s%s%s OK", when, suffix[0] ? " " : "", suffix);
     } else {

@@ -56,6 +56,7 @@ typedef enum {
     UI_MI_INFO_SYNC, /* the last sync's result (spec §5.7) */
     UI_MI_INFO_UPTIME,
     UI_MI_INFO_MEMORY,
+    UI_MI_INFO_MQTT, /* M7: the last MQTT session, or the kept connection (D32) */
     UI_MI_SYSTEM,
     UI_MI_LANGUAGE,      /* choice: the language packs */
     UI_MI_REBOOT,        /* action */

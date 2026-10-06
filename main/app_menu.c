@@ -64,7 +64,7 @@ static const char *s_zone_names[ZONES_MAX];
 static const char *s_language_names[LANGUAGE_COUNT];
 static char s_rate_text[RATE_COUNT][12];
 static const char *s_rates[RATE_COUNT];
-static char s_info[8][80];
+static char s_info[9][80];
 static const char *s_sync_modes[4];
 
 static const lang_t *lang(void)
@@ -231,10 +231,11 @@ static void build_model(void)
     snprintf(s_info[6], sizeof(s_info[6]), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4],
              mac[5]);
     app_sync_summary(s_info[7], sizeof(s_info[7]));
+    app_mqtt_summary(s_info[8], sizeof(s_info[8])); /* M7 */
     const ui_menu_item_t info_items[] = { UI_MI_INFO_BATTERY, UI_MI_INFO_FIRMWARE, UI_MI_INFO_DEVICE,
                                           UI_MI_INFO_UPTIME,  UI_MI_INFO_MEMORY,   UI_MI_INFO_IP,
-                                          UI_MI_INFO_MAC,     UI_MI_INFO_SYNC };
-    for (int i = 0; i < 8; i++) {
+                                          UI_MI_INFO_MAC,     UI_MI_INFO_SYNC,     UI_MI_INFO_MQTT };
+    for (int i = 0; i < 9; i++) {
         m->info[info_items[i]] = s_info[i];
     }
 }

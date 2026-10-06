@@ -479,6 +479,36 @@ static void test_a_sync_fails_on_any_step_but_the_energy(void)
     TEST_ASSERT_EQUAL_INT(SYNC_STEP_WIFI, sync_first_failed(r));
 }
 
+/* M7 (D32): a failed MQTT session doesn't fail the sync either; it shows, and Info's last sync names it. */
+static void test_a_failed_mqtt_session_fails_no_sync(void)
+{
+    uint8_t r[SYNC_STEP_COUNT];
+    for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+        r[i] = SYNC_STEP_OK;
+    }
+    r[SYNC_STEP_MQTT] = SYNC_STEP_FAILED;
+    TEST_ASSERT_FALSE(sync_report_failed(r));
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_MQTT, sync_first_failed(r));
+    r[SYNC_STEP_ENERGY] = SYNC_STEP_FAILED; /* MQTT's energy source with no values (D40) */
+    TEST_ASSERT_FALSE(sync_report_failed(r));
+    r[SYNC_STEP_WEATHER] = SYNC_STEP_FAILED;
+    TEST_ASSERT_TRUE(sync_report_failed(r));
+}
+
+/* M7: how long quiet hours keep Wi-Fi off in sync mode `always` (HA's sensors outlast it, spec §12.3). */
+static void test_the_quiet_hours_span(void)
+{
+    sync_schedule_t s = { .mode = SYNC_MODE_ALWAYS, .quiet = true, .quiet_from = 23 * 60, .quiet_to = 6 * 60 };
+    TEST_ASSERT_EQUAL_UINT32(7 * 3600, sync_quiet_span_s(&s));
+    s.quiet_from = 60;
+    TEST_ASSERT_EQUAL_UINT32(5 * 3600, sync_quiet_span_s(&s));
+    s.quiet_from = s.quiet_to;
+    TEST_ASSERT_EQUAL_UINT32(0, sync_quiet_span_s(&s)); /* no minutes: off */
+    s.quiet_from = 23 * 60;
+    s.quiet = false;
+    TEST_ASSERT_EQUAL_UINT32(0, sync_quiet_span_s(&s));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -515,6 +545,8 @@ int main(void)
     RUN_TEST(test_wifi_is_wanted_in_always_mode_outside_quiet_hours);
     RUN_TEST(test_radar_refreshes_follow_the_frames);
     RUN_TEST(test_a_sync_fails_on_any_step_but_the_energy);
+    RUN_TEST(test_a_failed_mqtt_session_fails_no_sync);
+    RUN_TEST(test_the_quiet_hours_span);
     RUN_TEST(test_hhmm_text);
     RUN_TEST(test_a_time_in_the_spring_forward_gap_runs_after_it);
     RUN_TEST(test_a_time_in_the_repeated_hour_runs_once);

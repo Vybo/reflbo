@@ -22,6 +22,7 @@ typedef enum {
     SYNC_STEP_RADAR,  /* M6 (spec §11.2) */
     SYNC_STEP_SOLAR,  /* M6d (spec §11.5) */
     SYNC_STEP_ENERGY, /* M6d (spec §11.6) */
+    SYNC_STEP_MQTT,   /* M7 (spec §9.3 step 8, D32) */
     SYNC_STEP_COUNT,
 } sync_step_t;
 
@@ -62,6 +63,8 @@ typedef struct {
 } sync_due_t;
 
 bool sync_quiet_at(const sync_schedule_t *s, time_t t);
+/* How long quiet hours last, 0 when they are off or have no minutes (M7: what HA's sensors must outlast). */
+uint32_t sync_quiet_span_s(const sync_schedule_t *s);
 /* The next scheduled sync strictly after `after`: a time, an interval slot, or in `always` mode the
  * hourly refresh (aligned like interval 60); one inside quiet hours moves to their end. 0 in `manual`. */
 time_t sync_next_scheduled(const sync_schedule_t *s, time_t after);

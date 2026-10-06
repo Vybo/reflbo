@@ -50,6 +50,19 @@ int ui_schedule_step(const ui_schedule_t *schedule, time_t *checked, time_t now,
     return ui_schedule_due(schedule, after, now, order);
 }
 
+uint32_t ui_schedule_longest_night_s(const ui_schedule_t *schedule)
+{
+    uint32_t longest = 0;
+    for (int i = 0; schedule->enabled && i < schedule->count && i < UI_SCHEDULE_MAX; i++) {
+        const ui_schedule_entry_t *e = &schedule->entries[i];
+        uint32_t span = (uint32_t)((e->until_min - e->at_min + 24 * 60) % (24 * 60)) * 60;
+        if (e->action == UI_SCHED_NIGHT && span > longest) {
+            longest = span;
+        }
+    }
+    return longest;
+}
+
 time_t ui_schedule_after_night(time_t until)
 {
     return until - 1;

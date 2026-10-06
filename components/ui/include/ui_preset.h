@@ -91,6 +91,8 @@ int ui_schedule_step(const ui_schedule_t *schedule, time_t *checked, time_t now,
 /* Where the checks resume after a night that ended at `until`: a night covers [start, until), so
  * the entries inside it don't run, and one at the end minute does. */
 time_t ui_schedule_after_night(time_t until);
+/* The longest night the schedule starts, 0 while it is off (M7: what HA's sensors must outlast). */
+uint32_t ui_schedule_longest_night_s(const ui_schedule_t *schedule);
 
 /* Built-in presets a file from an earlier firmware is offered once (spec §5.4): presets.json's
  * "offered" names them, so one deleted later stays deleted. */

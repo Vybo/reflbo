@@ -753,6 +753,20 @@ test('the Sync page says why a step was kept or skipped', async () => {
   assert.match(text(main), /House energyskipped: no source/);
 });
 
+test('the Sync page shows the MQTT step, whose switch is on the MQTT page (M7)', async () => {
+  const last = { at: 1790880000, failed: 'mqtt', detail: 'no broker',
+                 steps: { wifi: 'ok', time: 'ok', weather: 'ok', air: 'ok', radar: 'ok', solar: 'ok', energy: 'skipped',
+                          mqtt: 'failed' },
+                 details: { energy: 'no source', mqtt: 'no broker' } };
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, STEP_SETTINGS),
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'times', running: false, last })),
+  });
+  await ctx.syncPage();
+  assert.match(text(main), /MQTTfailed: no broker/);
+  assert.ok(!below(main).some((e) => e.tag === 'label' && text(e) === 'MQTT'));
+});
+
 const SOLAR_SETTINGS = { schema: 1, location: { name: 'Brno', lat: 49.1951, lon: 16.6068 },
                          sync: { steps: ['weather', 'air', 'radar', 'solar', 'energy'] },
                          solar: { source: 'open-meteo', planes: [{ kwp: 5, tilt: 35, azimuth: 0 }], losses_pct: 14,

@@ -31,6 +31,7 @@ static const char *TAG = "sync";
 #define BODY_MAX (32 * 1024) /* the largest reply, Solcast's 72 h, is about 18 KB (M6d) */
 #define RADAR_STEP_MS 10000 /* spec §9.3 */
 #define REFRESH_MAX_MS 30000 /* a radar-only refresh, the last hour's 12 frames at most (D28) */
+#define MQTT_STEP_MS 15000   /* spec §9.3 step 8 */
 
 static volatile bool s_running;
 static volatile uint8_t s_step = SYNC_STEP_COUNT;
@@ -590,6 +591,26 @@ static void step_energy(void)
     }
 }
 
+/* M7 (spec §9.3 step 8, D32): the MQTT session, while MQTT is on; its failure shows but doesn't fail the sync. */
+static void step_mqtt(void)
+{
+    if (s_req.mqtt == NULL) {
+        skipped(SYNC_STEP_MQTT, "off");
+        return;
+    }
+    int budget = sync_budget_ms(esp_timer_get_time(), s_deadline_us, MQTT_STEP_MS);
+    if (budget == 0) {
+        failed(SYNC_STEP_MQTT, "timeout");
+        return;
+    }
+    char detail[SYNC_DETAIL_LEN] = "";
+    if (s_req.mqtt(budget, detail, sizeof(detail)) == ESP_OK) {
+        s_report.result[SYNC_STEP_MQTT] = SYNC_STEP_OK;
+    } else {
+        failed(SYNC_STEP_MQTT, detail[0] != '\0' ? detail : "failed");
+    }
+}
+
 /* Sync mode `always`: the radar, the house's reading or both, on the network Wi-Fi is on already (D23: never
  * joining). */
 static void refresh_task(int64_t start)
@@ -642,6 +663,8 @@ static void sync_task(void *arg)
         step_solar();
         s_step = SYNC_STEP_ENERGY;
         step_energy();
+        s_step = SYNC_STEP_MQTT;
+        step_mqtt();
     } else {
         const char *why = err == ESP_ERR_NOT_FOUND ? "no network saved" : err == ESP_ERR_INVALID_STATE ? "Wi-Fi busy"
                                                                                                     : "not joined";
@@ -693,6 +716,6 @@ sync_step_t sync_step(void)
 const char *sync_step_name(sync_step_t step)
 {
     static const char *const k_names[SYNC_STEP_COUNT] = { "wifi", "time", "weather", "air", "radar", "solar",
-                                                          "energy" };
+                                                          "energy", "mqtt" };
     return (unsigned)step < SYNC_STEP_COUNT ? k_names[step] : "";
 }

@@ -42,6 +42,11 @@ bool ha_collect_over(int topics, int seen, int64_t now_ms, int64_t quiet_since_m
     return (topics > 0 && seen >= topics) || now_ms - quiet_since_ms >= HA_QUIET_MS;
 }
 
+bool ha_state_due(bool changed, int64_t since_s)
+{
+    return since_s < 0 || since_s >= 300 || (changed && since_s >= 30);
+}
+
 uint32_t ha_expected_s(bool always, uint32_t sync_expected_s, uint32_t longest_off_s)
 {
     return always ? ALWAYS_EXPECTED_S + longest_off_s : sync_expected_s;

@@ -215,9 +215,10 @@ void app_ui_context(ui_context_t *ctx)
                            .fahrenheit = s.settings.fahrenheit,
                            .web_session = (app_config_active() || app_sync_lan_ui()) && webui_session_active(),
                            .lat_e4 = s.settings.lat_e4, .lon_e4 = s.settings.lon_e4,
-                           .sync = app_sync_running()  ? UI_SYNC_RUNNING
-                                   : app_sync_failed() ? UI_SYNC_FAILED
-                                                       : UI_SYNC_IDLE };
+                           .sync = app_sync_running()       ? UI_SYNC_RUNNING
+                                   : app_sync_mark_failed() ? UI_SYNC_FAILED
+                                                            : UI_SYNC_IDLE,
+                           .mqtt_failed = app_mqtt_failed() };
     if (app_sync_holds_wifi() && !app_config_active()) { /* spec §5.2: sync mode `always` */
         netmgr_status_t ns;
         netmgr_status(&ns);
@@ -673,7 +674,7 @@ static void settings_changed(void)
 
 esp_err_t app_ui_replace_settings(const char *json, char *err, size_t err_size)
 {
-    static settings_t parsed;
+    EXT_RAM_BSS_ATTR static settings_t parsed, before;
     if (!settings_from_json(json, &s.settings, &parsed, err, err_size)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -683,7 +684,9 @@ esp_err_t app_ui_replace_settings(const char *json, char *err, size_t err_size)
         return ESP_ERR_INVALID_SIZE;
     }
     settings_replaced(&parsed, &s.settings); /* a page that turns `always` on: BOOT double returns */
+    before = s.settings;
     s.settings = parsed;
+    app_mqtt_settings_changed(&before);
     memcpy(s_settings_base, json, n + 1); /* keys this firmware doesn't know stay, as in the file */
     esp_err_t e = app_ui_save_settings();
     settings_changed();

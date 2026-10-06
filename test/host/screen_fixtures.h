@@ -70,6 +70,7 @@ static inline void fixture_menu_model(ui_menu_model_t *m, const lang_t *lang)
     m->info[UI_MI_INFO_MAC] = "14:c1:9f:54:bb:94";
     m->info[UI_MI_INFO_UPTIME] = "2 d 3 h";
     m->info[UI_MI_INFO_MEMORY] = "7.9 MB";
+    m->info[UI_MI_INFO_MQTT] = "Off";
     m->local = fixture_local(20, 48, 0);
 }
 

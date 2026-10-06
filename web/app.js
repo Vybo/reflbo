@@ -307,9 +307,10 @@ async function statusPage() {
 /* ---- Sync (spec §9.3, D25) ---- */
 
 const SYNC_STEPS = [['wifi', 'Wi-Fi'], ['time', 'Time'], ['weather', 'Weather'], ['air', 'Air quality'],
-                    ['radar', 'Radar'], ['solar', 'Solar forecast'], ['energy', 'House energy']];
-/* The data steps a sync can leave out (D35): the time always runs, as the clock and its trim need it. */
-const STEP_SWITCHES = SYNC_STEPS.slice(2);
+                    ['radar', 'Radar'], ['solar', 'Solar forecast'], ['energy', 'House energy'], ['mqtt', 'MQTT']];
+/* The data steps a sync can leave out (D35): the time always runs, as the clock and its trim need it; MQTT has its
+ * own switch, on the MQTT page (M7). */
+const STEP_SWITCHES = SYNC_STEPS.slice(2, -1);
 const SYNC_INTERVALS = [15, 30, 60, 120, 180, 360, 720, 1440];
 const intervalLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} h`);
 

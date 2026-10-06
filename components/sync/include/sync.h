@@ -14,11 +14,11 @@
 
 /*
  * The sync (spec §9.3): Wi-Fi, the time, the weather, the air quality, the weather radar, the PV
- * forecast and the house's energy, on a task of its own; in sync mode `always` also a refresh of the
- * radar and the house's reading, and from the Solar page a check of the last two. It only fetches:
- * the app task applies the report, as it owns the clock, the RTC, the datastore, the radar's frames
- * and the solar state (spec §3.2). Wi-Fi stays on afterwards; the app turns it off unless config mode
- * or sync mode `always` keeps it.
+ * forecast, the house's energy and the MQTT session (M7), on a task of its own; in sync mode `always`
+ * also a refresh of the radar and the house's reading, and from the Solar page a check of those two. It
+ * only fetches: the app task applies the report, as it owns the clock, the RTC, the datastore, the
+ * radar's frames and the solar state (spec §3.2). Wi-Fi stays on afterwards; the app turns it off
+ * unless config mode or sync mode `always` keeps it.
  */
 
 #define SYNC_DETAIL_LEN 24
@@ -67,6 +67,9 @@ typedef struct {
     bool refresh_energy;     /* SYNC_KIND_REFRESH: the house's reading (D36) */
     sync_solar_req_t solar;
     sync_energy_req_t energy;
+    /* M7: the MQTT session on the sync's task within budget_ms, ESP_OK or why not in `detail`; NULL while MQTT is
+     * off, which skips the step */
+    esp_err_t (*mqtt)(int budget_ms, char *detail, size_t size);
 } sync_request_t;
 
 typedef struct {
@@ -96,7 +99,7 @@ esp_err_t sync_start(const sync_request_t *req, void (*done)(sync_report_t *repo
 bool sync_running(void);
 /* The step running now, for the progress the web UI shows; SYNC_STEP_COUNT when none runs. */
 sync_step_t sync_step(void);
-const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air", "radar", "solar", "energy" */
+const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air", "radar", "solar", "energy", "mqtt" */
 /* The Developer API's last data replies, for `energy raw` (D37): the inverter's, the battery's and the meter's
  * real-time data and the month's statistics; "" for none. Never the token's. Read them while no sync runs. */
 #define SYNC_ENERGY_RAW_COUNT 4

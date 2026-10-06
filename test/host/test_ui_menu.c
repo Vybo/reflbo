@@ -226,16 +226,17 @@ static void test_the_wifi_section_asks_before_it_forgets_anything(void)
     TEST_ASSERT_NULL(ui_menu_question(UI_MI_REBOOT, en));
 }
 
-/* Spec §5.7: Info gains the IP address and the MAC with M4, the last sync with M5. */
+/* Spec §5.7: Info gains the IP address and the MAC with M4, the last sync with M5, MQTT with M7 (last, so the
+ * first screen stays as it was). */
 static void test_info_shows_the_network_addresses(void)
 {
     open_item(UI_MI_INFO);
     ui_menu_item_t items[UI_MI_COUNT];
     const ui_menu_item_t expected[] = { UI_MI_INFO_BATTERY, UI_MI_INFO_FIRMWARE, UI_MI_INFO_DEVICE,
                                         UI_MI_INFO_IP,      UI_MI_INFO_MAC,      UI_MI_INFO_SYNC,
-                                        UI_MI_INFO_UPTIME,  UI_MI_INFO_MEMORY };
-    TEST_ASSERT_EQUAL_INT(8, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
-    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 8);
+                                        UI_MI_INFO_UPTIME,  UI_MI_INFO_MEMORY,   UI_MI_INFO_MQTT };
+    TEST_ASSERT_EQUAL_INT(9, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 9);
     TEST_ASSERT_TRUE(ui_menu_is_section(UI_MI_WIFI));
     TEST_ASSERT_FALSE(ui_menu_is_section(UI_MI_INFO_IP));
 }

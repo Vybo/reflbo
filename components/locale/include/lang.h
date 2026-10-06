@@ -228,6 +228,9 @@ typedef enum {
     LS_NO_ENERGY,
     LS_M_SYNC_STEPS, /* Sync ▸ Steps (M6d, D35) */
     LS_MESSAGE,      /* ha.message: Home Assistant's message (M7, spec §12.7) */
+    LS_M_MQTT,       /* Info ▸ MQTT (spec §5.7): the last session, or the kept connection */
+    LS_MQTT_CONNECTED,
+    LS_SYNC_STEP_MQTT, /* the sync's step 8 (app_sync.c maps the steps) */
     LS_COUNT,
 } lang_str_t;
 

@@ -285,6 +285,36 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
     if (esrc == SETTINGS_ENERGY_SOLAX_DEV && ss->site.plant_id[0] != '\0') {
         cJSON_AddStringToObject(energy, "plant", ss->site.plant_id); /* the Developer API's, found once (D37) */
     }
+    /* spec §10.3, M7: MQTT, the last sync's session, sync mode `always`'s connection and a test's result */
+    app_mqtt_status_t ms;
+    app_mqtt_status(&ms);
+    cJSON *mqtt = cJSON_AddObjectToObject(o, "mqtt");
+    cJSON_AddBoolToObject(mqtt, "enabled", ms.on);
+    cJSON_AddBoolToObject(mqtt, "keep", ms.keeping);
+    cJSON_AddBoolToObject(mqtt, "connected", ms.client.connected);
+    cJSON_AddBoolToObject(mqtt, "password_set", ms.password_set);
+    if (ms.keeping && !ms.client.connected && ms.client.detail[0] != '\0') {
+        cJSON_AddStringToObject(mqtt, "detail", ms.client.detail);
+    }
+    uint8_t mr = st->sync.last_at != 0 ? st->sync.last_result[SYNC_STEP_MQTT] : SYNC_STEP_NOT_RUN;
+    if (mr != SYNC_STEP_NOT_RUN) {
+        cJSON *last = cJSON_AddObjectToObject(mqtt, "last");
+        cJSON_AddNumberToObject(last, "at", st->sync.last_at);
+        cJSON_AddStringToObject(last, "result", mr == SYNC_STEP_OK ? "ok" : "failed");
+        if (mr == SYNC_STEP_FAILED) {
+            cJSON_AddStringToObject(last, "detail", st->sync.last_detail[SYNC_STEP_MQTT]);
+        }
+    }
+    if (ms.client.test_running || ms.client.test_done) {
+        cJSON *test = cJSON_AddObjectToObject(mqtt, "test");
+        cJSON_AddBoolToObject(test, "running", ms.client.test_running);
+        if (!ms.client.test_running) {
+            cJSON_AddBoolToObject(test, "ok", ms.client.test_ok);
+            if (!ms.client.test_ok) {
+                cJSON_AddStringToObject(test, "detail", ms.client.test_detail);
+            }
+        }
+    }
 
     const ui_preset_t *active = &st->presets.presets[st->presets.active];
     cJSON *preset = cJSON_AddObjectToObject(o, "preset");
@@ -416,9 +446,10 @@ static void learn(const char *body, uint8_t *out, size_t size, webui_reply_t *re
     reply_cjson(reply, out, size, o);
 }
 
-/* A backup of the largest files restores: settings.json up to the 4 KB app_ui.c keeps, presets.json up to
- * its own limit, and the bundle around them; and of the deepest, as each limit leaves room for the next. */
-_Static_assert(SETTINGS_FILE_MAX + UI_PRESETS_JSON_MAX + 512 <= WEBUI_BODY_MAX,
+/* A backup of the largest files restores: settings.json up to the 4 KB app_ui.c keeps, presets.json and
+ * mqtt_fields.json up to their own limits, and the bundle around them; and of the deepest, as each limit leaves room
+ * for the next. */
+_Static_assert(SETTINGS_FILE_MAX + UI_PRESETS_JSON_MAX + HA_FIELDS_JSON_MAX + 512 <= WEBUI_BODY_MAX,
                "a backup of the largest files fits a request");
 _Static_assert(UI_JSON_MAX_DEPTH + 2 <= BACKUP_MAX_DEPTH, "a backup holds the deepest presets.json");
 _Static_assert(BACKUP_MAX_DEPTH <= WEBUI_JSON_MAX_DEPTH, "the web server passes the deepest backup");
@@ -428,14 +459,16 @@ static void backup(uint8_t *out, size_t size, webui_reply_t *reply)
 {
     EXT_RAM_BSS_ATTR static char settings[SETTINGS_FILE_MAX];
     EXT_RAM_BSS_ATTR static char presets[UI_PRESETS_JSON_MAX];
+    EXT_RAM_BSS_ATTR static char fields[HA_FIELDS_JSON_MAX];
     netmgr_status_t net;
     netmgr_status(&net);
     backup_file_t files[] = {
         { "settings.json", app_ui_settings_json(settings, sizeof(settings)) ? settings : NULL },
         { "presets.json", ui_presets_to_json(app_presets(), presets, sizeof(presets)) ? presets : NULL },
+        { "mqtt_fields.json", app_mqtt_fields_json(fields, sizeof(fields)) ? fields : NULL }, /* M7 */
     };
-    reply_text(reply, out, size,
-               backup_build(files, 2, net.host, esp_app_get_description()->version, (char *)out, size));
+    reply_text(reply, out, size, backup_build(files, sizeof(files) / sizeof(files[0]), net.host,
+                                              esp_app_get_description()->version, (char *)out, size));
 }
 
 /* GET /api/settings (spec §10.3): the file's settings, and which keys are set, never the keys. */
@@ -480,12 +513,16 @@ static void patch_settings(const char *body, uint8_t *out, size_t size, webui_re
     ok = ok && settings_check_solar(&next, fs_key, err, sizeof(err)) &&
          app_ui_patch_settings(clean, err, sizeof(err)) == ESP_OK;
     esp_err_t saved = ok ? app_secrets_apply(&secrets) : ESP_OK;
+    bool broker_pass = secrets.given[SETTINGS_SECRET_MQTT_PASS];
     memset(&secrets, 0, sizeof(secrets)); /* the keys stay in NVS alone */
     if (!ok) {
         reply_error(reply, out, size, 400, err);
     } else if (saved != ESP_OK) {
         reply_error(reply, out, size, 500, "the keys weren't saved");
     } else {
+        if (broker_pass) {
+            app_mqtt_password_changed(); /* a kept connection logs in again with it (M7) */
+        }
         get_settings(out, size, reply);
     }
 }
@@ -495,20 +532,23 @@ static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *
 {
     EXT_RAM_BSS_ATTR static char buf[WEBUI_BODY_MAX];
     EXT_RAM_BSS_ATTR static ui_presets_t presets;
+    EXT_RAM_BSS_ATTR static ha_fields_t fields;
     backup_file_t files[8];
-    char err[112];
+    char err[128]; /* "mqtt_fields.json: " and a reason of up to 95 bytes */
     int n = backup_split(body, files, 8, buf, sizeof(buf), err, sizeof(err));
     if (n < 0) {
         reply_error(reply, out, size, 400, err);
         return;
     }
-    const char *settings = NULL, *presets_text = NULL;
+    const char *settings = NULL, *presets_text = NULL, *fields_text = NULL;
     cJSON *skipped = cJSON_CreateArray();
     for (int i = 0; i < n; i++) {
         if (strcmp(files[i].name, "settings.json") == 0) {
             settings = files[i].text;
         } else if (strcmp(files[i].name, "presets.json") == 0) {
             presets_text = files[i].text;
+        } else if (strcmp(files[i].name, "mqtt_fields.json") == 0) {
+            fields_text = files[i].text;
         } else {
             cJSON_AddItemToArray(skipped, cJSON_CreateString(files[i].name)); /* from a later firmware */
         }
@@ -528,6 +568,8 @@ static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *
         snprintf(err, sizeof(err), "settings.json: %s", why);
     } else if (presets_text != NULL && !ui_presets_from_json(presets_text, &presets, why, sizeof(why))) {
         snprintf(err, sizeof(err), "presets.json: %s", why);
+    } else if (fields_text != NULL && !ha_fields_from_json(fields_text, &fields, why, sizeof(why))) {
+        snprintf(err, sizeof(err), "mqtt_fields.json: %s", why);
     } else {
         err[0] = '\0';
     }
@@ -539,6 +581,9 @@ static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *
     esp_err_t e = settings != NULL ? app_ui_replace_settings(settings, why, sizeof(why)) : ESP_OK;
     if (e == ESP_OK && presets_text != NULL) {
         e = app_ui_replace_presets(&presets);
+    }
+    if (e == ESP_OK && fields_text != NULL) {
+        e = app_mqtt_replace_fields(&fields);
     }
     if (e != ESP_OK) {
         cJSON_Delete(skipped);
@@ -562,6 +607,7 @@ void app_web_api(const char *method, const char *path, const char *query, const 
                  size_t size, webui_reply_t *reply)
 {
     EXT_RAM_BSS_ATTR static ui_presets_t presets;
+    EXT_RAM_BSS_ATTR static ha_fields_t mqtt_fields;
     char err[112];
     bool get = strcmp(method, "GET") == 0;
     if (strcmp(path, "/api/status") == 0 && get) {
@@ -618,6 +664,28 @@ void app_web_api(const char *method, const char *path, const char *query, const 
                         : e == ESP_ERR_INVALID_STATE ? "not now: a sync runs, the battery is critical, or the device "
                                                        "is on its own network only"
                                                      : "the check didn't start");
+        }
+    } else if (strcmp(path, "/api/mqtt_fields") == 0 && get) { /* spec §10.3, M7 */
+        reply_text(reply, out, size, app_mqtt_fields_json((char *)out, size));
+    } else if (strcmp(path, "/api/mqtt_fields") == 0 && strcmp(method, "PUT") == 0) {
+        if (!ha_fields_from_json(body, &mqtt_fields, err, sizeof(err))) {
+            reply_error(reply, out, size, 400, err);
+        } else if (app_mqtt_replace_fields(&mqtt_fields) != ESP_OK) {
+            reply_error(reply, out, size, 500, "mqtt_fields.json wasn't saved");
+        } else {
+            reply_text(reply, out, size, app_mqtt_fields_json((char *)out, size));
+        }
+    } else if (strcmp(path, "/api/mqtt/test") == 0 && strcmp(method, "POST") == 0) {
+        esp_err_t e = app_mqtt_test();
+        if (e == ESP_OK) {
+            reply_text(reply, out, size, (size_t)snprintf((char *)out, size, "{\"started\":true}"));
+            reply->status = 202; /* the page follows it in GET /api/status */
+        } else {
+            reply_error(reply, out, size, 409,
+                        e == ESP_ERR_INVALID_ARG     ? "save the broker's host first"
+                        : e == ESP_ERR_INVALID_STATE ? "the device is on its own network only: it reaches the broker "
+                                                       "from yours"
+                                                     : "the test didn't start");
         }
     } else if (strcmp(path, "/api/backup") == 0 && get) {
         backup(out, size, reply);

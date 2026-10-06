@@ -740,7 +740,11 @@ static esp_err_t api_handler(httpd_req_t *req)
     }
     api_call_t call = { .method = method_name(req->method), .path = path, .query = has_query ? query : "",
                         .body = mutating ? s_body : "", .reply = { .status = 404, .type = "application/json" } };
-    if (s_cfg.run(api_on_app, &call) != ESP_OK) {
+    esp_err_t ran = s_cfg.run(api_on_app, &call);
+    if (mutating) {
+        memset(s_body, 0, req->content_len); /* a PATCH may carry the MQTT password: it doesn't linger */
+    }
+    if (ran != ESP_OK) {
         return send_error(req, 503, "the device is busy");
     }
     httpd_resp_set_status(req, webui_status_line(call.reply.status));

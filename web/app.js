@@ -224,7 +224,8 @@ document.getElementById('done').onclick = async () => {
 /* ---- pages ---- */
 
 const pages = { status: statusPage, wifi: wifiPage, place: placePage, sync: syncPage, radar: radarPage,
-                solar: solarPage, device: devicePage, presets: presetsPage, firmware: firmwarePage, backup: backupPage };
+                solar: solarPage, mqtt: mqttPage, device: devicePage, presets: presetsPage, firmware: firmwarePage,
+                backup: backupPage };
 
 function route() {
   const name = location.hash.slice(1) || 'status';
@@ -311,6 +312,8 @@ const SYNC_STEPS = [['wifi', 'Wi-Fi'], ['time', 'Time'], ['weather', 'Weather'],
 /* The data steps a sync can leave out (D35): the time always runs, as the clock and its trim need it; MQTT has its
  * own switch, on the MQTT page (M7). */
 const STEP_SWITCHES = SYNC_STEPS.slice(2, -1);
+/* The steps whose failure fails no sync (D36, D32), as a sentence names them. */
+const ASIDE_STEPS = { energy: 'the house\'s energy', mqtt: 'the MQTT session' };
 const SYNC_INTERVALS = [15, 30, 60, 120, 180, 360, 720, 1440];
 const intervalLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} h`);
 
@@ -367,11 +370,11 @@ async function syncPage() {
       await sleep(1500);
       const now = await api('GET', '/api/status');
       showStatus(now);
-      if (!now.sync.running) { /* the house's energy failing alone fails no sync (D36) */
+      if (!now.sync.running) { /* the house's energy or MQTT failing alone fails no sync (D36, D32) */
         const last = now.sync.last, done = last && (last.ok ?? !last.failed);
         nowNote.className = done ? 'good' : 'bad';
         nowNote.textContent = !done ? 'The sync failed; see above.'
-          : last.failed ? 'Synced; the house\'s energy failed, see above.' : 'Synced.';
+          : last.failed ? `Synced; ${ASIDE_STEPS[last.failed] || last.failed} failed, see above.` : 'Synced.';
         return;
       }
     }
@@ -784,6 +787,242 @@ async function radarPage() {
   await Promise.all([radarPreview(wxImg, 'radar'), radarPreview(flImg, 'flights')]).catch(() => {});
 }
 
+/* ---- MQTT and Home Assistant (spec §12, D32) ---- */
+
+const STALE_AFTER = [[0, 'Twice the sync interval'], [3600, '1 h'], [7200, '2 h'], [21600, '6 h'], [43200, '12 h'],
+                     [86400, '1 day'], [172800, '2 days'], [604800, '7 days'], [2592000, '30 days']];
+const DECIMALS = [['auto', 'As the value comes, up to 3'], ['0', 'None'], ['1', '1'], ['2', '2'], ['3', '3']];
+const MQTT_FIELDS_MAX = 32;
+const MQTT_KINDS = [['number', 'Number'], ['text', 'Text'], ['time', 'Time']];
+/* The common states of a binary sensor and a person, as words (D40); Zigbee2MQTT's contact is true while closed. */
+const STATE_PAIRS = [['Open / Closed', { on: 'Open', off: 'Closed' }], ['On / Off', { on: 'On', off: 'Off' }],
+                     ['Home / Away', { home: 'Home', not_home: 'Away' }],
+                     ['Closed / Open (true / false)', { true: 'Closed', false: 'Open' }]];
+const STATES_MAX = 8;
+
+/* The last session (a sync's), or the kept connection in sync mode Always on. */
+function mqttFacts(st) {
+  const m = st.mqtt || {}, last = m.last;
+  if (!m.enabled) return [['Now', 'off']];
+  return [
+    m.keep ? ['Now', m.connected ? 'connected' : `not connected${m.detail ? ` (${m.detail})` : ''}; it tries again`] : null,
+    ['Last session', !last ? 'none yet: one runs with each sync'
+      : last.result === 'ok' ? `${when(last.at)}, all well` : `${when(last.at)}: failed (${last.detail || 'no reason given'})`],
+  ];
+}
+
+/* One mapping (spec §12.5): its controls, and the value it brought last. */
+function mappingBox(f, value, onRemove) {
+  const select = (pairs, current) => {
+    const el = h('select', {}, pairs.map(([v, t]) => h('option', { value: v, selected: v === current }, t)));
+    el.value = current;
+    return el;
+  };
+  const key = h('input', { type: 'text', value: f.key || '', autocapitalize: 'off', spellcheck: 'false' });
+  const label = h('input', { type: 'text', value: f.label || '' });
+  const kind = select(MQTT_KINDS, f.kind === 'text' || f.kind === 'time' ? f.kind : 'number');
+  const unit = h('input', { type: 'text', value: f.unit || '' });
+  const decimals = select(DECIMALS, typeof f.precision === 'number' ? String(f.precision) : 'auto');
+  const topic = h('input', { type: 'text', value: f.topic || '', autocapitalize: 'off', spellcheck: 'false' });
+  const path = h('input', { type: 'text', value: f.json_path || '', autocapitalize: 'off', spellcheck: 'false' });
+  const ttl = f.ttl_s || 0;
+  const stale = select([...STALE_AFTER, ...(STALE_AFTER.some(([s]) => s === ttl) ? [] : [[ttl, duration(ttl)]])]
+    .map(([s, t]) => [String(s), t]), String(ttl));
+  /* A text's state labels (D40): a state of Home Assistant's shown as words; one without a label shows as it comes. */
+  const stateList = h('div');
+  let stateRows = [];
+  const showStates = () => stateList.replaceChildren(...stateRows);
+  const stateRow = (state, shown) => {
+    const st = h('input', { type: 'text', value: state, autocapitalize: 'off', spellcheck: 'false' });
+    const lb = h('input', { type: 'text', value: shown });
+    const row = h('div', { class: 'row state' }, h('div', {}, field('State', st)), h('div', {}, field('Shown as', lb)),
+      actions(button('Remove', () => { stateRows = stateRows.filter((r) => r !== row); showStates(); })));
+    row.read = () => [st.value.trim(), lb.value.trim()];
+    return row;
+  };
+  const setStates = (states) => {
+    stateRows = Object.entries(states || {}).slice(0, STATES_MAX).map(([st, shown]) => stateRow(st, shown));
+    showStates();
+  };
+  setStates(f.states);
+  const numberOnly = h('div', { class: 'row' }, h('div', {}, field('Unit', unit)),
+    h('div', {}, field('Decimals', decimals)));
+  const textOnly = h('div', {},
+    h('p', { class: 'muted small', text: 'Words for Home Assistant\'s states, such as Open for on; a state without ' +
+      'one shows as it comes. Zigbee2MQTT\'s true or false can have words too (a contact is true while closed); ' +
+      'without them they show as on and off.' }),
+    stateList,
+    actions(button('Add a state', () => {
+      if (stateRows.length < STATES_MAX) {
+        stateRows.push(stateRow('', ''));
+        showStates();
+      }
+    }), ...STATE_PAIRS.map(([name, pair]) => button(name, () => setStates(pair)))));
+  const showKind = () => {
+    numberOnly.hidden = kind.value !== 'number';
+    textOnly.hidden = kind.value !== 'text';
+  };
+  kind.addEventListener('change', showKind);
+  showKind();
+  const box = h('div', { class: 'mapping' },
+    h('div', { class: 'row' }, h('div', {}, field('Key', key)), h('div', {}, field('Label', label))),
+    field('Kind', kind, 'A number, a text, or a time such as a timestamp sensor\'s, shown as the clock shows times; ' +
+      'a date sensor\'s date shows as a date.'),
+    numberOnly, textOnly,
+    field('Topic', topic), field('JSON path', path, 'Keys joined by dots, such as co2 or state.temperature; empty ' +
+      'for the whole payload.'),
+    field('Stale after', stale),
+    h('p', { class: 'muted small', text: value ? `Last value: ${value.value || '—'}${value.state === 'stale' ? ', stale' : ''}`
+      : 'No value yet: it comes with the next sync.' }),
+    actions(button('Remove', onRemove)));
+  /* The mapping as mqtt_fields.json has it, checked as the device would (spec §12.5); `n` names it. */
+  box.read = (n) => {
+    const k = key.value.trim(), name = k || `number ${n}`;
+    if (!/^[a-z0-9_]{1,23}$/.test(k)) throw new ApiError(`Field ${name}: a key is 1 to 23 characters of a–z, 0–9 and _.`);
+    const t = topic.value.trim();
+    if (!t || bytes(t) > 127 || /[\x00-\x1f\x7f"\\]/.test(t)) { /* UTF-8 is fine: Zigbee2MQTT's names */
+      throw new ApiError(`Field ${k}: a topic of 1 to 127 bytes, without quotes, backslashes or control characters.`);
+    }
+    if (/[+#]/.test(t)) throw new ApiError(`Field ${k}: a topic without + or #.`);
+    const pth = path.value.trim();
+    if (pth && (bytes(pth) > 47 || !/^[\x20-\x7e]+$/.test(pth) || /["\\]|^\.|\.$|\.\./.test(pth))) {
+      throw new ApiError(`Field ${k}: the JSON path is keys joined by dots, up to 47 characters.`);
+    }
+    if (bytes(label.value) > 23) throw new ApiError(`Field ${k}: a label of up to 23 bytes.`);
+    const kd = kind.value, number = kd === 'number';
+    if (number && bytes(unit.value) > 7) throw new ApiError(`Field ${k}: a unit of up to 7 bytes.`);
+    const states = new Map(); /* ha_fields.c's rules */
+    for (const row of kd === 'text' ? stateRows : []) {
+      const [st, shown] = row.read();
+      if (!st && !shown) continue; /* an empty row is left out */
+      if (!st || bytes(st) > 23 || !/^[\x20-\x7e]+$/.test(st)) {
+        throw new ApiError(`Field ${k}: a state is 1 to 23 plain characters.`);
+      }
+      if (states.has(st)) throw new ApiError(`Field ${k}: the state ${st} twice.`);
+      if (!shown) throw new ApiError(`Field ${k}: a label for the state ${st}.`);
+      if (bytes(shown) > 23) throw new ApiError(`Field ${k}: a label of up to 23 bytes for the state ${st}.`);
+      states.set(st, shown);
+    }
+    return { key: k, label: label.value.trim() || k, kind: kd, unit: number ? unit.value.trim() : '',
+             precision: !number || decimals.value === 'auto' ? null : Number(decimals.value), topic: t,
+             json_path: pth || null, ttl_s: Number(stale.value),
+             ...(states.size ? { states: Object.fromEntries(states) } : {}) };
+  };
+  return box;
+}
+
+async function mqttPage() {
+  const [s, st, doc, cat] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status'),
+    api('GET', '/api/mqtt_fields'), api('GET', '/api/fields')]);
+  const m = s.mqtt || {}, now = st.mqtt || {};
+
+  const enabled = h('input', { type: 'checkbox', checked: !!m.enabled });
+  const host = h('input', { type: 'text', value: m.host || '', autocapitalize: 'off', spellcheck: 'false' });
+  const port = h('input', { type: 'number', min: 1, max: 65535, value: m.port ?? 1883 });
+  const user = h('input', { type: 'text', value: m.user || '', autocapitalize: 'off', autocomplete: 'off' });
+  const password = h('input', { type: 'password', autocomplete: 'new-password' });
+  const forget = now.password_set ? h('input', { type: 'checkbox', name: 'forget' }) : null;
+  const discovery = h('input', { type: 'checkbox', checked: m.discovery !== false });
+  const prefix = h('input', { type: 'text', value: m.discovery_prefix || 'homeassistant', autocapitalize: 'off' });
+  const brokerNote = h('p');
+  const brokerCard = card('Broker',
+    h('label', { class: 'check' }, enabled, 'Connect to an MQTT broker'),
+    field('Host', host, 'Its name or address, such as homeassistant.local or 192.168.1.10.'), field('Port', port),
+    field('User', user), field('Password', password, now.password_set ? 'Saved on the device, which never shows it. Leave ' +
+      'it empty to keep it.' : 'None saved.'),
+    forget ? h('label', { class: 'check' }, forget, 'Forget the saved password') : null,
+    h('label', { class: 'check' }, discovery, 'Home Assistant discovery: the device appears in Home Assistant by itself'),
+    field('Discovery prefix', prefix, 'Home Assistant\'s, "homeassistant" unless you changed it there.'),
+    brokerNote,
+    actions(button('Save broker', () => busy(brokerCard, brokerNote, async () => {
+      const h_ = host.value.trim(), pr = prefix.value.trim(), po = Number(port.value);
+      if (enabled.checked && !h_) throw new ApiError('MQTT needs the broker\'s host.');
+      if (h_ && (bytes(h_) > 63 || !/^[A-Za-z0-9.-]+$/.test(h_))) { /* settings.c's host_name() */
+        throw new ApiError('Host: a name or an address, of letters, digits, dots and dashes; no mqtt:// or port.');
+      }
+      if (bytes(user.value.trim()) > 63 || /[\x00-\x1f\x7f]/.test(user.value)) {
+        throw new ApiError('User: up to 63 bytes, without control characters.');
+      }
+      if (!Number.isInteger(po) || po < 1 || po > 65535) throw new ApiError('Port: 1 to 65535.');
+      if (!pr || bytes(pr) > 31 || /^\/|\/$|[+#\s]/.test(pr) || !/^[\x21-\x7e]+$/.test(pr)) {
+        throw new ApiError('Discovery prefix: up to 31 characters, without spaces, + or #, and not starting or ' +
+          'ending with /.');
+      }
+      if (bytes(password.value) > 63) throw new ApiError('Password: up to 63 bytes.');
+      const patch = { enabled: enabled.checked, host: h_, port: po, user: user.value.trim(), discovery: discovery.checked,
+                      discovery_prefix: pr };
+      if (password.value) patch.password = password.value;
+      else if (forget && forget.checked) patch.password = null;
+      await api('PATCH', '/api/settings', { mqtt: patch });
+      password.value = '';
+      brokerNote.className = 'good';
+      brokerNote.textContent = 'Saved. The next sync connects with it.';
+      toast('Broker saved');
+    }), 'primary')));
+
+  const status = h('div', {}, facts(mqttFacts(st)));
+  const testNote = h('p');
+  const testCard = card('Connection', status,
+    h('p', { class: 'muted small', text: 'A session runs with each sync: it sends the device\'s state and takes ' +
+      'Home Assistant\'s commands and the fields\' values. In sync mode Always on the device stays connected. Test ' +
+      'connection tries the saved broker, which needs the device on your network.' }),
+    testNote,
+    actions(button('Test connection', () => busy(testCard, testNote, async () => {
+      await api('POST', '/api/mqtt/test');
+      testNote.className = 'muted';
+      testNote.textContent = 'Connecting…';
+      for (let i = 0; i < 30; i++) { /* it gives up after 10 s */
+        await sleep(1000);
+        const t = await api('GET', '/api/status');
+        status.replaceChildren(facts(mqttFacts(t)));
+        const r = (t.mqtt || {}).test || {};
+        if (!r.running) {
+          testNote.className = r.ok ? 'good' : 'bad';
+          testNote.textContent = r.ok ? 'Connected to the broker.' : `It couldn't connect: ${r.detail || 'no reason given'}.`;
+          return;
+        }
+      }
+    }))));
+
+  const values = Object.fromEntries((cat.fields || []).map((f) => [f.id, f]));
+  const list = h('div');
+  let boxes = [];
+  const fieldsNote = h('p');
+  const add = (f) => {
+    const box = mappingBox(f, values[`mqtt.${f.key}`], () => { boxes = boxes.filter((b) => b !== box); show(); });
+    boxes.push(box);
+  };
+  const show = () => list.replaceChildren(...boxes, ...(boxes.length < MQTT_FIELDS_MAX ? []
+    : [h('p', { class: 'muted small', text: `${MQTT_FIELDS_MAX} fields at most.` })]));
+  (doc.fields || []).forEach(add);
+  show();
+  const fieldsCard = card('Fields',
+    h('p', { class: 'muted small', text: 'Values from Home Assistant and other devices, shown on the dashboard as ' +
+      'mqtt.<key> fields; choose them for a preset\'s slots on the Presets page.' }),
+    h('p', { class: 'muted small', text: 'The device sleeps between syncs, so it reads only retained messages: ' +
+      'publishers must retain theirs, or go through Home Assistant\'s MQTT statestream. Zigbee2MQTT needs retain: true ' +
+      'for each device.' }),
+    list, fieldsNote,
+    actions(button('Add a field', () => {
+      if (boxes.length >= MQTT_FIELDS_MAX) return;
+      add({ kind: 'number', precision: null, ttl_s: 0 });
+      show();
+    }), button('Save fields', () => busy(fieldsCard, fieldsNote, async () => {
+      const fields = boxes.map((b, i) => b.read(i + 1));
+      const keys = new Set();
+      for (const f of fields) {
+        if (keys.has(f.key)) throw new ApiError(`Two fields have the key ${f.key}.`);
+        keys.add(f.key);
+      }
+      await api('PUT', '/api/mqtt_fields', { schema: 1, fields });
+      fieldsNote.className = 'good';
+      fieldsNote.textContent = 'Saved. Their values come with the next sync.';
+      toast('Fields saved');
+    }), 'primary')));
+
+  main.replaceChildren(h('h1', { text: 'MQTT and Home Assistant' }), brokerCard, testCard, fieldsCard);
+}
+
 /* ---- Device: the settings the menu also has (spec §5.7, D19) ---- */
 
 /* ---- Solar (spec §11.5, §11.6, D35, D36, D37) ---- */
@@ -1044,7 +1283,7 @@ function fieldOptions(ed, fits, selected) {
           FIELD_GROUPS.map(([k, label]) => {
             const list = fits.filter((f) => fieldStep(f.id) === k);
             return list.length ? h('optgroup', { label }, list.map(option)) : null;
-          })];
+          }), unlisted(ed, selected)];
 }
 const CYCLE_S = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
 const cycleLabel = (s) => (s < 60 ? `${s} s` : s < 3600 ? `${s / 60} min` : `${s / 3600} h`);
@@ -1078,6 +1317,11 @@ async function presetsPage() {
 
 /* The preview, with each slot's name at its top right corner, as the slot fields below call them
  * (the renderer puts captions top left); a split preset's cells by their numbers. */
+/* A slot's or a cell's field the catalogue doesn't list, such as an mqtt.<key> no mapping names (spec §12.5): an
+ * option of its own, so the slot shows it and keeps it. */
+const unlisted = (ed, id) => (id && !ed.fields.some((f) => f.id === id)
+  ? h('option', { value: id, selected: true }, id.startsWith('mqtt.') ? `${id} (no mapping)` : id) : null);
+
 function previewBox(ed, slots) {
   const pct = (v, of) => `${+(100 * v / of).toFixed(3)}%`;
   return h('div', { class: 'preview' }, ed.img, slots.map((slot) => {

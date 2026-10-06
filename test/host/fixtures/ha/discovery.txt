@@ -1,0 +1,51 @@
+homeassistant/sensor/reflbo-bb94/temperature/config
+{"name":"Temperature","unique_id":"reflbo-bb94_temperature","state_topic":"reflbo/reflbo-bb94/state","value_template":"{{ value_json.temp }}","device_class":"temperature","unit_of_measurement":"°C","state_class":"measurement","expire_after":173400,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/sensor/reflbo-bb94/humidity/config
+{"name":"Humidity","unique_id":"reflbo-bb94_humidity","state_topic":"reflbo/reflbo-bb94/state","value_template":"{{ value_json.hum }}","device_class":"humidity","unit_of_measurement":"%","state_class":"measurement","expire_after":173400,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/sensor/reflbo-bb94/battery/config
+{"name":"Battery","unique_id":"reflbo-bb94_battery","state_topic":"reflbo/reflbo-bb94/state","value_template":"{{ value_json.bat_pct }}","device_class":"battery","unit_of_measurement":"%","state_class":"measurement","expire_after":173400,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/sensor/reflbo-bb94/charging/config
+{"name":"Charging","unique_id":"reflbo-bb94_charging","state_topic":"reflbo/reflbo-bb94/state","value_template":"{{ value_json.charging }}","device_class":"enum","options":["unknown","discharging","charging","full"],"expire_after":173400,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/sensor/reflbo-bb94/battery_voltage/config
+{"name":"Battery voltage","unique_id":"reflbo-bb94_battery_voltage","state_topic":"reflbo/reflbo-bb94/state","value_template":"{{ value_json.bat_v }}","device_class":"voltage","unit_of_measurement":"V","state_class":"measurement","entity_category":"diagnostic","expire_after":173400,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/sensor/reflbo-bb94/rssi/config
+{"name":"Wi-Fi signal","unique_id":"reflbo-bb94_rssi","state_topic":"reflbo/reflbo-bb94/state","value_template":"{{ value_json.rssi }}","device_class":"signal_strength","unit_of_measurement":"dBm","state_class":"measurement","entity_category":"diagnostic","expire_after":173400,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/sensor/reflbo-bb94/last_sync/config
+{"name":"Last sync","unique_id":"reflbo-bb94_last_sync","state_topic":"reflbo/reflbo-bb94/state","value_template":"{{ value_json.last_sync }}","device_class":"timestamp","entity_category":"diagnostic","expire_after":173400,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/select/reflbo-bb94/preset/config
+{"name":"Preset","unique_id":"reflbo-bb94_preset","state_topic":"reflbo/reflbo-bb94/state","value_template":"{{ value_json.preset_name }}","command_topic":"reflbo/reflbo-bb94/cmd/preset","options":["Home","Indoor","Weather","Focus clock","Rain radar","Flights"],"qos":1,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/button/reflbo-bb94/sync_now/config
+{"name":"Sync now","unique_id":"reflbo-bb94_sync_now","command_topic":"reflbo/reflbo-bb94/cmd/sync","payload_press":"PRESS","qos":1,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/button/reflbo-bb94/next_preset/config
+{"name":"Next preset","unique_id":"reflbo-bb94_next_preset","command_topic":"reflbo/reflbo-bb94/cmd/next","payload_press":"PRESS","qos":1,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/notify/reflbo-bb94/message/config
+{"name":"Message","unique_id":"reflbo-bb94_message","command_topic":"reflbo/reflbo-bb94/cmd/message","qos":1,"device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/device_automation/reflbo-bb94/key_short/config
+{"automation_type":"trigger","topic":"reflbo/reflbo-bb94/action","type":"button_short_press","subtype":"button_1","payload":"key_short","device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/device_automation/reflbo-bb94/key_double/config
+{"automation_type":"trigger","topic":"reflbo/reflbo-bb94/action","type":"button_double_press","subtype":"button_1","payload":"key_double","device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/device_automation/reflbo-bb94/key_long/config
+{"automation_type":"trigger","topic":"reflbo/reflbo-bb94/action","type":"button_long_press","subtype":"button_1","payload":"key_long","device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/device_automation/reflbo-bb94/boot_short/config
+{"automation_type":"trigger","topic":"reflbo/reflbo-bb94/action","type":"button_short_press","subtype":"button_2","payload":"boot_short","device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/device_automation/reflbo-bb94/boot_double/config
+{"automation_type":"trigger","topic":"reflbo/reflbo-bb94/action","type":"button_double_press","subtype":"button_2","payload":"boot_double","device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+
+homeassistant/device_automation/reflbo-bb94/boot_long/config
+{"automation_type":"trigger","topic":"reflbo/reflbo-bb94/action","type":"button_long_press","subtype":"button_2","payload":"boot_long","device":{"identifiers":["reflbo-bb94"],"name":"reflbo-bb94","model":"ESP32-S3-RLCD-4.2","manufacturer":"Waveshare","sw_version":"0.1.0"}}
+

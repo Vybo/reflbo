@@ -617,7 +617,9 @@ void app_ui_tick(bool force)
         s.cycle_at = now + s.presets.cycle_interval_s; /* the first tick, or the clock moved back */
     }
     if (s.presets.cycle_enabled && now >= s.cycle_at) {
-        app_ui_select(ui_presets_next(&s.presets, s.settings.sync_mode == SETTINGS_SYNC_ALWAYS),
+        time_t at = timekeeping_valid() ? now : 0; /* without a valid clock every window is open (spec §5.4) */
+        app_ui_select(ui_presets_cycle_next(&s.presets, s.settings.sync_mode == SETTINGS_SYNC_ALWAYS, at,
+                                            s.settings.lat_e4, s.settings.lon_e4),
                       false); /* renders; not saved, the cycle will move on */
         return;
     }

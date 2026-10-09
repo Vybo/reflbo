@@ -1048,6 +1048,28 @@ function fieldOptions(ed, fits, selected) {
 const CYCLE_S = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
 const cycleLabel = (s) => (s < 60 ? `${s} s` : s < 3600 ? `${s / 60} min` : `${s / 3600} h`);
 const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']; /* bit 0 is Monday */
+
+/* A cycle window's end (spec §5.4, D41): "HH:MM", or sunrise or sunset with "+N" or "-N" minutes. Read as it is
+ * written, offsets out of range included, so the editor shows it and windowError() names what's wrong. */
+function parseBound(text) {
+  const m = /^(?:(\d\d:\d\d)|(sunrise|sunset)(?:([+-]\d+))?)$/.exec(text || '');
+  if (!m) return { kind: 'time', time: '07:00' };
+  return m[1] ? { kind: 'time', time: m[1] } : { kind: m[2], offset: Number(m[3] || 0) };
+}
+const boundOk = (text) => /^(?:([01]\d|2[0-3]):[0-5]\d|(sunrise|sunset)([+-](?:[1-9]\d?|1[0-7]\d|180))?)$/.test(text || '');
+const windowText = (w) => `${w.from} – ${w.until}${(w.days ?? 127) === 127 ? ''
+  : `, ${DAYS.filter((d, bit) => (w.days ?? 127) & (1 << bit)).join(' ')}`}`;
+
+/* What the device would refuse in a preset's window (spec §5.4), as a sentence; null when it takes it. */
+function windowError(p) {
+  const w = p.window;
+  if (!w) return null;
+  if (!boundOk(w.from) || !boundOk(w.until)) return `${p.name}: a window's ends are times, or sunrise or sunset within 180 minutes.`;
+  if (w.from === w.until) return `${p.name}: the window's from and until can't be the same.`;
+  const days = w.days ?? 127;
+  if (!Number.isInteger(days) || days < 1 || days > 127) return `${p.name}: a window opens on one day at least.`;
+  return null;
+}
 let catalogue = null; /* GET /api/layouts, cached: it doesn't change while the page is open */
 
 function uniqueId(doc, base) {
@@ -1236,7 +1258,8 @@ function renderPresets(ed) {
       h('b', { text: q.name }), ' ', h('span', { class: 'muted small', text: LAYOUT_NAMES[q.layout] || q.layout })),
     h('label', { class: 'check small', title: 'KEY and the auto-cycle step through these' },
       h('input', { type: 'checkbox', checked: q.in_cycle, onchange: (ev) => { q.in_cycle = ev.target.checked; changed(ed, false); } }),
-      'cycle'))));
+      'cycle'),
+    q.window ? h('span', { class: 'muted small', text: ` ${windowText(q.window)}` }) : null)));
   const listCard = card('Presets', list, h('p', { class: 'muted small', text: 'Tap a preset to edit it. The dot marks ' +
     'the one on the screen now; "cycle" puts a preset in the order KEY and the auto-cycle step through.' }), actions(
     button('New preset', () => {
@@ -1300,9 +1323,44 @@ function renderPresets(ed) {
       o.status_battery = ['percent', 'voltage', 'days'].filter((k) => battery.has(k));
       changed(ed, false);
     } }), text);
+  /* The cycle window (spec §5.4, D41): each end a time, or sunrise or sunset with an offset, and the days. */
+  const bound = (key) => {
+    const b = parseBound(p.window[key]);
+    const kind = choose([['time', 'At a time'], ['sunrise', 'Sunrise'], ['sunset', 'Sunset']], b.kind);
+    kind.addEventListener('change', (ev) => {
+      const k = ev.target.value, now = parseBound(p.window[key]); /* the offset as typed since the last render */
+      p.window[key] = k === 'time' ? '07:00' : `${k}${now.offset ? (now.offset > 0 ? '+' : '') + now.offset : ''}`;
+      changed(ed, true);
+    });
+    const value = b.kind === 'time'
+      ? h('input', { type: 'time', value: b.time, onchange: (ev) => { p.window[key] = ev.target.value; changed(ed, false); } })
+      : h('input', { type: 'number', min: -180, max: 180, step: 1, value: b.offset, title: 'Minutes after (+) or before (-)',
+                     onchange: (ev) => {
+                       const n = Number(ev.target.value);
+                       p.window[key] = n ? `${b.kind}${n > 0 ? '+' : ''}${n}` : b.kind; /* 1.5 or 200: refused at Save */
+                       changed(ed, false);
+                     } });
+    return h('div', { class: 'row' }, kind, value);
+  };
+  const cycleWindow = choose([['all', 'All day'], ['window', 'Within a window']], p.window ? 'window' : 'all');
+  cycleWindow.addEventListener('change', (ev) => {
+    if (ev.target.value === 'window') p.window = { from: 'sunrise', until: 'sunset', days: 127 };
+    else delete p.window;
+    changed(ed, true);
+  });
+  const windowDays = () => h('div', { class: 'days' }, DAYS.map((d, bit) => h('label', {}, h('input', { type: 'checkbox',
+    checked: (p.window.days ?? 127) & (1 << bit), onchange: (ev) => {
+      p.window.days = ((p.window.days ?? 127) & ~(1 << bit)) | (ev.target.checked ? 1 << bit : 0);
+      changed(ed, false);
+    } }), d)));
+
   const editCard = card(`Edit ${p.name}`, previewBox(ed, slotsOf(p)), ed.previewNote,
     field('Name', name), field('Layout', layout), slots,
     NO_SLOTS[p.layout] ? h('p', { class: 'muted small', text: NO_SLOTS[p.layout] }) : null,
+    field('In the cycle', cycleWindow, 'The auto-cycle skips this preset while its window is closed; KEY still reaches it.'),
+    p.window ? [field('From', bound('from')), field('Until', bound('until')), field('Days', windowDays()),
+                h('p', { class: 'muted small', text: 'Sunrise and sunset are the location\'s, with minutes after (+) or ' +
+                  'before (-). An end before the start runs past midnight.' })] : null,
     field('Time format', clock), check('seconds', 'Show seconds'),
     o.seconds ? h('p', { class: 'bad small', text: 'Seconds wake the device every second: the battery lasts far less.' }) : null,
     check('invert', 'White on black'), field('Old or missing data', stale),
@@ -1365,6 +1423,8 @@ function renderPresets(ed) {
 
   ed.saveBar = card(null, ed.saveNote, actions(
     button('Save', () => busy(ed.saveBar, ed.saveNote, async () => {
+      const bad = ed.doc.presets.map(windowError).find(Boolean);
+      if (bad) throw new ApiError(bad);
       ed.doc = await api('PUT', '/api/presets', ed.doc);
       if (!ed.doc.schedule) ed.doc.schedule = { enabled: false, entries: [] };
       ed.dirty = false;

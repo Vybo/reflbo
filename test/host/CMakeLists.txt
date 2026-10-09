@@ -270,6 +270,7 @@ reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
 reflbo_host_test(test_ui_split ui)
 reflbo_host_test(test_ui_schedule ui)
+reflbo_host_test(test_ui_window ui astro)
 reflbo_host_test(test_ui_widget_fit ui)
 target_include_directories(test_ui_widget_fit PRIVATE ${REPO_ROOT}/components/ui) # ui_widget_draw(), fresh and stale
 reflbo_host_test(test_ui_menu ui)

@@ -1,5 +1,9 @@
+#define _POSIX_C_SOURCE 200809L /* setenv */
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "ui_fields.h"
 #include "ui_preset.h"
@@ -73,6 +77,124 @@ static void test_the_cycle_visits_flights_only_in_sync_mode_always(void)
     s_p.active = 0;
     TEST_ASSERT_EQUAL_INT(0, ui_presets_next(&s_p, false)); /* only flights in the cycle: stays */
     TEST_ASSERT_EQUAL_INT(5, ui_presets_next(&s_p, true));
+}
+
+/* Europe/Prague and Brno, the defaults (AGENTS.md §1), for the cycle windows (spec §5.4, D41). */
+#define TZ_PRAGUE "CET-1CEST,M3.5.0,M10.5.0/3"
+#define BRNO_LAT 491951
+#define BRNO_LON 166068
+
+static time_t local_time(int y, int mo, int d, int h, int mi)
+{
+    struct tm t = { .tm_year = y - 1900, .tm_mon = mo - 1, .tm_mday = d, .tm_hour = h, .tm_min = mi, .tm_isdst = -1 };
+    return mktime(&t);
+}
+
+static int cycle_next(bool always, time_t now)
+{
+    return ui_presets_cycle_next(&s_p, always, now, BRNO_LAT, BRNO_LON);
+}
+
+/* The auto-cycle skips a preset whose window is closed; KEY short (ui_presets_next) doesn't (D41). */
+static void test_the_auto_cycle_skips_a_closed_window(void)
+{
+    setenv("TZ", TZ_PRAGUE, 1);
+    tzset();
+    TEST_ASSERT_TRUE(ui_window_make("07:00", "08:00", 127, &s_p.presets[1].window, s_err, sizeof(s_err)));
+    time_t noon = local_time(2026, 10, 9, 12, 0), morning = local_time(2026, 10, 9, 7, 30);
+    TEST_ASSERT_EQUAL_INT(2, cycle_next(true, noon));  /* home -> weather, past indoor's closed window */
+    TEST_ASSERT_EQUAL_INT(1, cycle_next(true, morning)); /* open: home -> indoor */
+    TEST_ASSERT_EQUAL_INT(1, ui_presets_next(&s_p, true)); /* KEY short still reaches it */
+    TEST_ASSERT_EQUAL_INT(1, cycle_next(true, 0));       /* no valid time: every window open */
+    s_p.active = 4;                                      /* rain: flights still only in sync mode always */
+    TEST_ASSERT_EQUAL_INT(5, cycle_next(true, noon));
+    TEST_ASSERT_EQUAL_INT(0, cycle_next(false, noon));
+}
+
+/* With no other preset in the cycle open, the one on screen stays, its own window open or not. */
+static void test_the_auto_cycle_keeps_the_preset_when_none_is_open(void)
+{
+    setenv("TZ", TZ_PRAGUE, 1);
+    tzset();
+    for (int i = 0; i < s_p.count; i++) {
+        TEST_ASSERT_TRUE(ui_window_make("07:00", "08:00", 127, &s_p.presets[i].window, s_err, sizeof(s_err)));
+    }
+    s_p.active = 2;
+    TEST_ASSERT_EQUAL_INT(2, cycle_next(true, local_time(2026, 10, 9, 12, 0)));
+    TEST_ASSERT_EQUAL_INT(3, ui_presets_next(&s_p, true));
+}
+
+/* The built-in Solar preset has a window from sunrise to sunset; the others none (spec §5.4, M6e). */
+static void test_the_built_in_solar_preset_has_a_daylight_window(void)
+{
+    for (int i = 0; i < s_p.count; i++) {
+        const ui_window_t *w = &s_p.presets[i].window;
+        if (strcmp(s_p.presets[i].id, "solar") == 0) {
+            TEST_ASSERT_EQUAL_UINT8(0x7F, w->days);
+            TEST_ASSERT_EQUAL_INT16(UI_BOUND_SUNRISE, w->from);
+            TEST_ASSERT_EQUAL_INT16(UI_BOUND_SUNSET, w->until);
+        } else {
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, w->days, s_p.presets[i].id);
+        }
+    }
+}
+
+static void test_a_window_survives_a_round_trip(void)
+{
+    const char *json = "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"grid\", \"window\": "
+                       "{\"from\": \"sunrise+30\", \"until\": \"22:00\", \"days\": 31}}, "
+                       "{\"id\": \"b\", \"layout\": \"grid\"}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(31, s_p.presets[0].window.days);
+    TEST_ASSERT_EQUAL_INT16(UI_BOUND_SUNRISE + 30, s_p.presets[0].window.from);
+    TEST_ASSERT_EQUAL_INT16(22 * 60, s_p.presets[0].window.until);
+    TEST_ASSERT_EQUAL_UINT8(0, s_p.presets[1].window.days); /* none: always open */
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"window\":{\"from\":\"sunrise+30\",\"until\":\"22:00\",\"days\":31}"));
+    TEST_ASSERT_NULL(strstr(strstr(s_json, "\"id\":\"b\""), "\"window\"")); /* not for b */
+    ui_presets_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(s_p));
+}
+
+/* A window without days opens every day; `null` is no window. */
+static void test_a_window_without_days_opens_every_day(void)
+{
+    const char *json = "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"grid\", \"window\": "
+                       "{\"from\": \"sunset\", \"until\": \"sunrise\"}}, "
+                       "{\"id\": \"b\", \"layout\": \"grid\", \"window\": null}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(0x7F, s_p.presets[0].window.days);
+    TEST_ASSERT_EQUAL_UINT8(0, s_p.presets[1].window.days);
+}
+
+static void test_bad_windows_are_rejected_with_a_reason(void)
+{
+    static const struct {
+        const char *window, *why;
+    } k_cases[] = {
+        { "\"sunrise\"", "preset \"a\": window must be an object" },
+        { "{\"from\": \"dawn\", \"until\": \"sunset\"}",
+          "preset \"a\": window: from must be HH:MM, or sunrise or sunset with an offset of 1-180 minutes" },
+        { "{\"from\": \"07:00\"}",
+          "preset \"a\": window: until must be HH:MM, or sunrise or sunset with an offset of 1-180 minutes" },
+        { "{\"from\": \"sunset+0\", \"until\": \"23:00\"}",
+          "preset \"a\": window: from must be HH:MM, or sunrise or sunset with an offset of 1-180 minutes" },
+        { "{\"from\": \"07:00\", \"until\": \"07:00\"}", "preset \"a\": window: from and until can't be the same" },
+        { "{\"from\": \"07:00\", \"until\": \"22:00\", \"days\": 0}", "preset \"a\": window: days must be 1-127" },
+        { "{\"from\": \"07:00\", \"until\": \"22:00\", \"days\": 255}", "preset \"a\": window: days must be 1-127" },
+        { "{\"from\": \"07:00\", \"until\": \"22:00\", \"days\": \"Mo\"}", "preset \"a\": window: days must be 1-127" },
+        { "{\"from\": \"07:00\", \"until\": \"22:00\", \"days\": 3.5}", "preset \"a\": window: days must be 1-127" },
+    };
+    for (size_t i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
+        char json[256];
+        snprintf(json, sizeof(json),
+                 "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"grid\", \"window\": %s}]}",
+                 k_cases[i].window);
+        s_err[0] = '\0';
+        TEST_ASSERT_FALSE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), json);
+        TEST_ASSERT_EQUAL_STRING(k_cases[i].why, s_err);
+    }
 }
 
 /* A presets.json saved by M5: the four presets of its day, no marker. */
@@ -560,6 +682,7 @@ static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
         p->clock = UI_CLOCK_12H;
         p->stale_policy = UI_STALE_PLACEHOLDER;
         p->status_battery = UI_STATUS_BAT_PERCENT | UI_STATUS_BAT_VOLTAGE | UI_STATUS_BAT_DAYS;
+        TEST_ASSERT_TRUE(ui_window_make("sunrise-180", "sunset-180", 0x7E, &p->window, s_err, sizeof(s_err))); /* M6e */
     }
     s_p.count = UI_PRESET_MAX;
     s_p.cycle_interval_s = UI_CYCLE_MAX_S;
@@ -628,6 +751,12 @@ int main(void)
     RUN_TEST(test_defaults_are_the_eight_built_ins);
     RUN_TEST(test_next_follows_cycle_order_and_skips_presets_out_of_it);
     RUN_TEST(test_the_cycle_visits_flights_only_in_sync_mode_always);
+    RUN_TEST(test_the_auto_cycle_skips_a_closed_window);
+    RUN_TEST(test_the_auto_cycle_keeps_the_preset_when_none_is_open);
+    RUN_TEST(test_the_built_in_solar_preset_has_a_daylight_window);
+    RUN_TEST(test_a_window_survives_a_round_trip);
+    RUN_TEST(test_a_window_without_days_opens_every_day);
+    RUN_TEST(test_bad_windows_are_rejected_with_a_reason);
     RUN_TEST(test_a_file_from_before_m6_gains_the_radars_once);
     RUN_TEST(test_a_file_from_m6c_gains_solar_and_energy_once);
     RUN_TEST(test_the_radars_need_room_and_a_free_id);

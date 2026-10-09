@@ -44,17 +44,17 @@ void ui_presets_defaults(ui_presets_t *p)
 }
 
 /* The built-ins added after M5, whose layouts have no slots: the two radars (D28) in the cycle, Solar and Energy
- * (D35, D36) outside it. */
+ * (D35, D36) outside it; Solar's cycle window runs from sunrise to sunset (M6e, D41). */
 static const struct {
     uint8_t bit;
     const char *id, *name;
     ui_layout_id_t layout;
-    bool in_cycle;
+    bool in_cycle, daylight;
 } k_offered[] = {
-    { UI_OFFERED_RAIN, "rain", "Rain radar", UI_LAYOUT_RADAR, true },
-    { UI_OFFERED_FLIGHTS, "flights", "Flights", UI_LAYOUT_FLIGHTS, true },
-    { UI_OFFERED_SOLAR, "solar", "Solar", UI_LAYOUT_SOLAR, false },
-    { UI_OFFERED_ENERGY, "energy", "Energy", UI_LAYOUT_ENERGY, false },
+    { UI_OFFERED_RAIN, "rain", "Rain radar", UI_LAYOUT_RADAR, true, false },
+    { UI_OFFERED_FLIGHTS, "flights", "Flights", UI_LAYOUT_FLIGHTS, true, false },
+    { UI_OFFERED_SOLAR, "solar", "Solar", UI_LAYOUT_SOLAR, false, true },
+    { UI_OFFERED_ENERGY, "energy", "Energy", UI_LAYOUT_ENERGY, false, false },
 };
 
 bool ui_presets_offer_builtins(ui_presets_t *p)
@@ -69,6 +69,9 @@ bool ui_presets_offer_builtins(ui_presets_t *p)
             *added = make(k_offered[i].id, k_offered[i].name, k_offered[i].layout, k_offered[i].in_cycle,
                           (ui_field_id_t[UI_SLOT_MAX]){ UI_FIELD_NONE });
             added->status_clock = true; /* the view fills the screen: the time goes to the status bar */
+            if (k_offered[i].daylight) {
+                added->window = (ui_window_t){ .days = 0x7F, .from = UI_BOUND_SUNRISE, .until = UI_BOUND_SUNSET };
+            }
         }
         p->offered |= k_offered[i].bit;
         changed = true;
@@ -98,9 +101,16 @@ int ui_presets_find(const ui_presets_t *p, const char *id)
 
 int ui_presets_next(const ui_presets_t *p, bool always)
 {
+    return ui_presets_cycle_next(p, always, 0, 0, 0);
+}
+
+int ui_presets_cycle_next(const ui_presets_t *p, bool always, time_t now, int32_t lat_e4, int32_t lon_e4)
+{
     for (int step = 1; step < p->count; step++) {
         int i = (p->active + step) % p->count;
-        if (p->presets[i].in_cycle && (always || p->presets[i].layout != UI_LAYOUT_FLIGHTS)) {
+        const ui_preset_t *q = &p->presets[i];
+        if (q->in_cycle && (always || q->layout != UI_LAYOUT_FLIGHTS) &&
+            (now == 0 || ui_window_open(&q->window, now, lat_e4, lon_e4, NULL))) {
             return i;
         }
     }

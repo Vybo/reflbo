@@ -7,6 +7,7 @@
 
 #include "ui_layout.h"
 #include "ui_split.h"
+#include "ui_window.h"
 
 /*
  * Presets (spec §5.4): a layout, its slot bindings and options, stored in /cfg/presets.json.
@@ -47,6 +48,7 @@ typedef struct {
     char name[UI_PRESET_NAME_LEN];
     uint8_t layout; /* ui_layout_id_t */
     bool in_cycle;
+    ui_window_t window; /* the auto-cycle skips the preset while it is closed (spec §5.4, D41); days 0: none */
     uint8_t slots[UI_SLOT_MAX]; /* ui_field_id_t per slot, in the layout's slot order, or per cell */
     uint8_t split[UI_SPLIT_NODES]; /* the split layout's tree (ui_split.h); all 0 for the others */
     uint8_t clock;              /* ui_clock_mode_t */
@@ -123,6 +125,10 @@ int ui_presets_find(const ui_presets_t *p, const char *id); /* index, or -1 */
  * preset is in the cycle (spec §5.4, KEY short). Presets on the Flights layout are in it only in
  * sync mode `always` (D28). */
 int ui_presets_next(const ui_presets_t *p, bool always);
+/* The auto-cycle's next preset (spec §5.4, D41): as ui_presets_next(), skipping presets whose cycle window is
+ * closed at `now` at the location (1e-4 degrees); the active one when no other is open. `now` 0, the clock not
+ * set: every window counts as open. */
+int ui_presets_cycle_next(const ui_presets_t *p, bool always, time_t now, int32_t lat_e4, int32_t lon_e4);
 /* Offers the built-ins `offered` doesn't name yet: each joins at the end if its id is free and
  * there is room, and is marked offered either way. True if anything changed: save the file. */
 bool ui_presets_offer_builtins(ui_presets_t *p);

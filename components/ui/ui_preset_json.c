@@ -192,6 +192,27 @@ static bool parse_split(const cJSON *split, ui_preset_t *out, char *err, size_t 
     return true;
 }
 
+/* A preset's cycle window (spec §5.4, D41): from, until and days, checked as the console checks them. */
+static bool parse_window(const cJSON *window, ui_preset_t *out, char *err, size_t size)
+{
+    if (!cJSON_IsObject(window)) {
+        return fail(err, size, "preset \"%s\": window must be an object", out->id);
+    }
+    const cJSON *from = cJSON_GetObjectItemCaseSensitive(window, "from");
+    const cJSON *until = cJSON_GetObjectItemCaseSensitive(window, "until");
+    const cJSON *days = cJSON_GetObjectItemCaseSensitive(window, "days");
+    int mask = 0x7F;
+    if (days != NULL) {
+        mask = cJSON_IsNumber(days) && days->valuedouble == (double)days->valueint ? days->valueint : -1;
+    }
+    char why[96];
+    if (!ui_window_make(cJSON_IsString(from) ? from->valuestring : "", cJSON_IsString(until) ? until->valuestring : "",
+                        mask, &out->window, why, sizeof(why))) {
+        return fail(err, size, "preset \"%s\": window: %s", out->id, why);
+    }
+    return true;
+}
+
 static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t size)
 {
     memset(out, 0, sizeof(*out));
@@ -213,6 +234,10 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
     }
     out->layout = (uint8_t)layout;
     out->in_cycle = optional_bool(item, "in_cycle", true);
+    const cJSON *window = cJSON_GetObjectItemCaseSensitive(item, "window");
+    if (window != NULL && !cJSON_IsNull(window) && !parse_window(window, out, err, size)) {
+        return false;
+    }
     const cJSON *slots = cJSON_GetObjectItemCaseSensitive(item, "slots");
     if (slots != NULL && !cJSON_IsNull(slots) &&
         !parse_slots(slots, ui_layout((ui_layout_id_t)layout), out, err, size)) {
@@ -406,6 +431,15 @@ static cJSON *preset_json(const ui_preset_t *p)
     cJSON_AddStringToObject(obj, "name", p->name);
     cJSON_AddStringToObject(obj, "layout", layout->id);
     cJSON_AddBoolToObject(obj, "in_cycle", p->in_cycle);
+    if (p->window.days != 0) {
+        char from[UI_BOUND_TEXT_LEN], until[UI_BOUND_TEXT_LEN];
+        ui_bound_format(p->window.from, from, sizeof(from));
+        ui_bound_format(p->window.until, until, sizeof(until));
+        cJSON *window = cJSON_AddObjectToObject(obj, "window");
+        cJSON_AddStringToObject(window, "from", from);
+        cJSON_AddStringToObject(window, "until", until);
+        cJSON_AddNumberToObject(window, "days", p->window.days);
+    }
     if (p->layout == UI_LAYOUT_SPLIT) {
         int at = 0, cell = 0;
         bool whole = ui_split_nodes(p->split) > 0; /* a tree cut short can't be walked: one empty cell */

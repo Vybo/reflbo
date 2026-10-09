@@ -1,5 +1,7 @@
 # M7: MQTT and Home Assistant, Implementation Plan
 
+> **Refresh before it runs** (D41, 2026-10-09): the sync's status in HA (spec r45 §12.2, §12.3) joins M7, and M6e's cycle windows land first, adding about 100 bytes to the RTC snapshot this plan counts on.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** M7 (spec §18, D32, D40): the board publishes its state to Home Assistant through MQTT discovery and takes HA's commands (the preset select, Sync now and Next preset buttons) and a message, which shows as a banner until KEY dismisses it and as the `ha.message` field; values from HA and other local devices arrive as `mqtt.<key>` fields of any kind: numbers, texts whose states read as words (a door's Open and Closed), and times (a phone's next alarm); the house's energy can come from MQTT, a third source beside SolaX's two; while connected, its key presses reach HA as device triggers. A session runs in every sync, and sync mode `always` keeps one; a failed session is shown but doesn't fail the sync.

@@ -80,6 +80,7 @@ reflbo turns the Waveshare ESP32-S3-RLCD-4.2 into a battery-powered desk display
 | D38 | Owner, 2026-10-06 (M6d acceptance): a power under 1 kW shows in whole watts, as the SolaX app does ("382 W", not "0.38 kW"), on every field, the Solar and Energy layouts and the flow; the flow, whose heading carries one unit, shows W while all its powers are under 1 kW. Solcast's check with the owner's key waits for later | "0.39 kW" and "0.00 kW" told less than the app's watts in the evening; the flow's numbers have no room for units of their own |
 | D39 | Owner, 2026-10-06 (M6d acceptance): the Developer API's solar output is the app's figure, what the panels give through the inverter (its AC output, with a battery's charge, at most the panels' DC power), not the panels' DC power; the past bars from SolaX's 5-minute history stay an option for later (§19); the owner's roof checked; the power measurement and Solcast's check come at the project's end; this build becomes `stable-m6d` | The app's Solar equals Home when the grid is at 0 (382 W both): it shows the inverter's output, about 5 % under the panels' 1471 W against 1397 W |
 | D40 | Owner, 2026-10-06 (M7's plan refreshed against M6c and M6d, D33): M7 also brings an MQTT source for the house's energy, beside SolaX's two (§11.6, §12.11); state labels for text fields and a time kind for timestamps, so any HA entity reads well on the panel (§12.5); HA's `unknown` and `unavailable` count as no value; the device publishes no `pv.*` or `energy.*` values to HA; the checks with HA still wait for the owner's broker; the plan runs Native | Any HA entity as a field was the aim (D7); raw states (`on`, `not_home`) and timestamps read badly; the owner's house may report its energy to HA by other means than SolaX Cloud |
+| D41 | Owner, 2026-10-09: presets get a cycle window (§5.4): from and until, each a local time or sunrise or sunset with an offset of up to 3 h, crossing midnight when until comes first, and the days it opens on; only the auto-cycle skips a preset whose window is closed: KEY short, the schedule, the menu, the web UI and HA still reach it, and a preset on screen when its window closes stays until the cycle's next step; built now as M6e, before M7. M7 also publishes the sync's status to HA (Sync problem, Sync error, Last successful sync, Next sync; §12.2, §12.3), built with M7. Sync now stays where it is (Menu ▸ Sync ▸ Sync now) | The Solar preset says little after sundown, so it should leave the cycle then and come back in the morning; HA should know when the board's syncs fail |
 
 ### 1.3 Out of scope for v1
 
@@ -431,6 +432,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
 - **Built-in defaults.** Home (Classic), Indoor (Grid, with the status clock), Weather and Focus clock are compiled in. They are used when the file is missing or invalid. The built-in Weather preset joins the cycle from M5, which brings its data; a `presets.json` saved earlier keeps its own choice. M6 adds Rain radar (the Radar layout, in the cycle) and Flights (the Flights layout, D28): the cycle visits Flights only in sync mode `always`, and outside it a preset on that layout says "Flights need sync mode Always on". A `presets.json` saved before M6 gains both once, at the first boot that knows them, if there is room; the file then carries a marker, so a preset deleted later stays deleted. There can be at most 16 presets.
   - M6d (D35, D36) adds Solar (the Solar layout) and Energy (the Energy layout), both outside the cycle, offered once to an older `presets.json` as M6's were, and named in the same marker.
   - As built (M6d): `solar` and `energy`, with the status clock. An older `presets.json` gains them once, at its end, if there is room and their ids are free; the marker then names them, so one deleted later stays deleted. The owner's M6c file gained both at M6d's first boot.
+  - M6e (D41): the built-in Solar preset has the cycle window `sunrise` → `sunset`; it stays outside the cycle until the user adds it. A file saved earlier keeps its presets as they are.
 - **Options.** `clock_24h` overrides the time setting when present. `status_clock` and `status_battery` shape the status bar (§5.2).
 - **Validation.** A file with a structural error is rejected as a whole, and the error names it. Structural errors:
   - not JSON, or another schema;
@@ -441,7 +443,8 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - an `mqtt.<key>` with a bad key, or more than 32 different keys in the file (M7, §12.5); a key no mapping names is not an error;
   - an unknown `stale_policy` or `status_battery` value;
   - nesting deeper than 16 levels, or `slots` that isn't an object;
-  - a bad schedule: more than 8 entries, or an entry with a bad time, action or preset, or a night that ends at the minute it starts.
+  - a bad schedule: more than 8 entries, or an entry with a bad time, action or preset, or a night that ends at the minute it starts;
+  - a bad `window` (M6e, D41): a bound that isn't a time or `sunrise` or `sunset` with an offset of 1–180 minutes, `from` and `until` the same, or `days` outside 1–127.
 
   Everything else is lenient:
   - an unknown `active` selects the first preset;
@@ -451,7 +454,7 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - `null` or `""` leaves a slot empty.
 - **Switching.** Presets change by:
   - KEY short: next preset in cycle order.
-  - The auto-cycle timer: interval at least 10 s; each switch costs a wake-up.
+  - The auto-cycle timer: interval at least 10 s; each switch costs a wake-up. From M6e it skips a preset whose cycle window is closed (D41).
   - The HA `select` entity (§12.3).
   - The web UI or the menu.
 
@@ -465,6 +468,13 @@ A preset is a layout, a slot → field binding and a set of options. Presets are
   - A night covers the minutes from its start up to its end, so an entry at the end minute runs: night 23:00–06:00 with a preset at 06:00 switches the preset in the morning.
   - A preset entry's switch is not saved, like an auto-cycle switch.
   - Until the web UI (M4), the `schedule` console command edits the entries (§15).
+- **Cycle windows** (M6e, D41). A preset may carry `"window": { "from": "sunrise", "until": "sunset-30", "days": 127 }`, beside `in_cycle`: the auto-cycle visits it only while its window is open.
+  - A bound is a local time, `"HH:MM"`, or `"sunrise"` or `"sunset"` with an optional offset of 1–180 minutes (`"sunset+30"`, `"sunrise-15"`). Sun times are those of the day the bound falls on, at the device's location (`astro`, §11). Where the sun doesn't rise or set that day, sunrise counts as 00:00 and sunset as 24:00 in a polar day, and both as 12:00 in a polar night.
+  - A window opens on each day `days` names (the schedule's Mon–Sun mask, every day when missing) at `from`, and closes at `until` that day, or the next day when `until` comes at or before `from` that day: `sunset` → `sunrise` spans the night. A local time that a DST change skips counts from the next valid minute, as alarms do (§9.2).
+  - Only the auto-cycle looks at windows: it steps to the next preset in cycle order whose window is open (Flights still only in sync mode `always`), and keeps the one shown when none is. KEY short, `cmd/next` (§12.4), schedule entries, the menu, the web UI and HA's select still reach every preset. A preset on screen when its window closes stays until the cycle's next step; with the auto-cycle off it stays.
+  - Without a valid time every window counts as open, as the schedule's entries don't run then either.
+  - A preset without `window` is always open, so earlier files work unchanged.
+  - The windows ride with the presets in the RTC snapshot (§6), about 100 bytes. `stable-m6d` reads a file with windows, ignoring them, and its next save of `presets.json` drops them; restoring the backup brings them back.
 
 ### 5.5 Screens
 
@@ -832,6 +842,7 @@ Optimisation candidates (evaluated at M2/M5, not features): LPM frame rate, CPU 
   - Sync (M5): the mode with its shortcuts, the times or the interval, the quiet hours (D25), "Sync now" with its progress, the last sync's steps, the next sync, and the RTC's trim and drift (§7). M6d adds a switch for each data step (D35) and the Solar and Energy steps' results.
   - Solar (M6d, D35, D36): the forecast's source, with only the fields that source needs (up to 2 planes of kWp, tilt and azimuth, the losses and the inverter's limit; Forecast.Solar's optional key; Solcast's key and 1–2 site ids); the house's energy (off, SolaX Cloud's Developer API with its Client ID, Client Secret and region, or SolaX Cloud by its Token ID with the token and registration number; the home battery: auto, on or off) and the plant the Developer API found; Check now, which runs the two steps and shows their results; the last forecast and reading with their times and errors; the credits. Keys, tokens and site ids are write-only: the page shows whether each is set.
   - Presets (M6c, M6d): the editor allows 24 cells down to 40×20 and shows XS; the field list groups the Solar and Energy fields and marks fields whose sync step is off.
+  - Presets (M6e, D41): the edit card's "In the cycle": all day, or a window whose ends are each a time, sunrise or sunset with an offset of up to ±3 h, and its days. The preset list shows each window beside its cycle box ("sunrise – sunset"). The page checks a window as the device does, so a save it allows is one the device takes.
   - Location & time (M5): a place search through `/api/geocode`, which fills in the name, latitude and longitude.
   - Radar (M6): a card for each radar: its centre (the location, the place search or coordinates) and zoom or range, the flight radar's filters, a live preview through `/api/preview.bmp`, and the credits (§11.2, §11.3). The flight radar's card says it runs only in sync mode Always on.
     - As built (M6): the previews draw the saved settings and refresh after each save; the zoom is a list with each step's width in km; the flight radar's card shows the last poll's failure ("Last poll: failed: too big") and adsb.lol's pause; below both cards, the map's credits: Natural Earth, OurAirports and GeoNames (CC BY 4.0, D29).
@@ -1037,11 +1048,18 @@ State example:
  "preset":"home","last_sync":"2026-09-25T03:30:12Z","fw":"0.1.0","uptime_s":86400}
 ```
 
+The sync's status (D41, built with M7) joins the state: `"sync_problem":true,"sync_error":"weather: HTTP 503; energy: no session","last_ok_sync":"2026-09-24T03:30:09Z","next_sync":"2026-09-25T15:30:00Z"`.
+- They describe the sync whose session carries them, its steps before the MQTT step. `sync_problem` is true when any of them failed, the ones that don't fail a sync (the house's energy, D36) included. `sync_error` names the failed steps and why, or says `"none"`.
+- `last_ok_sync` is the last sync that didn't fail (D32, D36). `next_sync` is the next planned one, `null` in manual mode.
+- In sync mode `always` they go out with the state when they change.
+- A sync that never reaches the broker (no Wi-Fi, the broker down) can't report itself. HA sees it as Last successful sync ageing at the next session, or as the entities going unavailable after `expire_after` (§12.3).
+
 ### 12.3 Discovery entities
 
 | Entity | Details |
 |---|---|
-| Sensors | Temperature (°C), humidity (%), battery (%), charging state (enum); as diagnostics: battery voltage (V), Wi-Fi RSSI (dBm), last sync (timestamp) |
+| Sensors | Temperature (°C), humidity (%), battery (%), charging state (enum); as diagnostics: battery voltage (V), Wi-Fi RSSI (dBm), last sync (timestamp); from D41, Sync error (text), Last successful sync and Next sync (timestamps) |
+| `binary_sensor` | Sync problem (D41), `device_class: problem`: on when any step of the last sync failed (§12.2) |
 | `select` | Active preset. Options are the preset names; `command_topic` is `.../cmd/preset`; `qos: 1` |
 | `button` | "Sync now" (`.../cmd/sync`) and "Next preset" (`.../cmd/next`), payload `PRESS`, `qos: 1` (D32) |
 | `notify` | "Message" (`.../cmd/message`, §12.7, D32) |
@@ -1054,7 +1072,7 @@ State example:
 ### 12.4 Commands
 
 - `cmd/preset` activates a preset by id or name, saved like a manual switch.
-- `cmd/next` activates the next preset in cycle order, saved like KEY short's (D32).
+- `cmd/next` activates the next preset in cycle order, saved like KEY short's (D32); like KEY short, it ignores the cycle windows (D41).
 - `cmd/sync` starts a sync at once in sync mode `always`. One that queued while the board slept arrives during a sync, which is already running, so it is ignored (D32).
 - `cmd/message` sets the message (§12.7).
 - Commands are applied on the app task in the order they arrive, and the new state is published in the same session. A command with an unknown preset or payload is logged and ignored.
@@ -1281,7 +1299,7 @@ M3a reads `language`, `time.tz_iana`, `time.tz_posix`, `time.clock_24h`, `units.
 | `sensors` · `battery` · `battery learn start\|stop` | Readings; learning the battery curve from the next full discharge (D21) |
 | `rtc get` · `rtc set <ISO 8601>` | RTC |
 | `field list` · `field get <id>` · `field set <id> <value>` · `field clear <id>` | Inspect and inject data, e.g. fixtures on the device; from M7 `field set ha.message <text>` raises the message banner as HA's would (§12.7) |
-| `preset list` · `preset set <id>` | Presets |
+| `preset list` · `preset set <id>` · `preset window <id> <from> <until> [days]` · `preset window <id> off` | Presets. From M6e (D41) `preset list` shows each cycle window and whether it is open now ("open until 18:21", "closed until 06:58"), and `preset window` sets or removes one, saved as the web page saves it |
 | `schedule list` · `schedule on\|off\|clear` · `schedule add <HH:MM> preset <id> [days]` · `schedule add <HH:MM> night <HH:MM> [days]` | The preset schedule (§5.4); `days` is the Mon–Sun mask, default 127 |
 | `night <minutes>` | Night sleep now (§9.1), for measuring; the console drops until it ends |
 | `wifi status` · `wifi scan` | Wi-Fi: the state, network, address, AP clients and saved names; the networks in sight while Wi-Fi is on (config mode) |
@@ -1346,6 +1364,7 @@ pyserial comes from the ESP-IDF Python environment. The generators run through `
     - As built (M6c): `test_ui_widget_fit` draws every field in all 2451 cell sizes in fifteen sets of data (other skies, a charging battery, a holiday, polar day and night, a 12-hour clock, the largest values) and checks XS and short S cells for a cut number, time, battery, day's weather or sun time and for the stale mark, the age mark against the value at every size, a one-line XS sun's sunset and a stacked XS Moon's illumination; `test_ui_catalog` checks the published rules at every width and height; `test_storage_backup` the deepest file a bundle holds; `test_lang` the day form; five goldens of small-cell presets (`dash_split_compact`, `dash_split_compact_cs`, `dash_split_xs_rows`, `dash_split_xs_grid`, `dash_split_xs_narrow`). On the board (2026-10-04): the owner's M6b files load as they are; two small-cell presets over the API, drawn on the panel as the previews draw them, every cell clear of its edges; the refusal at 25 cells, the deepest tree and the largest file; a 34 KB backup restored; two deep sleeps carried the presets; the editor's 24 boxes and 12; the app task kept 3 120 bytes of its stack.
   - M6d (D35, D36): the PV model against known irradiance and temperatures; each forecast parser on recorded replies (Open-Meteo, Forecast.Solar with and without a key, Solcast) and their refusals; the local quarter hours across DST, the midnight roll-over, Solcast's budget; the SolaX parser on recorded replies (a string inverter, a hybrid, `success: false`), the signs, the battery's auto rule, the midnight totals and the quarter-hour actuals; `sync.steps`, `solar.*` and `energy.*` in the settings and the steps that are off in the sync plan; the `pv.*` and `energy.*` fields and widgets; goldens of the spike's renders (the Solar and Energy layouts with their variants, the fields in Classic, Grid, Weather and Focus); the Solar page and the step switches against the fake device, the keys write-only.
   - As built (M6d): `test_solar`, `test_energy`, `test_energy_dev` (D37: the requests, the token's, plants', devices', real-time and statistics replies and their refusals, the signs in a residential and a commercial plant, a hybrid's battery, the reading with and without today's row), `test_settings` (the steps, the sources, the region, the keys never in the file), `test_ui_fields`, `test_ui_solar`, `test_ui_widget_fit` (every cell size, fifteen sets of data, about 40 s, 4 min under ASan), `test_ui_preset`, `test_ui_menu`, `test_sync_plan`, `test_util_url`, `test_util_json` and twelve goldens; 66 host targets, all also under ASan and UBSan; 54 page tests. Task 12 checked on the board: the layouts with the sample day, Open-Meteo and Forecast.Solar through Check now, keys write-only through the API, a switched-off step making no request, the forecast through deep sleep and a cold boot, the heap, the stack and a sync's length, and a restore of the owner's configuration.
+  - M6e (D41): a cycle window's bounds (times, sunrise and sunset with offsets, across midnight, the days, a DST change, polar days and nights), the auto-cycle's rule (a closed window skipped, KEY short not, none open), `presets.json`'s windows (a round trip and the refusals), and the page's window editor.
   - Preset and settings JSON: validation and migrations.
   - Config files: the atomic write and the `.bak` fallback, in a scratch directory.
   - M7: `ha_mqtt`'s topics, golden JSON for every discovery entity and the state, payload parsing (numbers, text, `json_path`), commands, the mappings' codec and validation, the discovery hash and `expire_after`; the `mqtt.<key>` and `ha.message` fields, goldens of the message banner, presets with an unmapped key; the MQTT step not failing a sync; the MQTT page against the fake device (the write-only password, the mappings editor, Test connection).
@@ -1377,7 +1396,8 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M6b | One plan (D31): the split layout (§5.2, §5.4) in the renderer, `presets.json` and the web editor; BOOT double for sync mode `always` (§5.6) | Goldens of split presets (2); a split preset built in the web editor shows on the panel (3); BOOT double turns `always` on and back (3) |
 | M6c | One plan (D33, D34): split cells down to 40×20 and up to 24 (§5.2, §5.4), the XS size and S in short cells (§5.3), sizes that never shrink as a cell grows, the snapshot's cap, the editor | Goldens of small-cell presets (2); a 24-cell preset built in the editor shows on the panel (3); the owner checks XS cells' legibility on the panel (4) |
 | M6d | One plan (D33, D35, D36): `solar` (Open-Meteo with our model, Forecast.Solar, Solcast) and `energy` (SolaX Cloud, by its Token ID or, from D37, its Developer API), the Solar and Energy steps and the steps' switches (§9.3), the `pv.*` and `energy.*` fields, the chart and the flow, the Solar and Energy layouts and presets (§11.5, §11.6), the Solar page, `solar status`, `solar demo` and `energy raw`. Built 2026-10-05; its board checks passed the same day, and the Developer API's reading worked with the owner's keys | Goldens of the approved renders (2); a forecast from Open-Meteo and from Forecast.Solar renders after a sync (3); with the owner's keys, Solcast's forecast and a SolaX reading render, and the owner compares the reading with the SolaX app (3/4); a switched-off step makes no request (3); a sync's energy with both steps is measured on battery and `docs/power.md` updated (4) |
-| M7 | One plan (D32), refreshed against M6c and M6d (D33, D40): `ha_mqtt` (a session in every sync, kept connected in sync mode `always`), discovery, state, the preset select, HA buttons, key-press triggers, the message (banner and `ha.message`), the MQTT field mappings with state labels and the time kind, the MQTT page, the house's energy from MQTT (§12.11); review minors where M7 touches their code | Host tests and goldens (2); MQTT off and the MQTT page on the board, which runs the stable firmware between tests (3, §12.10); with the owner's broker and HA: entities appear in HA, the select and buttons work at the next sync, a mapped HA value renders, a labelled state and a time read as words, a message shows, key presses trigger in sync mode `always`, an MQTT energy source draws the Energy layout (3/4) |
+| M6e | One plan (D41): cycle windows per preset (§5.4): `presets.json`, the auto-cycle, the console, the web editor | Host and page tests (2); a window set from the console closes on the board, and the auto-cycle skips its preset while KEY still reaches it (3); the owner sees the Solar preset leave the cycle after sunset and come back in the morning (4) |
+| M7 | One plan (D32), refreshed against M6c and M6d (D33, D40): `ha_mqtt` (a session in every sync, kept connected in sync mode `always`), discovery, state, the preset select, HA buttons, key-press triggers, the message (banner and `ha.message`), the MQTT field mappings with state labels and the time kind, the MQTT page, the house's energy from MQTT (§12.11), the sync's status (D41, §12.2, §12.3); review minors where M7 touches their code | Host tests and goldens (2); MQTT off and the MQTT page on the board, which runs the stable firmware between tests (3, §12.10); with the owner's broker and HA: entities appear in HA, the select and buttons work at the next sync, a mapped HA value renders, a labelled state and a time read as words, a message shows, key presses trigger in sync mode `always`, an MQTT energy source draws the Energy layout, a failed step shows as Sync problem with its Sync error (3/4) |
 | M8 | `audio`: codec path, offline alarms (also from deep sleep), tones and WAV, radio (MP3/AAC, ICY) | An alarm fires from idle, and snooze and stop work (3/4); a radio stream plays (4) |
 | M9 | microSD features agreed at the start of M9 | Per the agreed list |
 
@@ -1393,6 +1413,7 @@ Verification levels (1–4) are defined in `AGENTS.md` §7.
 | M6 | Accepted (D22, D23, D24): the ADS-B flight radar (§19.1) and the weather radar (§19.2), on one map renderer; together about the size of M3a and M3b. Designed in §11.1–§11.4 (D27, D28), with three extras: rain in the next 2 hours, the last hour's loop, the nearest aircraft's route |
 | M7 | Accepted (D32): HA buttons (sync now, next preset); device triggers for key presses; an HA message entity. Accepted at the refresh (D40): an MQTT source for the house's energy; state labels; a time kind. Declined: the `pv.*` and `energy.*` values as HA sensors. Still deferred: MQTT over TLS; HA REST pull as an alternative source |
 | M6c, M6d | The owner's requests of 2026-10-04 (D33–D36), designed in §5.2, §5.3, §11.5 and §11.6. Still deferred: the SolaX dongle's local API; an MQTT source for the house's energy (with M7); the chart's past bars from SolaX's own 5-minute history of the day (the Developer API's `/openapi/v2/device/history_data`), one more request a sync, instead of a snapshot a sync (owner, 2026-10-06: an option for later) |
+| M6e, M7 | The owner's requests of 2026-10-09 (D41): cycle windows per preset (M6e, §5.4) and the sync's status to HA (M7, §12.2, §12.3). Sync now from the menu was there already (Menu ▸ Sync) |
 | M8 | Radio sleep timer; ESP-SR (echo cancellation, noise suppression, wake word) |
 | M9 | Config backup/provisioning file; sensor history CSV with graphs; sounds and station lists; 1-bit images; firmware file; logs and screenshots; from M6 (D28): radar and flight history over days, a detailed map pack, an aircraft registration database |
 | Later | IDS JMK departures; a remote 1-bit image slot; the VBUS-sense hardware mod; external I²C sensors on the header; BLE or ESP-NOW sources |
@@ -1555,3 +1576,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r42 | 2026-10-06 | Solar as the SolaX app shows it (D39): §1.2, §11.6; the 5-minute history as a later option (§19) |
 | r43 | 2026-10-06 | `stable-m6d` is the stable firmware (§12.10) |
 | r44 | 2026-10-06 | M7's refresh (D40): §1.2; the fields' kinds, state labels, time, no value, where they draw (§5.1, §12.5); the house's energy from MQTT (§9.3, §11.6, §12.11, §14.3); the MQTT and Solar pages (§10.3); the M7 rows (§18, §19) |
+| r45 | 2026-10-09 | The owner's requests (D41): §1.2; cycle windows per preset (§5.4, §10.3, §15, §17), built as M6e (§18); the sync's status to HA, built with M7 (§12.2, §12.3, §12.4, §18); §19 |

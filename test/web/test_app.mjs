@@ -177,10 +177,11 @@ const FIELDS = { fields: [{ id: 'time.clock', kind: 'time', name: 'Time', value:
 const preset = (id, name, inCycle) => ({ id, name, layout: 'classic', in_cycle: inCycle,
                                          slots: { main: 'time.clock', s1: 'env.temp' }, options: {} });
 
-/* A device with presets: Home in the cycle, Weather out of it; PUTs are kept in `saved`. */
-function presetDevice(saved) {
+/* A device with presets: Home in the cycle, Weather out of it; PUTs are kept in `saved`; `edit` may change the doc. */
+function presetDevice(saved, edit = () => {}) {
   const doc = { schema: 1, active: 'weather', presets: [preset('home', 'Home', true), preset('weather', 'Weather', false)],
                 cycle: { enabled: false, interval_s: 60 }, schedule: { enabled: false, entries: [] } };
+  edit(doc);
   return {
     'GET /api/layouts': () => reply(200, CATALOGUE),
     'GET /api/presets': () => reply(200, JSON.parse(JSON.stringify(doc))),
@@ -222,6 +223,75 @@ test('the preview names each slot where the layout puts it', async () => {
   const tags = below(main).filter((e) => e.className.split(' ').includes('slot-tag'));
   assert.deepEqual(tags.map(text), ['main', 's1']);
   assert.deepEqual(tags.map((e) => [e.style.left, e.style.top]), [['100%', '7%'], ['50%', '57.333%']]); /* top right */
+});
+
+/* ---- a preset's cycle window (spec §5.4, §10.3, D41) ---- */
+
+test('a preset gets a cycle window, sunrise to sunset by default, and the list shows it (D41)', async () => {
+  const saved = [];
+  const { ctx, main } = await load(presetDevice(saved));
+  await ctx.presetsPage(); /* Weather, the active one, is selected */
+  assert.equal(control(main, 'In the cycle').value, 'all');
+  await type(control(main, 'In the cycle'), 'window');
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.deepEqual(saved.at(-1).presets[1].window, { from: 'sunrise', until: 'sunset', days: 127 });
+  assert.equal(saved.at(-1).presets[0].window, undefined);
+  assert.match(text(main), /sunrise – sunset/);
+  assert.match(text(main), /skips this preset while its window is closed; KEY still reaches it/);
+});
+
+test('a window\'s ends take a time, or sunrise or sunset with an offset, and its days (D41)', async () => {
+  const saved = [];
+  const { ctx, main } = await load(presetDevice(saved));
+  await ctx.presetsPage();
+  await type(control(main, 'In the cycle'), 'window');
+  await type(control(main, 'From').children[0], 'time');
+  await type(control(main, 'From').children[1], '22:00');
+  await type(control(main, 'Until').children[1], '-30'); /* sunset, 30 min before */
+  await type(control(main, 'Until').children[0], 'sunrise'); /* the offset stays */
+  const days = below(control(main, 'Days')).filter((e) => e.tag === 'input');
+  for (const i of [5, 6]) { days[i].checked = false; await Promise.all(days[i].listeners.change.map((fn) => fn({ target: days[i] }))); }
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.deepEqual(saved.at(-1).presets[1].window, { from: '22:00', until: 'sunrise-30', days: 31 });
+  assert.match(text(main), /22:00 – sunrise-30, Mo Tu We Th Fr/);
+});
+
+test('the page refuses a window the device would refuse (D41)', async () => {
+  const saved = [];
+  const { ctx, main } = await load(presetDevice(saved, (doc) => {
+    doc.presets[1].window = { from: 'sunset', until: 'sunset+200', days: 127 };
+  }));
+  await ctx.presetsPage();
+  await type(control(main, 'Until').children[1], '200'); /* the page changed nothing yet: a save is due */
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.match(text(main), /Weather: a window's ends are times, or sunrise or sunset within 180 minutes\./);
+  await type(control(main, 'Until').children[1], '0');
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.match(text(main), /Weather: the window's from and until can't be the same\./);
+  await type(control(main, 'Until').children[1], '15');
+  const days = below(control(main, 'Days')).filter((e) => e.tag === 'input');
+  for (const d of days) { d.checked = false; await Promise.all(d.listeners.change.map((fn) => fn({ target: d }))); }
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.match(text(main), /Weather: a window opens on one day at least\./);
+  assert.equal(saved.length, 0);
+});
+
+test('All day removes the window (D41)', async () => {
+  const saved = [];
+  const { ctx, main } = await load(presetDevice(saved, (doc) => {
+    doc.presets[1].window = { from: 'sunrise', until: 'sunset', days: 127 };
+  }));
+  await ctx.presetsPage();
+  assert.equal(control(main, 'In the cycle').value, 'window');
+  await type(control(main, 'In the cycle'), 'all');
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.equal(saved.at(-1).presets[1].window, undefined);
 });
 
 /* ---- the Device page's battery calibration (owner, 2026-09-30) ---- */

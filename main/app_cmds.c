@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "lang.h"
 #include "netmgr.h"
+#include "timekeeping.h"
 #include "ui_fields.h"
 #include "ui_layout.h"
 #include "util_time.h"
@@ -97,15 +98,32 @@ static int field_body(int argc, char **argv)
     return 0;
 }
 
+/* A preset's cycle window and whether it is open now (spec §5.4, §15, D41); nothing without one. */
+static void print_window(const ui_preset_t *pr)
+{
+    if (pr->window.days == 0) {
+        return;
+    }
+    const settings_t *set = app_settings();
+    char text[48], state[48];
+    ui_window_text(&pr->window, text, sizeof(text));
+    ui_window_state_text(&pr->window, timekeeping_valid() ? time(NULL) : 0, set->lat_e4, set->lon_e4, state,
+                         sizeof(state));
+    printf("    window %s: %s\n", text, state);
+}
+
 static int preset_body(int argc, char **argv)
 {
-    static const char *const k_usage = "preset list | preset set <id>";
+    static const char *const k_usage = "preset list | preset set <id> | preset window <id> <from> <until> [days] | "
+                                       "preset window <id> off  (from, until: HH:MM, sunrise or sunset, +-1-180 "
+                                       "minutes; days: bit 0 Monday, default 127)";
     ui_presets_t *p = app_presets();
     if (argc == 2 && strcmp(argv[1], "list") == 0) {
         for (int i = 0; i < p->count; i++) {
             const ui_preset_t *pr = &p->presets[i];
             printf("%c %-15s %-23s %-8s%s\n", i == p->active ? '*' : ' ', pr->id, pr->name,
                    ui_layout((ui_layout_id_t)pr->layout)->id, pr->in_cycle ? "" : " (not in the cycle)");
+            print_window(pr);
         }
         printf("auto-cycle %s, every %u s\n", p->cycle_enabled ? "on" : "off", (unsigned)p->cycle_interval_s);
         return 0;
@@ -118,6 +136,38 @@ static int preset_body(int argc, char **argv)
         }
         app_ui_select(index, true);
         printf("preset: %s\n", p->presets[index].id);
+        return 0;
+    }
+    if ((argc == 4 || argc == 5 || argc == 6) && strcmp(argv[1], "window") == 0) {
+        int index = ui_presets_find(p, argv[2]);
+        if (index < 0) {
+            printf("preset: no preset \"%s\" (see `preset list`)\n", argv[2]);
+            return 1;
+        }
+        ui_preset_t *pr = &p->presets[index];
+        if (argc == 4 && strcmp(argv[3], "off") == 0) {
+            pr->window = (ui_window_t){ 0 };
+        } else if (argc >= 5) {
+            char *end = NULL;
+            long days = argc == 6 ? strtol(argv[5], &end, 0) : 0x7F;
+            if (argc == 6 && (*end != '\0' || days < 0 || days > 0x7F)) {
+                days = -1; /* ui_window_make() names the rule */
+            }
+            char why[96];
+            if (!ui_window_make(argv[3], argv[4], (int)days, &pr->window, why, sizeof(why))) {
+                printf("preset: %s\n", why);
+                return 1;
+            }
+        } else {
+            return usage(k_usage);
+        }
+        app_ui_save_presets(); /* as the web page saves it (spec §15) */
+        if (pr->window.days == 0) {
+            printf("preset: %s has no window: always in the cycle\n", pr->id);
+        } else {
+            printf("preset: %s\n", pr->id);
+            print_window(pr);
+        }
         return 0;
     }
     return usage(k_usage);
@@ -521,7 +571,8 @@ void app_register_commands(void)
 {
     const esp_console_cmd_t cmds[] = {
         { .command = "field", .help = "field list | get <id> | set <id> <value> | clear <id>", .func = &cmd_field },
-        { .command = "preset", .help = "preset list | set <id>", .func = &cmd_preset },
+        { .command = "preset", .help = "preset list | set <id> | window <id> <from> <until> [days] | window <id> off",
+          .func = &cmd_preset },
         { .command = "night", .help = "night <minutes>: night sleep now (spec §9.1)", .func = &cmd_night },
         { .command = "schedule", .help = "schedule list | on | off | clear | add <HH:MM> preset <id> [days] | "
                                          "add <HH:MM> night <HH:MM> [days]", .func = &cmd_schedule },

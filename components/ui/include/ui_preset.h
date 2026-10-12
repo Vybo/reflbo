@@ -20,7 +20,9 @@
 #define UI_CYCLE_MIN_S 10
 #define UI_CYCLE_MAX_S 3600
 #define UI_SCHEDULE_MAX 8
-#define UI_PRESETS_JSON_MAX 49152 /* presets.json at its largest: 24 cells a preset (test_ui_preset.c, M6c) */
+#define UI_PRESETS_JSON_MAX 49152 /* presets.json at its largest: 24 cells a preset (test_ui_preset.c, M6c, D42) */
+#define UI_TITLE_LEN 24           /* a slot's or cell's own title with its terminator, as a preset's name (D42) */
+#define UI_TITLES_BYTES 768       /* every preset's titles together, in the deep-sleep snapshot (spec §5.4, D42) */
 #define UI_JSON_MAX_DEPTH 20      /* presets.json nests 17 levels at most (a split tree's chain of 13 splits),
                                      settings.json 5; anything deeper is rejected unparsed */
 
@@ -57,6 +59,7 @@ typedef struct {
     uint8_t stale_policy;   /* ui_stale_policy_t */
     bool status_clock;      /* a small clock in the middle of the status bar */
     uint8_t status_battery; /* UI_STATUS_BAT_* bits */
+    uint32_t force_title;   /* split cells (bit = cell) whose title shows whatever their size (spec §5.4, D42) */
 } ui_preset_t;
 
 typedef enum {
@@ -112,7 +115,15 @@ typedef struct {
     ui_preset_t presets[UI_PRESET_MAX];
     ui_schedule_t schedule;
     uint8_t offered; /* UI_OFFERED_* */
+    /* The presets' own titles (spec §5.4, D42), in preset and slot order: each the preset's index, the slot, the text
+     * and its terminator. An empty text ends them, so all zeros is none. */
+    uint8_t titles[UI_TITLES_BYTES];
 } ui_presets_t;
+
+/* A preset's own titles for the renderer, by slot (or cell); NULL: the field's own label. */
+typedef struct {
+    const char *text[UI_SLOT_MAX];
+} ui_titles_t;
 
 /* How many of `p`'s slots its layout uses: a fixed layout's slots, or the cells of its split tree
  * (0 for a tree cut short). */
@@ -132,6 +143,12 @@ int ui_presets_cycle_next(const ui_presets_t *p, bool always, time_t now, int32_
 /* Offers the built-ins `offered` doesn't name yet: each joins at the end if its id is free and
  * there is room, and is marked offered either way. True if anything changed: save the file. */
 bool ui_presets_offer_builtins(ui_presets_t *p);
+/* Preset `preset`'s own title for `slot`, or NULL. */
+const char *ui_presets_title(const ui_presets_t *p, int preset, int slot);
+/* Sets it (NULL or "" clears it), keeping the pool in order. False, the pool unchanged, if it doesn't fit. */
+bool ui_presets_set_title(ui_presets_t *p, int preset, int slot, const char *text);
+/* Preset `preset`'s titles, pointing into the pool: valid while it doesn't change. */
+void ui_presets_titles(const ui_presets_t *p, int preset, ui_titles_t *out);
 /* Parses and validates presets.json. On failure returns false with a reason in `err` and leaves
  * *out unspecified. */
 bool ui_presets_from_json(const char *json, ui_presets_t *out, char *err, size_t err_size);

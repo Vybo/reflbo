@@ -116,3 +116,83 @@ int ui_presets_cycle_next(const ui_presets_t *p, bool always, time_t now, int32_
     }
     return p->active;
 }
+
+/* ---- the presets' own titles (spec §5.4, D42) ---- */
+
+/* The text's length of the record at `at`, or -1 where the records end: an empty text, or none whole. */
+static int record_len(const uint8_t *pool, size_t at)
+{
+    if (at + 3 > UI_TITLES_BYTES) {
+        return -1;
+    }
+    size_t n = strnlen((const char *)pool + at + 2, UI_TITLES_BYTES - at - 2);
+    return n == 0 || at + 2 + n >= UI_TITLES_BYTES ? -1 : (int)n;
+}
+
+/* The bytes of `text` a title keeps: at most UI_TITLE_LEN - 1, cut where a letter starts (not inside "ř"). */
+static size_t title_bytes(const char *text)
+{
+    size_t n = strnlen(text, UI_TITLE_LEN);
+    if (n >= UI_TITLE_LEN) {
+        n = UI_TITLE_LEN - 1;
+        while (n > 0 && ((unsigned char)text[n] & 0xC0) == 0x80) { /* text[n] continues a letter */
+            n--;
+        }
+    }
+    return n;
+}
+
+const char *ui_presets_title(const ui_presets_t *p, int preset, int slot)
+{
+    int n;
+    for (size_t at = 0; (n = record_len(p->titles, at)) >= 0; at += 3 + (size_t)n) {
+        if (p->titles[at] == preset && p->titles[at + 1] == slot) {
+            return (const char *)p->titles + at + 2;
+        }
+    }
+    return NULL;
+}
+
+bool ui_presets_set_title(ui_presets_t *p, int preset, int slot, const char *text)
+{
+    if (preset < 0 || preset >= UI_PRESET_MAX || slot < 0 || slot >= UI_SLOT_MAX) {
+        return false;
+    }
+    int key = preset * UI_SLOT_MAX + slot, n;
+    size_t at = 0, used = 0, old = 0;
+    for (size_t i = 0; (n = record_len(p->titles, i)) >= 0; i += 3 + (size_t)n) {
+        int k = p->titles[i] * UI_SLOT_MAX + p->titles[i + 1];
+        if (k < key) {
+            at = i + 3 + (size_t)n;
+        } else if (k == key) {
+            old = 3 + (size_t)n;
+        }
+        used = i + 3 + (size_t)n;
+    }
+    size_t len = text != NULL ? title_bytes(text) : 0, add = len ? 3 + len : 0;
+    if (used - old + add > UI_TITLES_BYTES) {
+        return false;
+    }
+    memmove(p->titles + at + add, p->titles + at + old, used - at - old);
+    if (add) {
+        p->titles[at] = (uint8_t)preset;
+        p->titles[at + 1] = (uint8_t)slot;
+        memcpy(p->titles + at + 2, text, len);
+        p->titles[at + 2 + len] = 0;
+    }
+    if (old > add) { /* what moved down leaves zeros behind, so the records end where they do */
+        memset(p->titles + used - (old - add), 0, old - add);
+    }
+    return true;
+}
+
+void ui_presets_titles(const ui_presets_t *p, int preset, ui_titles_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    int n;
+    for (size_t at = 0; (n = record_len(p->titles, at)) >= 0; at += 3 + (size_t)n) {
+        if (p->titles[at] == preset && p->titles[at + 1] < UI_SLOT_MAX) {
+            out->text[p->titles[at + 1]] = (const char *)p->titles + at + 2;
+        }
+    }
+}

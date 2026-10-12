@@ -661,10 +661,10 @@ static void test_bad_split_trees_are_rejected_with_a_reason(void)
 #define C (UI_RATIO_1_2 | UI_SPLIT_COLUMNS | UI_SPLIT_NO_LINE) /* a hidden column split: the longest node written */
 #define EIGHT_COLUMNS C, C, C, 0, 0, C, 0, 0, C, C, 0, 0, C, 0, 0
 
-/* The largest presets.json there can be (M6c): 16 split presets of 24 cells, three rows of eight columns, the
+/* The largest presets.json there can be (M6c, D42): 16 split presets of 24 cells, three rows of eight columns, the
  * most columns a tree can have, with every line hidden; the longest field ids a cell takes; names of control
  * characters, which cJSON writes as six bytes each ("\u0001"); every option at its longest; 8 schedule entries
- * that switch to a preset. */
+ * that switch to a preset; every cell's title forced, and the pool full of one-quote titles. */
 static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
 {
     static const uint8_t k_tree[UI_SPLIT_NODES] = { UI_RATIO_1_3 | UI_SPLIT_NO_LINE, EIGHT_COLUMNS,
@@ -683,7 +683,14 @@ static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
         p->stale_policy = UI_STALE_PLACEHOLDER;
         p->status_battery = UI_STATUS_BAT_PERCENT | UI_STATUS_BAT_VOLTAGE | UI_STATUS_BAT_DAYS;
         TEST_ASSERT_TRUE(ui_window_make("sunrise-180", "sunset-180", 0x7E, &p->window, s_err, sizeof(s_err))); /* M6e */
+        p->force_title = (1u << UI_SPLIT_CELLS) - 1; /* D42: every cell's title forced */
     }
+    /* D42: as many titles as the pool holds, each a quote, which cJSON writes as two bytes: the most per byte */
+    int titled = 0;
+    while (ui_presets_set_title(&s_p, titled / UI_SPLIT_CELLS, titled % UI_SPLIT_CELLS, "\"")) {
+        titled++;
+    }
+    TEST_ASSERT_EQUAL_INT(UI_TITLES_BYTES / 4, titled); /* 4 bytes each */
     s_p.count = UI_PRESET_MAX;
     s_p.cycle_interval_s = UI_CYCLE_MAX_S;
     s_p.offered = UI_OFFERED_ALL;
@@ -745,6 +752,176 @@ static void test_a_preset_counts_the_slots_its_layout_uses(void)
     TEST_ASSERT_EQUAL_INT(0, ui_preset_slots(&split));
 }
 
+/* ---- D42 (spec §5.4): titles of slots and cells ---- */
+
+#define TITLED                                                                                                        \
+    "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"classic\", \"slots\": {\"main\": \"time.clock\","     \
+    " \"sub\": \"date.day\"}, \"titles\": {\"sub\": \"Dnes\"}},"                                                       \
+    " {\"id\": \"s\", \"layout\": \"split\", \"split\": {\"split\": \"rows\", \"ratio\": \"1/2\","                     \
+    " \"a\": {\"field\": \"env.temp\", \"title\": \"Obývák\", \"force_title\": true},"                                 \
+    " \"b\": {\"field\": \"env.hum\", \"force_title\": true}}}]}"
+
+static void test_titles_round_trip(void)
+{
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(TITLED, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("Dnes", ui_presets_title(&s_p, 0, 1));
+    TEST_ASSERT_NULL(ui_presets_title(&s_p, 0, 0));
+    TEST_ASSERT_EQUAL_STRING("Obývák", ui_presets_title(&s_p, 1, 0));
+    TEST_ASSERT_NULL(ui_presets_title(&s_p, 1, 1)); /* forced, with the field's own label */
+    TEST_ASSERT_EQUAL_HEX32(0x3, s_p.presets[1].force_title);
+    TEST_ASSERT_EQUAL_HEX32(0, s_p.presets[0].force_title);
+    ui_titles_t t;
+    ui_presets_titles(&s_p, 1, &t);
+    TEST_ASSERT_EQUAL_STRING("Obývák", t.text[0]);
+    TEST_ASSERT_NULL(t.text[1]);
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_json, "\"slots\":{\"main\":\"time.clock\",\"sub\":\"date.day\"},"
+                                                "\"titles\":{\"sub\":\"Dnes\"}"),
+                                 s_json);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_json, "\"a\":{\"field\":\"env.temp\",\"title\":\"Obývák\","
+                                                "\"force_title\":true},\"b\":{\"field\":\"env.hum\","
+                                                "\"force_title\":true}"),
+                                 s_json);
+    ui_presets_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(s_p));
+}
+
+/* A preset name's rule: 23 bytes at most, cut where a letter starts. */
+static void test_titles_are_cut_at_a_letter(void)
+{
+    const char *json = "{\"schema\": 1, \"presets\": [{\"id\": \"s\", \"layout\": \"split\", \"split\":"
+                       " {\"field\": \"env.temp\", \"title\": \"řřřřřřřřřřřř\"}}]}"; /* 24 bytes */
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("řřřřřřřřřřř", ui_presets_title(&s_p, 0, 0)); /* 22 bytes */
+}
+
+static void test_title_control_characters_become_spaces(void)
+{
+    const char *json = "{\"schema\": 1, \"presets\": [{\"id\": \"s\", \"layout\": \"split\", \"split\":"
+                       " {\"field\": \"env.temp\", \"title\": \"a\\tb\\nc\"}}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("a b c", ui_presets_title(&s_p, 0, 0));
+}
+
+/* Empty titles are none, and a file without titles has none of their keys. */
+static void test_titles_unset_are_not_written(void)
+{
+    const char *json = "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"classic\", \"titles\":"
+                       " {\"main\": \"\"}}, {\"id\": \"s\", \"layout\": \"split\", \"split\": {\"field\": \"env.temp\","
+                       " \"title\": \"\", \"force_title\": false}}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_NULL(ui_presets_title(&s_p, 0, 0));
+    TEST_ASSERT_NULL(ui_presets_title(&s_p, 1, 0));
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NULL_MESSAGE(strstr(s_json, "title"), s_json);
+    ui_presets_defaults(&s_p);
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NULL_MESSAGE(strstr(s_json, "title"), s_json);
+}
+
+static void test_bad_titles_are_rejected_with_a_reason(void)
+{
+    const char *cases[][2] = {
+        { "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"classic\", \"titles\": {\"nope\": \"x\"}}]}",
+          "no slot" },
+        { "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"classic\", \"titles\": [\"x\"]}]}",
+          "titles" },
+        { "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"classic\", \"titles\": {\"main\": 5}}]}",
+          "title" },
+        { "{\"schema\": 1, \"presets\": [{\"id\": \"s\", \"layout\": \"split\", \"split\": {\"title\": 5}}]}",
+          "title" },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        s_err[0] = '\0';
+        TEST_ASSERT_FALSE_MESSAGE(ui_presets_from_json(cases[i][0], &s_p, s_err, sizeof(s_err)), cases[i][0]);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_err, cases[i][1]), s_err);
+    }
+}
+
+/* Every preset's titles share UI_TITLES_BYTES: a file with more is refused, saying so. */
+static void test_titles_overflowing_the_pool_are_refused(void)
+{
+    static char json[UI_PRESETS_JSON_MAX];
+    int n = snprintf(json, sizeof(json), "{\"schema\": 1, \"presets\": [");
+    for (int i = 0; i < UI_PRESET_MAX; i++) { /* 16 × 2 titles of 23 bytes: 832 bytes with their 3 each */
+        n += snprintf(json + n, sizeof(json) - (size_t)n,
+                      "%s{\"id\": \"p%d\", \"layout\": \"classic\", \"titles\": {\"main\": \"%023d\","
+                      " \"sub\": \"%023d\"}}",
+                      i ? ", " : "", i, i, i);
+    }
+    snprintf(json + n, sizeof(json) - (size_t)n, "]}");
+    TEST_ASSERT_FALSE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_err, "titles: 768 bytes at most"), s_err);
+}
+
+static void test_set_title_keeps_order_and_clears(void)
+{
+    TEST_ASSERT_TRUE(ui_presets_set_title(&s_p, 2, 3, "c"));
+    TEST_ASSERT_TRUE(ui_presets_set_title(&s_p, 0, 5, "a"));
+    TEST_ASSERT_TRUE(ui_presets_set_title(&s_p, 2, 1, "b"));
+    TEST_ASSERT_EQUAL_STRING("a", ui_presets_title(&s_p, 0, 5));
+    TEST_ASSERT_EQUAL_STRING("b", ui_presets_title(&s_p, 2, 1));
+    TEST_ASSERT_EQUAL_STRING("c", ui_presets_title(&s_p, 2, 3));
+    TEST_ASSERT_EQUAL_UINT8(0, s_p.titles[0]); /* in preset and slot order: (0, 5) first */
+    TEST_ASSERT_EQUAL_UINT8(5, s_p.titles[1]);
+    TEST_ASSERT_TRUE(ui_presets_set_title(&s_p, 2, 1, "longer")); /* overwritten in place */
+    TEST_ASSERT_EQUAL_STRING("longer", ui_presets_title(&s_p, 2, 1));
+    TEST_ASSERT_EQUAL_STRING("c", ui_presets_title(&s_p, 2, 3));
+    TEST_ASSERT_TRUE(ui_presets_set_title(&s_p, 0, 5, ""));
+    TEST_ASSERT_NULL(ui_presets_title(&s_p, 0, 5));
+    TEST_ASSERT_TRUE(ui_presets_set_title(&s_p, 2, 1, NULL));
+    TEST_ASSERT_NULL(ui_presets_title(&s_p, 2, 1));
+    TEST_ASSERT_EQUAL_STRING("c", ui_presets_title(&s_p, 2, 3));
+    ui_presets_t empty;
+    ui_presets_defaults(&empty);
+    TEST_ASSERT_TRUE(ui_presets_set_title(&empty, 2, 3, "c"));
+    TEST_ASSERT_EQUAL_MEMORY(empty.titles, s_p.titles, UI_TITLES_BYTES); /* what is cleared is gone, zeros after */
+}
+
+/* Full: 32 titles of 21 bytes take all 768 bytes (24 each); one more is refused, and so is a title that grows,
+ * the pool unchanged; one that shrinks fits. */
+static void test_set_title_refuses_what_overflows_the_pool(void)
+{
+    int fitted = 0;
+    while (fitted < 40 &&
+           ui_presets_set_title(&s_p, fitted / UI_SLOT_MAX, fitted % UI_SLOT_MAX, "123456789012345678901")) {
+        fitted++;
+    }
+    TEST_ASSERT_EQUAL_INT(32, fitted);
+    uint8_t before[UI_TITLES_BYTES];
+    memcpy(before, s_p.titles, sizeof(before));
+    TEST_ASSERT_FALSE(ui_presets_set_title(&s_p, 5, 0, "1"));
+    TEST_ASSERT_FALSE(ui_presets_set_title(&s_p, 0, 0, "1234567890123456789012")); /* one byte longer, in place */
+    TEST_ASSERT_EQUAL_MEMORY(before, s_p.titles, sizeof(before));
+    TEST_ASSERT_TRUE(ui_presets_set_title(&s_p, 0, 0, "1234567890"));
+    TEST_ASSERT_EQUAL_STRING("1234567890", ui_presets_title(&s_p, 0, 0));
+    TEST_ASSERT_EQUAL_STRING("123456789012345678901", ui_presets_title(&s_p, 1, 7)); /* the last one */
+}
+
+/* A built-in offered at the end takes the next index: the titles before it stay where they are. */
+static void test_offer_builtins_keeps_titles(void)
+{
+    s_p.count = 4;
+    s_p.offered = 0;
+    TEST_ASSERT_TRUE(ui_presets_set_title(&s_p, 1, 2, "Kept"));
+    TEST_ASSERT_TRUE(ui_presets_offer_builtins(&s_p));
+    TEST_ASSERT_EQUAL_STRING("Kept", ui_presets_title(&s_p, 1, 2));
+    for (int i = 4; i < s_p.count; i++) {
+        TEST_ASSERT_NULL(ui_presets_title(&s_p, i, 0));
+    }
+}
+
+static void test_defaults_have_no_titles(void)
+{
+    for (int i = 0; i < s_p.count; i++) {
+        TEST_ASSERT_EQUAL_HEX32(0, s_p.presets[i].force_title);
+        for (int k = 0; k < UI_SLOT_MAX; k++) {
+            TEST_ASSERT_NULL(ui_presets_title(&s_p, i, k));
+        }
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -785,5 +962,25 @@ int main(void)
     RUN_TEST(test_a_full_set_of_split_presets_fits_the_save_buffer);
     RUN_TEST(test_the_deepest_tree_fits_the_nesting_limit);
     RUN_TEST(test_a_preset_counts_the_slots_its_layout_uses);
+    RUN_TEST(test_titles_round_trip);
+    RUN_TEST(test_titles_are_cut_at_a_letter);
+    RUN_TEST(test_title_control_characters_become_spaces);
+    RUN_TEST(test_titles_unset_are_not_written);
+    RUN_TEST(test_bad_titles_are_rejected_with_a_reason);
+    RUN_TEST(test_titles_overflowing_the_pool_are_refused);
+    RUN_TEST(test_set_title_keeps_order_and_clears);
+    RUN_TEST(test_set_title_refuses_what_overflows_the_pool);
+    RUN_TEST(test_offer_builtins_keeps_titles);
+    RUN_TEST(test_defaults_have_no_titles);
+    RUN_TEST(test_titles_round_trip);
+    RUN_TEST(test_titles_are_cut_at_a_letter);
+    RUN_TEST(test_title_control_characters_become_spaces);
+    RUN_TEST(test_titles_unset_are_not_written);
+    RUN_TEST(test_bad_titles_are_rejected_with_a_reason);
+    RUN_TEST(test_titles_overflowing_the_pool_are_refused);
+    RUN_TEST(test_set_title_keeps_order_and_clears);
+    RUN_TEST(test_set_title_refuses_what_overflows_the_pool);
+    RUN_TEST(test_offer_builtins_keeps_titles);
+    RUN_TEST(test_defaults_have_no_titles);
     return UNITY_END();
 }

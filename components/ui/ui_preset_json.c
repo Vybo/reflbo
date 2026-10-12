@@ -62,6 +62,54 @@ static void copy_name(char *out, size_t size, const char *name)
     out[n] = '\0';
 }
 
+/* A slot's or cell's own title (spec §5.4, D42): text, cut like a name, control characters as spaces; "" or null is
+ * none. False, with the reason, if it isn't text or the pool is full. */
+static bool parse_title(const cJSON *title, ui_presets_t *all, int index, int slot, const char *id, char *err,
+                        size_t size)
+{
+    if (title == NULL || cJSON_IsNull(title)) {
+        return true;
+    }
+    if (!cJSON_IsString(title)) {
+        return fail(err, size, "preset \"%s\": a title must be text", id);
+    }
+    char text[UI_TITLE_LEN];
+    copy_name(text, sizeof(text), title->valuestring);
+    for (char *c = text; *c; c++) {
+        if ((unsigned char)*c < 0x20 || *c == 0x7F) {
+            *c = ' ';
+        }
+    }
+    if (!ui_presets_set_title(all, index, slot, text)) {
+        return fail(err, size, "titles: %d bytes at most in all presets, each title taking 3 more", UI_TITLES_BYTES);
+    }
+    return true;
+}
+
+static bool parse_titles(const cJSON *titles, const ui_layout_t *layout, ui_presets_t *all, int index, char *err,
+                         size_t size)
+{
+    const char *id = all->presets[index].id;
+    if (titles == NULL || cJSON_IsNull(titles)) {
+        return true;
+    }
+    if (!cJSON_IsObject(titles)) {
+        return fail(err, size, "preset \"%s\": titles must be an object of slot names", id);
+    }
+    const cJSON *title;
+    cJSON_ArrayForEach(title, titles)
+    {
+        int slot = ui_slot_by_name(layout, title->string);
+        if (slot < 0) {
+            return fail(err, size, "preset \"%s\": layout %s has no slot \"%s\"", id, layout->id, title->string);
+        }
+        if (!parse_title(title, all, index, slot, id, err, size)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* "22:30" -> minutes after midnight. */
 static bool parse_hhmm(const cJSON *item, uint16_t *out)
 {
@@ -114,6 +162,8 @@ static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_preset
 
 typedef struct {
     ui_preset_t *out;
+    ui_presets_t *all; /* for the titles' pool (spec §5.4, D42) */
+    int index;         /* out's index in it */
     int nodes; /* taken so far, in preorder */
     int cells;
     char *err;
@@ -142,6 +192,13 @@ static bool parse_node(tree_t *t, const cJSON *node)
             }
             t->out->slots[t->cells] = (uint8_t)f;
         }
+        if (!parse_title(cJSON_GetObjectItemCaseSensitive(node, "title"), t->all, t->index, t->cells, id, t->err,
+                         t->size)) {
+            return false;
+        }
+        if (optional_bool(node, "force_title", false)) {
+            t->out->force_title |= 1u << t->cells;
+        }
         t->cells++;
         return true;
     }
@@ -165,15 +222,16 @@ static bool parse_node(tree_t *t, const cJSON *node)
 }
 
 /* The split layout's tree, then its geometry and what each cell can show (spec §5.2). */
-static bool parse_split(const cJSON *split, ui_preset_t *out, char *err, size_t size)
+static bool parse_split(const cJSON *split, ui_presets_t *all, int index, char *err, size_t size)
 {
+    ui_preset_t *out = &all->presets[index];
     if (split == NULL || cJSON_IsNull(split)) {
         return true; /* one empty cell */
     }
     if (!cJSON_IsObject(split)) {
         return fail(err, size, "preset \"%s\": split must be a tree of splits and cells", out->id);
     }
-    tree_t t = { .out = out, .err = err, .size = size };
+    tree_t t = { .out = out, .all = all, .index = index, .err = err, .size = size };
     if (!parse_node(&t, split)) {
         return false;
     }
@@ -213,8 +271,9 @@ static bool parse_window(const cJSON *window, ui_preset_t *out, char *err, size_
     return true;
 }
 
-static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t size)
+static bool parse_preset(const cJSON *item, ui_presets_t *all, int index, char *err, size_t size)
 {
+    ui_preset_t *out = &all->presets[index];
     memset(out, 0, sizeof(*out));
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
     if (!cJSON_IsString(id) || !valid_id(id->valuestring)) {
@@ -225,7 +284,7 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
     if (cJSON_IsString(name)) {
         copy_name(out->name, sizeof(out->name), name->valuestring);
     } else {
-        snprintf(out->name, sizeof(out->name), "%s", out->id);
+        copy_name(out->name, sizeof(out->name), out->id); /* not snprintf: GCC sees both in `all` and warns */
     }
     const cJSON *layout_name = cJSON_GetObjectItemCaseSensitive(item, "layout");
     int layout = cJSON_IsString(layout_name) ? ui_layout_by_name(layout_name->valuestring) : -1;
@@ -243,7 +302,11 @@ static bool parse_preset(const cJSON *item, ui_preset_t *out, char *err, size_t 
         !parse_slots(slots, ui_layout((ui_layout_id_t)layout), out, err, size)) {
         return false;
     }
-    if (layout == UI_LAYOUT_SPLIT && !parse_split(cJSON_GetObjectItemCaseSensitive(item, "split"), out, err, size)) {
+    if (layout == UI_LAYOUT_SPLIT && !parse_split(cJSON_GetObjectItemCaseSensitive(item, "split"), all, index, err, size)) {
+        return false;
+    }
+    if (layout != UI_LAYOUT_SPLIT && !parse_titles(cJSON_GetObjectItemCaseSensitive(item, "titles"),
+                                                   ui_layout((ui_layout_id_t)layout), all, index, err, size)) {
         return false;
     }
     const cJSON *options = cJSON_GetObjectItemCaseSensitive(item, "options");
@@ -356,7 +419,7 @@ static bool parse(const cJSON *root, ui_presets_t *out, char *err, size_t size)
     cJSON_ArrayForEach(item, presets)
     {
         ui_preset_t *p = &out->presets[out->count];
-        if (!parse_preset(item, p, err, size)) {
+        if (!parse_preset(item, out, out->count, err, size)) {
             return false;
         }
         if (ui_presets_find(out, p->id) >= 0) {
@@ -404,27 +467,37 @@ bool ui_presets_from_json(const char *json, ui_presets_t *out, char *err, size_t
 }
 
 /* A split tree's node and everything under it, in preorder: `at` the node, `cell` its first cell. */
-static cJSON *node_json(const ui_preset_t *p, int *at, int *cell)
+static cJSON *node_json(const ui_presets_t *all, int index, int *at, int *cell)
 {
+    const ui_preset_t *p = &all->presets[index];
     cJSON *obj = cJSON_CreateObject();
     uint8_t node = p->split[(*at)++];
     if ((node & UI_SPLIT_RATIO) == 0) {
-        const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[(*cell)++]);
+        int c = (*cell)++;
+        const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[c]);
         if (info != NULL) {
             cJSON_AddStringToObject(obj, "field", info->id);
+        }
+        const char *title = ui_presets_title(all, index, c);
+        if (title != NULL) {
+            cJSON_AddStringToObject(obj, "title", title);
+        }
+        if (p->force_title & (1u << c)) {
+            cJSON_AddBoolToObject(obj, "force_title", true);
         }
         return obj;
     }
     cJSON_AddStringToObject(obj, "split", node & UI_SPLIT_COLUMNS ? "columns" : "rows");
     cJSON_AddStringToObject(obj, "ratio", ui_split_ratio_name(node & UI_SPLIT_RATIO));
     cJSON_AddBoolToObject(obj, "line", !(node & UI_SPLIT_NO_LINE));
-    cJSON_AddItemToObject(obj, "a", node_json(p, at, cell));
-    cJSON_AddItemToObject(obj, "b", node_json(p, at, cell));
+    cJSON_AddItemToObject(obj, "a", node_json(all, index, at, cell));
+    cJSON_AddItemToObject(obj, "b", node_json(all, index, at, cell));
     return obj;
 }
 
-static cJSON *preset_json(const ui_preset_t *p)
+static cJSON *preset_json(const ui_presets_t *all, int index)
 {
+    const ui_preset_t *p = &all->presets[index];
     const ui_layout_t *layout = ui_layout((ui_layout_id_t)p->layout);
     cJSON *obj = cJSON_CreateObject();
     cJSON_AddStringToObject(obj, "id", p->id);
@@ -443,14 +516,23 @@ static cJSON *preset_json(const ui_preset_t *p)
     if (p->layout == UI_LAYOUT_SPLIT) {
         int at = 0, cell = 0;
         bool whole = ui_split_nodes(p->split) > 0; /* a tree cut short can't be walked: one empty cell */
-        cJSON_AddItemToObject(obj, "split", whole ? node_json(p, &at, &cell) : cJSON_CreateObject());
+        cJSON_AddItemToObject(obj, "split", whole ? node_json(all, index, &at, &cell) : cJSON_CreateObject());
     } else {
         cJSON *slots = cJSON_AddObjectToObject(obj, "slots");
+        cJSON *titles = NULL;
         for (int i = 0; i < layout->slot_count; i++) {
             const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[i]);
             if (info != NULL) {
                 cJSON_AddStringToObject(slots, layout->slots[i].name, info->id);
             }
+            const char *title = ui_presets_title(all, index, i);
+            if (title != NULL) {
+                titles = titles != NULL ? titles : cJSON_CreateObject();
+                cJSON_AddStringToObject(titles, layout->slots[i].name, title);
+            }
+        }
+        if (titles != NULL) {
+            cJSON_AddItemToObject(obj, "titles", titles);
         }
     }
     cJSON *options = cJSON_AddObjectToObject(obj, "options");
@@ -480,7 +562,7 @@ size_t ui_presets_to_json(const ui_presets_t *p, char *out, size_t size)
     cJSON_AddNumberToObject(cycle, "interval_s", p->cycle_interval_s);
     cJSON *presets = cJSON_AddArrayToObject(root, "presets");
     for (int i = 0; i < p->count; i++) {
-        cJSON_AddItemToArray(presets, preset_json(&p->presets[i]));
+        cJSON_AddItemToArray(presets, preset_json(p, i));
     }
     if (p->schedule.enabled || p->schedule.count) {
         cJSON *schedule = cJSON_AddObjectToObject(root, "schedule");

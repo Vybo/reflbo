@@ -491,4 +491,4 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "weather_solar", "focus_solar", "solar", "solar_actual",
                                                     "solar_cs", "solar_none", "energy", "energy_battery",
                                                     "energy_night_cs", "energy_none", "energy_low",
-                                                    "grid_solar_low", "solar_evening" };
+                                                    "grid_solar_low", "solar_evening", "split_titles" };

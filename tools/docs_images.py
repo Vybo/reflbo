@@ -42,6 +42,7 @@ SINGLE = {
     "split-eight": "dash_split_eight",
     "split-compact": "dash_split_compact",
     "split-small": "dash_split_xs_grid",
+    "split-titles": "dash_split_titles",
     "solar": "dash_solar_actual",
     "energy": "dash_energy_battery",
     "weather-solar": "dash_weather_solar",

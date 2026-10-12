@@ -175,6 +175,8 @@ Every slot of a layout, and every cell of a split, can have a title of your own 
 
 Small cells show no name. In a split cell, **Always show the title** shows it anyway: on a line above the value when the rest of the cell still fits the field, otherwise beside the value, as in a list of short rows. A cell too small for both shows the value alone. A cell that shows the field's name anyway is unchanged.
 
+<p><img src="images/panel/split-titles.png" width="400" alt="A split layout with titles: Venku over the weather, Praha above the clock, UV index above its level, the sun's times without a title, and two short rows, Dnes beside today's weather and Baterie beside the battery"></p>
+
 All presets' titles share 768 bytes, about 60 titles of ten letters, as the device keeps them through its sleep.
 
 ## Weather, air and the sun

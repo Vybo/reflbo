@@ -153,6 +153,8 @@ The schedule switches presets at set times of day, on chosen days. It can also s
 
 Presets, the auto-cycle and the schedule are edited on the web page, with a live preview drawn by the device.
 
+A preset can move to another device. **Export**, in the preset's editor, saves it as a file named after the preset. **Import…**, under the list, reads such a file and adds the preset after the selected one, with a name of its own, in the cycle; Save keeps it. The device checks the preset first, as it checks any save, and says why if it can't show it.
+
 <p><img src="images/web/presets.png" width="260" alt="The Presets page: Home, Indoor, Weather, My weather (active), Focus clock, Rain radar and Flights in the cycle, Solar and Energy outside it"> <img src="images/web/presets-edit.png" width="260" alt="Editing My weather: a preview with numbered cells, the name, the layout Split and its first split, rows at 3/4"></p>
 
 ## Your own layout
@@ -166,6 +168,14 @@ The editor shows each cell's size and offers only the fields that fit it. A fiel
 Small cells draw a field the way the status bar does. A cell under 90 pixels wide or 40 tall shows it in one line, the icon then the value, or with the icon over the value in a narrow, taller cell; the date shows its weekday over its day. A short cell, under 80 pixels tall, puts the icon beside the value. Before anything is cut, a value gives way: a shorter form, a smaller face, then its unit or its icon. A stale value's age mark appears only where it has room; the status bar's warning stands for it in small cells.
 
 <p><img src="images/panel/split-compact.png" width="400" alt="A split layout of twelve cells: the clock, the date, the weather, temperature, humidity, today, the sun, air quality, pollen, UV, the battery and the moon, each icon beside its value"> <img src="images/panel/split-small.png" width="400" alt="A split layout of 24 small cells, each with its icon over its value"></p>
+
+### Titles
+
+Every slot of a layout, and every cell of a split, can have a title of your own instead of the field's: "Living room" for the temperature, say. It shows wherever the field shows its name, at most 23 bytes: 23 plain letters, fewer with accents, which take two each. Leave it empty for the field's own name.
+
+Small cells show no name. In a split cell, **Always show the title** shows it anyway: on a line above the value when the rest of the cell still fits the field, otherwise beside the value, as in a list of short rows. A cell too small for both shows the value alone. A cell that shows the field's name anyway is unchanged.
+
+All presets' titles share 768 bytes, about 60 titles of ten letters, as the device keeps them through its sleep.
 
 ## Weather, air and the sun
 

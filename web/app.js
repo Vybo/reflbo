@@ -1115,7 +1115,15 @@ async function importPreset(ed, input) {
   copy.name = String(copy.name || copy.id || 'Preset').slice(0, 23);
   copy.id = uniqueId(doc, copy.name);
   copy.in_cycle = true; /* a new preset shows up on KEY */
-  copy.options = copy.options && typeof copy.options === 'object' ? copy.options : {};
+  const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
+  copy.options = isObj(copy.options) ? copy.options : {};
+  if (copy.layout === 'split') { /* the editor's shape: a tree, or slots, never neither */
+    copy.split = isObj(copy.split) ? copy.split : {};
+    delete copy.slots;
+  } else {
+    copy.slots = isObj(copy.slots) ? copy.slots : {};
+    delete copy.split;
+  }
   const presets = [...doc.presets.slice(0, ed.sel + 1), copy, ...doc.presets.slice(ed.sel + 1)];
   try {
     await api('POST', '/api/preview.bmp?preset=' + encodeURIComponent(copy.id), { ...doc, presets });

@@ -1224,3 +1224,18 @@ test('Import at 16 presets says so', async () => {
   await importFile(main, EXPORTED);
   assert.equal(text(byId.toast), '16 presets at most');
 });
+
+test('a bare preset without slots or a tree imports as an empty one, and the page carries on', async () => {
+  const saved = [], previews = [];
+  const { ctx, main, byId } = await load({ ...importDevice(saved, previews), 'GET /api/layouts': () => reply(200, SPLIT_CATALOGUE) });
+  await ctx.presetsPage();
+  await importFile(main, JSON.stringify({ name: 'Bare split', layout: 'split' }));
+  await importFile(main, JSON.stringify({ name: 'Bare classic', layout: 'classic', split: { field: 'env.temp' } }));
+  assert.match(text(byId.toast), /Bare classic imported/);
+  assert.deepEqual(cellLabels(main), [], 'the selected one, Bare classic, has slots, not a tree');
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  const [split, classic] = saved.at(-1).presets.slice(2);
+  assert.deepEqual([split.name, split.split, split.slots], ['Bare split', {}, undefined]);
+  assert.deepEqual([classic.name, classic.slots, classic.split], ['Bare classic', {}, undefined]);
+});

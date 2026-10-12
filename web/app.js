@@ -1080,6 +1080,54 @@ function uniqueId(doc, base) {
   return id;
 }
 
+/* A title as the device keeps it: at most 23 bytes of UTF-8, cut where a letter starts (spec §10.3, D42). */
+function cutTitle(s) {
+  let out = '';
+  for (const ch of s.trim()) {
+    if (bytes(out + ch) > 23) break;
+    out += ch;
+  }
+  return out;
+}
+
+/* A slot's or cell's own title, in place of its field's label: `set` gets it cut, or '' to clear it. */
+function titleInput(value, f, set) {
+  const input = h('input', { type: 'text', value: value || '', placeholder: f ? f.label : '', onchange: (ev) => {
+    ev.target.value = cutTitle(ev.target.value);
+    set(ev.target.value);
+  } });
+  return [h('label', { class: 'title-label', text: 'Title' }), input];
+}
+
+/* Import (spec §10.3, D42): a file Export wrote, or a bare preset. The device checks it as it checks a save, in its
+ * place after the selected preset; one it refuses isn't added. */
+async function importPreset(ed, input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  const doc = ed.doc;
+  if (doc.presets.length >= 16) return toast('16 presets at most');
+  let obj;
+  try { obj = JSON.parse(await f.text()); } catch (e) { return toast('That file is not JSON.'); }
+  const p = obj && obj.reflbo === 'preset' ? obj.preset : obj;
+  if (!p || typeof p !== 'object' || typeof p.layout !== 'string') return toast('That file holds no preset.');
+  const copy = JSON.parse(JSON.stringify(p));
+  copy.name = String(copy.name || copy.id || 'Preset').slice(0, 23);
+  copy.id = uniqueId(doc, copy.name);
+  copy.in_cycle = true; /* a new preset shows up on KEY */
+  copy.options = copy.options && typeof copy.options === 'object' ? copy.options : {};
+  const presets = [...doc.presets.slice(0, ed.sel + 1), copy, ...doc.presets.slice(ed.sel + 1)];
+  try {
+    await api('POST', '/api/preview.bmp?preset=' + encodeURIComponent(copy.id), { ...doc, presets });
+  } catch (e) {
+    return toast(`Can't import ${copy.name}: ${e.message}`);
+  }
+  doc.presets = presets;
+  ed.sel++;
+  toast(`${copy.name} imported. Save keeps it.`);
+  changed(ed, true);
+}
+
 async function presetsPage() {
   if (!catalogue) catalogue = await api('GET', '/api/layouts');
   const [doc, fieldList, settings] = await Promise.all([api('GET', '/api/presets'), api('GET', '/api/fields'),
@@ -1156,6 +1204,14 @@ function splitSize(w, h, kind) {
 
 const cellCount = (node) => (node.split ? cellCount(node.a) + cellCount(node.b) : 1);
 const firstField = (node) => (node.split ? firstField(node.a) || firstField(node.b) : node.field);
+const firstCell = (node) => (node.split ? firstCell(node.a) || firstCell(node.b) : node.field ? node : null);
+/* A cell's field with its title and force, as they go together (spec §10.3, D42). */
+const fieldPart = (cell) => {
+  const out = { field: cell.field };
+  if (cell.title) out.title = cell.title;
+  if (cell.force_title) out.force_title = true;
+  return out;
+};
 
 /* The preview's tags: each cell's number where a slot's name goes. */
 function slotsOf(p) {
@@ -1181,7 +1237,7 @@ function splitEditor(ed, p) {
         const half = { split: dir, ratio: '1/2', line: true, a: {}, b: {} }; /* the field goes to the first part */
         const b = button(text, () => {
           const f = fieldOf(node.field), [a] = splitParts(half, r);
-          if (f && splitSize(a.w, a.h, f.kind)) half.a.field = f.id;
+          if (f && splitSize(a.w, a.h, f.kind)) half.a = fieldPart(node);
           else if (f) toast(`No room for ${f.label}`);
           set(half);
           changed(ed, true);
@@ -1192,8 +1248,19 @@ function splitEditor(ed, p) {
       const size = splitSize(r.w, r.h), f = fieldOf(node.field), at = f && splitSize(r.w, r.h, f.kind);
       const smaller = at && at !== size ? ` (${f.label} at ${at})` : '';
       const name = `${number} · ${r.w}×${r.h} · ${size || 'too small'}${smaller}`;
+      const title = titleInput(node.title, f, (v) => {
+        if (v) node.title = v;
+        else delete node.title;
+        changed(ed, false);
+      });
+      const force = node.field ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!node.force_title,
+        onchange: (ev) => {
+          if (ev.target.checked) node.force_title = true;
+          else delete node.force_title;
+          changed(ed, false);
+        } }), 'Always show the title') : null;
       return h('div', { class: 'cell' }, h('label', { class: 'cell-name', text: name }),
-        select, actions(splitButton('rows', 'Split into rows'), splitButton('columns', 'Split into columns')));
+        select, title, force, actions(splitButton('rows', 'Split into rows'), splitButton('columns', 'Split into columns')));
     }
     const [ra, rb] = splitParts(node, r);
     const ratio = h('select', { onchange: (ev) => {
@@ -1202,7 +1269,9 @@ function splitEditor(ed, p) {
       for (const { node: cell, r: cr } of splitCells(p.split, splitArea())) {
         const f = fieldOf(cell.field);
         if (f && !splitSize(cr.w, cr.h, f.kind)) {
-          delete cell.field;
+          delete cell.field; /* its title and force with it */
+          delete cell.title;
+          delete cell.force_title;
           dropped.push(f.label);
         }
       }
@@ -1215,8 +1284,8 @@ function splitEditor(ed, p) {
       h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: node.line !== false,
         onchange: (ev) => { node.line = ev.target.checked; changed(ed, false); } }), 'Separator'),
       button('Join', () => {
-        const f = firstField(node); /* it had room in a part, so it has room in the whole */
-        set(f ? { field: f } : {});
+        const c = firstCell(node); /* it had room in a part, so it has room in the whole */
+        set(c ? fieldPart(c) : {});
         changed(ed, true);
       })),
     box(node.a, ra, (x) => { node.a = x; }), box(node.b, rb, (x) => { node.b = x; }));
@@ -1260,8 +1329,11 @@ function renderPresets(ed) {
       h('input', { type: 'checkbox', checked: q.in_cycle, onchange: (ev) => { q.in_cycle = ev.target.checked; changed(ed, false); } }),
       'cycle'),
     q.window ? h('span', { class: 'muted small', text: ` ${windowText(q.window)}` }) : null)));
+  const importInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true,
+                                   onchange: (ev) => importPreset(ed, ev.target) });
   const listCard = card('Presets', list, h('p', { class: 'muted small', text: 'Tap a preset to edit it. The dot marks ' +
-    'the one on the screen now; "cycle" puts a preset in the order KEY and the auto-cycle step through.' }), actions(
+    'the one on the screen now; "cycle" puts a preset in the order KEY and the auto-cycle step through.' }), importInput,
+  actions(
     button('New preset', () => {
       if (doc.presets.length >= 16) return toast('16 presets at most');
       const copy = JSON.parse(JSON.stringify(p));
@@ -1271,7 +1343,8 @@ function renderPresets(ed) {
       doc.presets.splice(ed.sel + 1, 0, copy);
       ed.sel++;
       changed(ed, true);
-    })));
+    }),
+    button('Import…', () => importInput.click())));
 
   const name = h('input', { type: 'text', maxlength: 23, value: p.name,
                             onchange: (ev) => { p.name = ev.target.value.trim() || p.id; changed(ed, true); } });
@@ -1279,6 +1352,8 @@ function renderPresets(ed) {
     const old = p.slots || {};
     const first = p.layout === 'split' ? firstField(p.split)
                                        : layoutOf(p.layout).slots.map((s) => old[s.id]).find(Boolean);
+    const oldTitles = p.titles || {};
+    delete p.titles;
     p.layout = ev.target.value;
     if (p.layout === 'split') { /* spec §10.3: one cell, holding the first field */
       const f = ed.fields.find((x) => x.id === first), all = splitArea();
@@ -1288,10 +1363,15 @@ function renderPresets(ed) {
     }
     delete p.split;
     p.slots = {};
-    for (const slot of layoutOf(p.layout).slots) { /* keep what still fits */
+    const titles = {};
+    for (const slot of layoutOf(p.layout).slots) { /* keep what still fits, with its title */
       const f = old[slot.id] && ed.fields.find((x) => x.id === old[slot.id]);
-      if (f && slot.kinds.includes(f.kind)) p.slots[slot.id] = f.id;
+      if (f && slot.kinds.includes(f.kind)) {
+        p.slots[slot.id] = f.id;
+        if (oldTitles[slot.id]) titles[slot.id] = oldTitles[slot.id];
+      }
     }
+    if (Object.keys(titles).length) p.titles = titles;
     changed(ed, true);
   } }, catalogue.layouts.map((l) => h('option', { value: l.id, selected: l.id === p.layout }, LAYOUT_NAMES[l.id] || l.id)));
   const slots = p.layout === 'split' ? splitEditor(ed, p)
@@ -1301,7 +1381,15 @@ function renderPresets(ed) {
       if (ev.target.value) p.slots[slot.id] = ev.target.value;
       else delete p.slots[slot.id];
       changed(ed, false);
-    } }, fieldOptions(ed, ed.fields.filter((f) => slot.kinds.includes(f.kind)), p.slots[slot.id])))));
+    } }, fieldOptions(ed, ed.fields.filter((f) => slot.kinds.includes(f.kind)), p.slots[slot.id])),
+    titleInput((p.titles || {})[slot.id], ed.fields.find((f) => f.id === p.slots[slot.id]), (v) => {
+      const titles = { ...p.titles };
+      if (v) titles[slot.id] = v;
+      else delete titles[slot.id];
+      if (Object.keys(titles).length) p.titles = titles;
+      else delete p.titles;
+      changed(ed, false);
+    }))));
 
   const o = p.options;
   const check = (key, text) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!o[key],
@@ -1367,6 +1455,8 @@ function renderPresets(ed) {
     h('label', {}, 'Status bar'), check('status_clock', 'A small clock'),
     part('percent', 'Battery level'), part('voltage', 'Battery voltage'), part('days', 'Days of battery left'),
     actions(
+      button('Export', () => download(new Blob([JSON.stringify({ reflbo: 'preset', version: 1, preset: p }, null, 2)],
+                                               { type: 'application/json' }), `${p.id}.json`)),
       button('Move up', () => { if (ed.sel > 0) { doc.presets.splice(ed.sel - 1, 0, doc.presets.splice(ed.sel, 1)[0]); ed.sel--; changed(ed, true); } }),
       button('Move down', () => { if (ed.sel < doc.presets.length - 1) { doc.presets.splice(ed.sel + 1, 0, doc.presets.splice(ed.sel, 1)[0]); ed.sel++; changed(ed, true); } }),
       button('Delete', () => {

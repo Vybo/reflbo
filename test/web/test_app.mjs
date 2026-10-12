@@ -1056,3 +1056,171 @@ test('the field lists group the Solar and Energy fields and mark those whose ste
   assert.ok(options.some((o) => /^Solar — 3.42 kW \(its sync step is off\)$/.test(o)), options.join(' | '));
   assert.ok(options.some((o) => /^Forecast now — 3.50 kW$/.test(o)), options.join(' | '));
 });
+
+/* ---- titles and shared presets (D42, spec §10.3) ---- */
+
+const inputsLabelled = (root, label) => below(root).flatMap((el) => el.children
+  .map((k, i) => (k instanceof FakeElement && k.tag === 'label' && text(k) === label ? el.children[i + 1] : null))
+  .filter(Boolean));
+const checkNamed = (root, name) => below(root).find((e) => e.tag === 'label' && text(e) === name).children[0];
+
+test('a cell\'s title and its force are saved with it, and gone when cleared', async () => {
+  const saved = [];
+  const { ctx, main } = await load(splitDevice(saved, { field: 'env.temp' }));
+  await ctx.presetsPage();
+  await change(control(main, 'Title'), '  Obývák ');
+  await change(checkNamed(main, 'Always show the title'), true);
+  let p = await savedTree(main, saved);
+  assert.deepEqual(p.split, { field: 'env.temp', title: 'Obývák', force_title: true });
+  await change(control(main, 'Title'), '');
+  await change(checkNamed(main, 'Always show the title'), false);
+  p = await savedTree(main, saved);
+  assert.deepEqual(p.split, { field: 'env.temp' });
+});
+
+test('a title is cut to 23 bytes where a letter starts', async () => {
+  const saved = [];
+  const { ctx, main } = await load(splitDevice(saved, { field: 'env.temp' }));
+  await ctx.presetsPage();
+  await change(control(main, 'Title'), 'ř'.repeat(12)); /* 24 bytes */
+  const p = await savedTree(main, saved);
+  assert.equal(p.split.title, 'ř'.repeat(11));
+});
+
+test('a title says what shows without one: the field\'s own label', async () => {
+  const { ctx, main } = await load(splitDevice([], { field: 'wx.hourly' }));
+  await ctx.presetsPage();
+  assert.equal(control(main, 'Title').attrs.placeholder, 'Next hours');
+});
+
+test('an empty cell offers no force for its title', async () => {
+  const { ctx, main } = await load(splitDevice([], {}));
+  await ctx.presetsPage();
+  assert.equal(below(main).find((e) => e.tag === 'label' && text(e) === 'Always show the title'), undefined);
+});
+
+test('a fixed slot\'s title is saved in the preset\'s titles', async () => {
+  const saved = [];
+  const { ctx, main } = await load(presetDevice(saved));
+  await ctx.presetsPage();
+  const [mainTitle, s1Title] = inputsLabelled(main, 'Title');
+  assert.ok(mainTitle && s1Title, 'a title for each slot');
+  await change(s1Title, 'Obývák');
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.deepEqual(saved.at(-1).presets[1].titles, { s1: 'Obývák' });
+  await change(inputsLabelled(main, 'Title')[1], '');
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.equal(saved.at(-1).presets[1].titles, undefined);
+});
+
+test('Split and Join keep a cell\'s title and force with its field', async () => {
+  const saved = [];
+  const { ctx, main } = await load(splitDevice(saved, { field: 'time.clock', title: 'Praha', force_title: true }));
+  await ctx.presetsPage();
+  await buttonNamed(main, 'Split into rows').click();
+  let p = await savedTree(main, saved);
+  assert.deepEqual(p.split.a, { field: 'time.clock', title: 'Praha', force_title: true });
+  assert.deepEqual(p.split.b, {});
+  await buttonNamed(main, 'Join').click();
+  p = await savedTree(main, saved);
+  assert.deepEqual(p.split, { field: 'time.clock', title: 'Praha', force_title: true });
+});
+
+test('a ratio that leaves a field without room takes its title too', async () => {
+  const saved = [];
+  const { ctx, main } = await load(splitDevice(saved, { split: 'rows', ratio: '1/2', line: true, a: {},
+                                                        b: { field: 'wx.hourly', title: 'Hodiny', force_title: true } }));
+  await ctx.presetsPage();
+  await change(ratioSelects(main)[0], '3/4');
+  const p = await savedTree(main, saved);
+  assert.deepEqual(p.split.b, {});
+});
+
+test('Export downloads the preset as a reflbo file named by its id', async () => {
+  const { ctx, blobs, main } = await load(splitDevice([], { field: 'env.temp', title: 'Obývák' }));
+  await ctx.presetsPage();
+  await buttonNamed(main, 'Export').click();
+  assert.equal(blobs.length, 1); /* the preview's timer never fires here */
+  const file = JSON.parse(await blobs[0].text());
+  assert.deepEqual(file, { reflbo: 'preset', version: 1, preset: { id: 'home', name: 'Home', layout: 'split',
+                                                                  in_cycle: true, split: { field: 'env.temp', title: 'Obývák' }, options: {} } });
+  const link = ctx.document.body.children.find((e) => e.tag === 'a');
+  assert.equal(link.attrs.download, 'home.json');
+});
+
+/* A device for imports: Home and Weather as presetDevice(), its preview answering `preview` for each POST. */
+function importDevice(saved, previews, preview = () => reply(200, 'BM', 'image/bmp')) {
+  return { ...presetDevice(saved),
+           'POST /api/preview.bmp': (init) => { previews.push(JSON.parse(init.body)); return preview(init); } };
+}
+
+async function importFile(main, content) {
+  const input = below(main).find((e) => e.tag === 'input' && e.attrs.type === 'file');
+  assert.ok(input, 'a file input');
+  input.files = [{ text: async () => content }];
+  await Promise.all((input.listeners.change || []).map((fn) => fn({ target: input })));
+  await settle();
+}
+
+const EXPORTED = JSON.stringify({ reflbo: 'preset', version: 1, preset: {
+  id: 'weather', name: 'Weather', layout: 'classic', in_cycle: false, slots: { main: 'time.clock' },
+  titles: { main: 'Hodiny' }, options: { seconds: false }, window: { from: 'sunrise', until: 'sunset' } } });
+
+test('Import adds the preset after the selected one, with an id of its own, in the cycle', async () => {
+  const saved = [], previews = [];
+  const { ctx, main, byId } = await load(importDevice(saved, previews));
+  await ctx.presetsPage(); /* Weather, the second, is selected */
+  await importFile(main, EXPORTED);
+  const asked = previews.at(-1);
+  assert.deepEqual(asked.presets.map((p) => p.id), ['home', 'weather', 'weather-2'], 'the device checked it in place');
+  assert.match(text(byId.toast), /Weather imported/);
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  const added = saved.at(-1).presets[2];
+  assert.equal(added.id, 'weather-2');
+  assert.equal(added.in_cycle, true);
+  assert.deepEqual(added.titles, { main: 'Hodiny' });
+  assert.deepEqual(added.window, { from: 'sunrise', until: 'sunset' }, 'keys this page doesn\'t know go along');
+});
+
+test('Import takes a bare preset too', async () => {
+  const saved = [], previews = [];
+  const { ctx, main } = await load(importDevice(saved, previews));
+  await ctx.presetsPage();
+  await importFile(main, JSON.stringify({ id: 'x', name: 'Bare', layout: 'classic', slots: {}, options: {} }));
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.equal(saved.at(-1).presets[2].name, 'Bare');
+});
+
+test('a preset the device refuses is not added, and the page says why', async () => {
+  const saved = [], previews = [];
+  const { ctx, main, byId } = await load(importDevice(saved, previews,
+    () => reply(400, { error: 'preset "weather-2": a split\'s parts must be at least 40×20' })));
+  await ctx.presetsPage();
+  await importFile(main, EXPORTED);
+  assert.match(text(byId.toast), /Can't import Weather: Preset "weather-2": a split's parts must be at least 40×20\./);
+  assert.equal(below(main).filter((e) => e.tag === 'li').length, 2, 'the list as it was');
+});
+
+test('a file that is no preset says so', async () => {
+  const previews = [];
+  const { ctx, main, byId } = await load(importDevice([], previews));
+  await ctx.presetsPage();
+  await importFile(main, '{"foo": 1}');
+  assert.equal(text(byId.toast), 'That file holds no preset.');
+  await importFile(main, 'not json');
+  assert.equal(text(byId.toast), 'That file is not JSON.');
+  assert.equal(previews.length, 0, 'nothing asked of the device');
+});
+
+test('Import at 16 presets says so', async () => {
+  const doc = { schema: 1, active: 'p0', presets: Array.from({ length: 16 }, (_, i) => preset(`p${i}`, `P${i}`, true)),
+                cycle: { enabled: false, interval_s: 60 }, schedule: { enabled: false, entries: [] } };
+  const { ctx, main, byId } = await load({ ...presetDevice([]), 'GET /api/presets': () => reply(200, doc) });
+  await ctx.presetsPage();
+  await importFile(main, EXPORTED);
+  assert.equal(text(byId.toast), '16 presets at most');
+});

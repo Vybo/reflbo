@@ -844,7 +844,7 @@ static void draw_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_v
         bool says = v->field == UI_FIELD_EN_GRID || v->field == UI_FIELD_EN_EXPORT || v->field == UI_FIELD_EN_IMPORT;
         int trend = says ? 0 : v->trend; /* "Export" or "To grid today" says which way */
         int arrow_w = trend ? gfx_text_width(f->label, ARROW_UP) + 4 : 0;
-        gfx_text_ellipsize(f->label, v->label, r.w - 12 - arrow_w, label, sizeof(label));
+        gfx_text_ellipsize(f->label, ui_label(v), r.w - 12 - arrow_w, label, sizeof(label));
         int pen = gfx_text(fb, f->label, r.x + 6, top + f->label->ascent, label, GFX_BLACK);
         if (trend) { /* beside the label, where it doesn't widen the value */
             gfx_text(fb, f->label, pen + 4, top + f->label->ascent, trend > 0 ? ARROW_UP : ARROW_DOWN, GFX_BLACK);
@@ -915,18 +915,33 @@ static void draw_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_v
     }
 }
 
-void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, ui_stale_policy_t policy,
+bool ui_widget_hidden(const ui_value_t *v, ui_stale_policy_t policy)
+{
+    bool missing = v->state == UI_VALUE_MISSING || (v->state == UI_VALUE_STALE && policy != UI_STALE_STALE);
+    return v->field == UI_FIELD_NONE || (missing && policy == UI_STALE_HIDE);
+}
+
+bool ui_widget_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, ui_stale_policy_t policy,
+                        const lang_t *lang)
+{
+    gfx_rect_t saved = fb->clip;
+    fb->clip = (gfx_rect_t){ 0, 0, 0, 0 }; /* every primitive clips: nothing reaches the frame */
+    bool labelled = ui_widget_draw(fb, r, size, v, policy, lang);
+    fb->clip = saved;
+    return labelled;
+}
+
+bool ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, ui_stale_policy_t policy,
                     const lang_t *lang)
 {
-    if (v->field == UI_FIELD_NONE) {
-        return;
+    if (ui_widget_hidden(v, policy)) {
+        return false;
     }
+    bool labelled = false;
     ui_value_t shown = *v;
+    shown.label_shown = &labelled;
     if (v->state == UI_VALUE_STALE && policy != UI_STALE_STALE) {
         shown.state = UI_VALUE_MISSING;
-    }
-    if (shown.state == UI_VALUE_MISSING && policy == UI_STALE_HIDE) {
-        return;
     }
     if (shown.state == UI_VALUE_STALE) {
         shown.trend = 0; /* an old reading's trend says nothing about now */
@@ -951,6 +966,7 @@ void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t
         draw_age(fb, r, &shown, lang);
     }
     fb->clip = saved;
+    return labelled;
 }
 
 void ui_draw_battery(gfx_fb_t *fb, int x, int y, int w, int h, int pct)

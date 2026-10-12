@@ -37,8 +37,23 @@ bool ui_tiny_stacked(gfx_rect_t r);
 /* How far `text`'s ink reaches above and below the baseline in `f` (ui_widget.c). */
 int ui_ink_above(const gfx_font_t *f, const char *text);
 int ui_ink_below(const gfx_font_t *f, const char *text);
-void ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, ui_stale_policy_t policy,
+/* Draws `v` in r at `size`; returns whether it drew its label (ui_label()). */
+bool ui_widget_draw(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, ui_stale_policy_t policy,
                     const lang_t *lang);
+/* Whether ui_widget_draw() with these arguments would draw `v`'s label (spec §5.4, D42): a dry run into `fb` with
+ * nothing to draw on, so its pixels stay as they are. */
+bool ui_widget_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_value_t *v, ui_stale_policy_t policy,
+                        const lang_t *lang);
+/* Whether the stale policy leaves the slot empty: nothing drawn, not even a title. */
+bool ui_widget_hidden(const ui_value_t *v, ui_stale_policy_t policy);
+/* A widget's label, where it draws it: notes it for ui_widget_labelled() (D42). */
+static inline const char *ui_label(const ui_value_t *v)
+{
+    if (v->label_shown != NULL) {
+        *v->label_shown = true;
+    }
+    return v->label;
+}
 void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, bool any_stale);
 /* Splits text that is wider than max_w into two lines at the last space that lets the first
  * line fit; each line is then cut with an ellipsis if it is still too wide. line2 is empty when

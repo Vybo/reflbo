@@ -252,7 +252,9 @@ void app_ui_render(void)
     } else if (s.first_run) {
         ui_draw_first_run(fb, &ctx);
     } else {
-        ui_draw_dashboard(fb, &ctx, &s.presets.presets[s.presets.active]);
+        ui_titles_t titles; /* the preset's own (spec §5.4, D42) */
+        ui_presets_titles(&s.presets, s.presets.active, &titles);
+        ui_draw_dashboard(fb, &ctx, &s.presets.presets[s.presets.active], &titles);
     }
     if (app_ui_toast_active()) {
         ui_draw_toast(fb, s_toast);

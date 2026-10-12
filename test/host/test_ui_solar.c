@@ -221,14 +221,14 @@ static void draw_preset(const char *fixture)
     TEST_ASSERT_TRUE(fixture_dashboard(fixture, &ctx, &preset));
     s_ctx = ctx;
     gfx_fb_init(&s_fb, s_buf, 400, 300);
-    ui_draw_dashboard(&s_fb, &s_ctx, &preset);
+    ui_draw_dashboard(&s_fb, &s_ctx, &preset, NULL);
 }
 
 static void redraw(const char *preset_id)
 {
     ui_preset_t preset = fixture_preset(preset_id);
     gfx_fb_init(&s_fb, s_buf, 400, 300);
-    ui_draw_dashboard(&s_fb, &s_ctx, &preset);
+    ui_draw_dashboard(&s_fb, &s_ctx, &preset, NULL);
 }
 
 #define EM_DASH 0x2014

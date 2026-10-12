@@ -362,6 +362,16 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         *preset = fixture_preset("weather");
         fixture_grid_split(preset, 3, 8, 0, k_fixture_small24, sizeof(k_fixture_small24));
         fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    } else if (strcmp(name, "split_titles") == 0) { /* D42: own titles, forced ones above and beside */
+        *preset = fixture_preset("weather");
+        static const uint8_t k_tree[] = { UI_RATIO_1_2, UI_RATIO_1_2 | UI_SPLIT_COLUMNS, 0, 0, UI_RATIO_1_2,
+                                          UI_RATIO_1_2 | UI_SPLIT_COLUMNS, 0, 0, UI_RATIO_1_2, 0, 0 };
+        static const uint8_t k_fields[] = { UI_FIELD_WX_NOW, UI_FIELD_TIME_CLOCK, UI_FIELD_AQ_UV, UI_FIELD_SUN_TIMES,
+                                            UI_FIELD_WX_TODAY, UI_FIELD_BAT_LEVEL };
+        fixture_split(preset, k_tree, sizeof(k_tree), k_fields, sizeof(k_fields));
+        preset->force_title = 1u << 1 | 1u << 2 | 1u << 4 | 1u << 5; /* fixture_titles(): 0, 1, 3 and 4 have their own */
+        fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+        ctx->lang = lang_get("cs");
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -450,6 +460,13 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         return false;
     }
     return true;
+}
+
+/* A fixture's own titles (spec §5.4, D42), NULL for none. */
+static inline const ui_titles_t *fixture_titles(const char *name)
+{
+    static const ui_titles_t k_split_titles = { .text = { [0] = "Venku", [1] = "Praha", [3] = "Slunce", [4] = "Dnes" } };
+    return strcmp(name, "split_titles") == 0 ? &k_split_titles : NULL;
 }
 
 static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather", "focus", "home_invalid",

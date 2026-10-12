@@ -25,7 +25,7 @@ static void check(const char *name)
     TEST_ASSERT_TRUE_MESSAGE(fixture_dashboard(name, &ctx, &preset), name);
     gfx_fb_t fb;
     gfx_fb_init(&fb, s_buf, 400, 300);
-    ui_draw_dashboard(&fb, &ctx, &preset);
+    ui_draw_dashboard(&fb, &ctx, &preset, fixture_titles(name));
     size_t n = gfx_pbm_encode(&fb, s_pbm, sizeof(s_pbm));
 
     char path[256];

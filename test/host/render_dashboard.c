@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     }
     gfx_fb_t fb;
     gfx_fb_init(&fb, buf, 400, 300);
-    ui_draw_dashboard(&fb, &ctx, &preset);
+    ui_draw_dashboard(&fb, &ctx, &preset, fixture_titles(argv[1]));
     size_t n = gfx_pbm_encode(&fb, pbm, sizeof(pbm));
     FILE *f = fopen(argv[2], "wb");
     if (f == NULL || fwrite(pbm, 1, n, f) != n) {

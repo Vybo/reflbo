@@ -256,7 +256,7 @@ static void test_separators_are_drawn_unless_hidden(void)
                                                             CELL, COLS(UI_RATIO_1_3), CELL, CELL } };
     gfx_fb_t fb;
     gfx_fb_init(&fb, buf, 400, 300);
-    ui_draw_dashboard(&fb, &ctx, &p); /* every cell empty: only the lines below the status bar */
+    ui_draw_dashboard(&fb, &ctx, &p, NULL); /* every cell empty: only the lines below the status bar */
     for (int x = 0; x < 400; x++) { /* the rows' gap at y 160 */
         TEST_ASSERT_EQUAL_INT_MESSAGE(x >= 8 && x < 392, gfx_get_pixel(&fb, x, 160), "the rows' line");
     }

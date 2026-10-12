@@ -29,7 +29,7 @@ static void render(const char *name)
     ui_preset_t preset;
     TEST_ASSERT_TRUE_MESSAGE(fixture_dashboard(name, &ctx, &preset), name);
     gfx_fb_init(&s_fb, s_buf, 400, 300);
-    ui_draw_dashboard(&s_fb, &ctx, &preset);
+    ui_draw_dashboard(&s_fb, &ctx, &preset, NULL);
 }
 
 /* Whether any pixel in x0..x1, y0..y1 is set; a byte at a time, as the fit tests draw a million cells. */
@@ -115,7 +115,7 @@ static void render_today(int max_c10, int min_c10)
     w.days[0].min_c10 = (int16_t)min_c10;
     ds_set_weather(&s_fix_ds, &w);
     gfx_fb_init(&s_fb, s_buf, 400, 300);
-    ui_draw_dashboard(&s_fb, &ctx, &preset);
+    ui_draw_dashboard(&s_fb, &ctx, &preset, NULL);
 }
 
 static void grab_slot(ui_layout_id_t id, const char *slot, uint8_t *out)
@@ -159,7 +159,7 @@ static void test_a_czech_number_fits_classics_main_slot(void)
     TEST_ASSERT_TRUE(fixture_dashboard("home_cs", &ctx, &preset));
     preset.slots[0] = UI_FIELD_ENV_TEMP;
     gfx_fb_init(&s_fb, s_buf, 400, 300);
-    ui_draw_dashboard(&s_fb, &ctx, &preset);
+    ui_draw_dashboard(&s_fb, &ctx, &preset, NULL);
     check_fits("home_cs, a temperature", UI_LAYOUT_CLASSIC, "main");
     gfx_rect_t r = ui_layout(UI_LAYOUT_CLASSIC)->slots[0].rect;
     TEST_ASSERT_FALSE_MESSAGE(inked(r.x, r.x + r.w - 1, r.y + r.h - 2, r.y + r.h - 1), "the slot's bottom edge");

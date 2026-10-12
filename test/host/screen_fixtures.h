@@ -180,7 +180,7 @@ static inline bool fixture_screen(const char *name, gfx_fb_t *fb)
         ui_context_t ctx;
         ui_preset_t preset;
         fixture_dashboard("home_cs", &ctx, &preset);
-        ui_draw_dashboard(fb, &ctx, &preset);
+        ui_draw_dashboard(fb, &ctx, &preset, NULL);
         char text[64];
         snprintf(text, sizeof(text), "%s: %s", lang_str(lang, LS_T_PRESET), "Indoor");
         ui_draw_toast(fb, text);

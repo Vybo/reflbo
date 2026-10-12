@@ -1,5 +1,6 @@
 #include "ui_dashboard.h"
 
+#include "gfx_fonts.h"
 #include "ui_internal.h"
 #include "ui_radar.h"
 #include "ui_solar.h"
@@ -37,6 +38,54 @@ static void draw_separators(gfx_fb_t *fb, ui_layout_id_t layout)
 bool ui_draw_cell(gfx_fb_t *fb, gfx_rect_t cell, const ui_context_t *ctx, ui_field_id_t field,
                   ui_stale_policy_t policy)
 {
+    return ui_draw_titled_cell(fb, cell, ctx, field, policy, NULL, false);
+}
+
+/* Draws `text` in `f` with its baseline at y, cut to max_w, clipped to the cell. */
+static void title_text(gfx_fb_t *fb, gfx_rect_t cell, const gfx_font_t *f, int x, int y, const char *text)
+{
+    gfx_rect_t saved = fb->clip;
+    gfx_set_clip(fb, gfx_rect_intersect(saved, cell));
+    gfx_text(fb, f, x, y, text, GFX_BLACK);
+    fb->clip = saved;
+}
+
+/* A forced title where the field shows no label (spec §5.2, D42): a line above the field where the rest of the cell
+ * still fits it, else beside it, cut to half the cell. Draws the title and returns the field's part with its size in
+ * *size; the whole cell, with nothing drawn, where neither has room. */
+static gfx_rect_t place_title(gfx_fb_t *fb, gfx_rect_t cell, const ui_value_t *v, ui_stale_policy_t policy,
+                              const lang_t *lang, int *size)
+{
+    char fit[48];
+    const gfx_font_t *lf = &gfx_font_sans_12; /* the M size's label */
+    int line = 6 + lf->line_height;
+    gfx_rect_t below = { cell.x, (int16_t)(cell.y + line), cell.w, (int16_t)(cell.h - line) };
+    int s = below.h > 0 ? ui_split_field_size(v->kind, below.w, below.h) : -1;
+    if (s >= 0 && !ui_widget_labelled(fb, below, (ui_size_t)s, v, policy, lang)) {
+        gfx_text_ellipsize(lf, v->label, cell.w - 12, fit, sizeof(fit));
+        title_text(fb, cell, lf, cell.x + 6, cell.y + 6 + lf->ascent, fit);
+        *size = s;
+        return below;
+    }
+    const gfx_font_t *bf = gfx_font_sans_16.line_height <= cell.h ? &gfx_font_sans_16 : lf;
+    int max_w = cell.w / 2 - 12;
+    if (max_w > 0 && gfx_text_ellipsize(bf, v->label, max_w, fit, sizeof(fit)) > 0) {
+        int column = 6 + gfx_text_width(bf, fit) + 6;
+        gfx_rect_t beside = { (int16_t)(cell.x + column), cell.y, (int16_t)(cell.w - column), cell.h };
+        s = ui_split_field_size(v->kind, beside.w, beside.h);
+        if (s >= 0 && !ui_widget_labelled(fb, beside, (ui_size_t)s, v, policy, lang)) {
+            title_text(fb, cell, bf, cell.x + 6, cell.y + (cell.h + ui_ink_above(bf, fit) - ui_ink_below(bf, fit)) / 2,
+                       fit);
+            *size = s;
+            return beside;
+        }
+    }
+    return cell;
+}
+
+bool ui_draw_titled_cell(gfx_fb_t *fb, gfx_rect_t cell, const ui_context_t *ctx, ui_field_id_t field,
+                         ui_stale_policy_t policy, const char *title, bool force)
+{
     const ui_field_info_t *info = ui_field_info(field);
     int size = info != NULL ? ui_split_field_size(info->kind, cell.w, cell.h) : -1;
     if (size < 0) {
@@ -44,13 +93,21 @@ bool ui_draw_cell(gfx_fb_t *fb, gfx_rect_t cell, const ui_context_t *ctx, ui_fie
     }
     ui_value_t v;
     ui_resolve(ctx, field, &v);
-    ui_widget_draw(fb, cell, (ui_size_t)size, &v, policy, ctx->lang);
+    if (title != NULL && title[0]) {
+        v.label = title;
+    }
+    gfx_rect_t body = cell;
+    if (force && v.label != NULL && v.label[0] && !ui_widget_hidden(&v, policy) &&
+        !ui_widget_labelled(fb, cell, (ui_size_t)size, &v, policy, ctx->lang)) {
+        body = place_title(fb, cell, &v, policy, ctx->lang, &size);
+    }
+    ui_widget_draw(fb, body, (ui_size_t)size, &v, policy, ctx->lang);
     return v.state == UI_VALUE_STALE;
 }
 
 /* The split layout (spec §5.2): each split's separator unless it is hidden, then each cell's field.
  * Returns whether any value shown is stale. */
-static bool draw_split(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset)
+static bool draw_split(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, const ui_titles_t *titles)
 {
     ui_split_geometry_t g;
     if (!ui_split_layout(preset->split, ui_split_area(), &g)) {
@@ -69,13 +126,14 @@ static bool draw_split(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
     }
     bool any_stale = false;
     for (int i = 0; i < g.cells; i++) {
-        any_stale |= ui_draw_cell(fb, g.cell[i], ctx, (ui_field_id_t)preset->slots[i],
-                                  (ui_stale_policy_t)preset->stale_policy);
+        any_stale |= ui_draw_titled_cell(fb, g.cell[i], ctx, (ui_field_id_t)preset->slots[i],
+                                         (ui_stale_policy_t)preset->stale_policy, titles ? titles->text[i] : NULL,
+                                         preset->force_title & (1u << i));
     }
     return any_stale;
 }
 
-void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset)
+void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, const ui_titles_t *titles)
 {
     ui_context_t c = *ctx;
     if (preset->clock != UI_CLOCK_DEFAULT) {
@@ -93,7 +151,7 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
     } else if (preset->layout == UI_LAYOUT_FLIGHTS) {
         ui_draw_flights_view(fb, below, &c);
     } else if (preset->layout == UI_LAYOUT_SPLIT) {
-        any_stale = draw_split(fb, &c, preset);
+        any_stale = draw_split(fb, &c, preset, titles);
     } else if (preset->layout == UI_LAYOUT_SOLAR) { /* M6d */
         any_stale = ui_draw_solar_layout(fb, below, &c);
     } else if (preset->layout == UI_LAYOUT_ENERGY) {
@@ -103,6 +161,9 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
         for (int i = 0; i < layout->slot_count; i++) {
             ui_value_t v;
             ui_resolve(&c, (ui_field_id_t)preset->slots[i], &v);
+            if (titles != NULL && titles->text[i] != NULL && titles->text[i][0]) {
+                v.label = titles->text[i]; /* the slot's own title (spec §5.2, D42) */
+            }
             any_stale |= v.state == UI_VALUE_STALE;
             ui_widget_draw(fb, layout->slots[i].rect, layout->slots[i].size, &v,
                            (ui_stale_policy_t)preset->stale_policy, c.lang);

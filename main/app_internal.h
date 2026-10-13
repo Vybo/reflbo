@@ -30,6 +30,7 @@ typedef struct {
     sync_history_t history;
     sync_due_t due;             /* the next automatic sync; at 0 = none */
     uint32_t last_at;           /* when the last sync started (UTC); 0 = none since the cold boot */
+    uint32_t ok_at;             /* when the last sync that succeeded started (UTC); 0 = none since (D43) */
     uint8_t last_result[SYNC_STEP_COUNT]; /* sync_step_result_t */
     uint8_t last_failed_step;   /* the first step that failed; SYNC_STEP_COUNT if none */
     char last_detail[SYNC_STEP_COUNT][SYNC_DETAIL_LEN]; /* why each step failed, kept or was skipped */
@@ -163,6 +164,7 @@ bool app_sync_active(void);      /* a sync or a radar-only refresh runs */
 bool app_sync_refreshing(void);  /* what runs is a refresh or a check (spec §9.3): not shown as a sync */
 bool app_sync_running(void);     /* a sync runs, or waits for a refresh to end: what the screens show */
 bool app_sync_failed(void);      /* the last sync failed a step */
+time_t app_sync_ok_at(void);     /* when the last sync that succeeded started (UTC); 0 = none since the cold boot */
 bool app_sync_holds_wifi(void);  /* sync mode `always` keeps Wi-Fi now */
 bool app_sync_wifi_pending(void); /* Wi-Fi is on, but nothing needs it: awake until it is off */
 void app_sync_wifi_check(void);   /* turns that Wi-Fi off, once a web reply has gone out */

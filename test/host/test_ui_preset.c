@@ -315,6 +315,7 @@ static void test_defaults_survive_a_json_round_trip(void)
     s_p.presets[3].stale_policy = UI_STALE_HIDE;
     s_p.presets[3].status_battery = UI_STATUS_BAT_VOLTAGE | UI_STATUS_BAT_DAYS;
     s_p.presets[3].status_clock = true;
+    s_p.presets[3].status_sync = true;
     TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
     ui_presets_t back;
     TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &back, s_err, sizeof(s_err)), s_err);
@@ -395,6 +396,26 @@ static void test_status_bar_options_parse(void)
     TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), s_err);
     TEST_ASSERT_TRUE(s_p.presets[0].status_clock);
     TEST_ASSERT_EQUAL_HEX8(UI_STATUS_BAT_VOLTAGE | UI_STATUS_BAT_DAYS, s_p.presets[0].status_battery);
+    TEST_ASSERT_FALSE(s_p.presets[0].status_sync);
+}
+
+static void test_status_sync_round_trips_and_is_written_only_when_on(void)
+{
+    const char *json = "{\"schema\": 1, \"presets\": [{\"id\": \"a\", \"layout\": \"grid\", \"options\":"
+                       " {\"status_sync\": true}}, {\"id\": \"b\", \"layout\": \"grid\"}]}";
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(json, &s_p, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_TRUE(s_p.presets[0].status_sync);
+    TEST_ASSERT_FALSE(s_p.presets[1].status_sync);
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    const char *first = strstr(s_json, "\"status_sync\"");
+    TEST_ASSERT_NOT_NULL_MESSAGE(first, s_json);
+    TEST_ASSERT_NULL_MESSAGE(strstr(first + 1, "\"status_sync\""), s_json); /* b's is off: left out */
+    ui_presets_t back;
+    TEST_ASSERT_TRUE_MESSAGE(ui_presets_from_json(s_json, &back, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_p, &back, sizeof(s_p));
+    ui_presets_defaults(&s_p);
+    TEST_ASSERT_TRUE(ui_presets_to_json(&s_p, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NULL_MESSAGE(strstr(s_json, "status_sync"), s_json);
 }
 
 static void test_json_that_does_not_fit_the_buffer_returns_zero(void)
@@ -684,6 +705,7 @@ static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
         p->status_battery = UI_STATUS_BAT_PERCENT | UI_STATUS_BAT_VOLTAGE | UI_STATUS_BAT_DAYS;
         TEST_ASSERT_TRUE(ui_window_make("sunrise-180", "sunset-180", 0x7E, &p->window, s_err, sizeof(s_err))); /* M6e */
         p->force_title = (1u << UI_SPLIT_CELLS) - 1; /* D42: every cell's title forced */
+        p->status_sync = true; /* D43: written only when on */
     }
     /* D42: as many titles as the pool holds, each a quote, which cJSON writes as two bytes: the most per byte */
     int titled = 0;
@@ -966,6 +988,7 @@ int main(void)
     RUN_TEST(test_titles_are_cut_at_a_letter);
     RUN_TEST(test_title_control_characters_become_spaces);
     RUN_TEST(test_titles_unset_are_not_written);
+    RUN_TEST(test_status_sync_round_trips_and_is_written_only_when_on);
     RUN_TEST(test_bad_titles_are_rejected_with_a_reason);
     RUN_TEST(test_titles_overflowing_the_pool_are_refused);
     RUN_TEST(test_set_title_keeps_order_and_clears);

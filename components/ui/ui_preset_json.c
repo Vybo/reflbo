@@ -329,6 +329,7 @@ static bool parse_preset(const cJSON *item, ui_presets_t *all, int index, char *
         out->stale_policy = (uint8_t)found;
     }
     out->status_clock = optional_bool(options, "status_clock", false);
+    out->status_sync = optional_bool(options, "status_sync", false);
     out->status_battery = UI_STATUS_BAT_PERCENT;
     const cJSON *battery = cJSON_GetObjectItemCaseSensitive(options, "status_battery");
     if (battery != NULL && !cJSON_IsNull(battery)) {
@@ -543,6 +544,9 @@ static cJSON *preset_json(const ui_presets_t *all, int index)
     cJSON_AddBoolToObject(options, "invert", p->invert);
     cJSON_AddStringToObject(options, "stale_policy", k_policies[p->stale_policy < 3 ? p->stale_policy : 0]);
     cJSON_AddBoolToObject(options, "status_clock", p->status_clock);
+    if (p->status_sync) { /* left out when off: older firmware has no use for it, and the file has no room to spare */
+        cJSON_AddBoolToObject(options, "status_sync", true);
+    }
     cJSON *battery = cJSON_AddArrayToObject(options, "status_battery");
     for (int i = 0; i < 3; i++) {
         if (p->status_battery & (1u << i)) {

@@ -124,6 +124,11 @@ bool app_sync_failed(void)
     return s->last_at != 0 && sync_report_failed(s->last_result); /* not for the house's energy (D36) */
 }
 
+time_t app_sync_ok_at(void)
+{
+    return (time_t)st()->ok_at;
+}
+
 /* Wi-Fi is off: netmgr isn't up yet (a routine wake), or it says so. */
 static bool wifi_off(void)
 {
@@ -274,6 +279,9 @@ static void apply(void *arg)
     save_summary(r, started);
     bool ok = !app_sync_failed();
     sync_history_record(&st()->history, s_started_by, ok, now);
+    if (ok) {
+        st()->ok_at = (uint32_t)started; /* the status bar's time (spec §5.2, D43), as Info ▸ Last sync counts it */
+    }
     ESP_LOGI(TAG, "sync %s%s%s", ok ? "done" : "failed at ", ok ? "" : sync_step_name(st()->last_failed_step),
              ok ? "" : st()->last_detail[st()->last_failed_step]);
     s_active = false; /* the report is applied: the next sync may overwrite it */

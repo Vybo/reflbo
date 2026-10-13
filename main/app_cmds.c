@@ -388,6 +388,7 @@ static int sync_body(int argc, char **argv)
                    sync_running() ? sync_step_name(sync_step()) : "applying its report");
         }
         print_time("last", st->last_at);
+        print_time("last ok", st->ok_at);
         if (st->last_at != 0) {
             static const char *const k_results[] = { "skipped", "ok", "failed", "kept" };
             for (int i = 0; i < SYNC_STEP_COUNT; i++) {

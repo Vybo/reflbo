@@ -141,6 +141,7 @@ typedef struct {
     int32_t lat_e4, lon_e4; /* the location, for the sun's times */
     ui_sync_mark_t sync;    /* the status bar's sync state (spec §5.2) */
     ui_wifi_mark_t wifi;
+    time_t sync_ok_at;      /* the last sync that succeeded (UTC); 0 = none since the cold boot (D43) */
     const ui_radar_t *radar; /* M6: the radars' map, frames and settings; NULL for none */
     const ui_solar_t *solar; /* M6d: the PV forecast and the house's energy; NULL for none */
 } ui_context_t;

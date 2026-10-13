@@ -1461,6 +1461,11 @@ function renderPresets(ed) {
     o.seconds ? h('p', { class: 'bad small', text: 'Seconds wake the device every second: the battery lasts far less.' }) : null,
     check('invert', 'White on black'), field('Old or missing data', stale),
     h('label', {}, 'Status bar'), check('status_clock', 'A small clock'),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!o.status_sync, onchange: (ev) => {
+      if (ev.target.checked) o.status_sync = true;
+      else delete o.status_sync; /* the device writes it only when on (spec §5.4) */
+      changed(ed, false);
+    } }), 'Last sync time'),
     part('percent', 'Battery level'), part('voltage', 'Battery voltage'), part('days', 'Days of battery left'),
     actions(
       button('Export', () => download(new Blob([JSON.stringify({ reflbo: 'preset', version: 1, preset: p }, null, 2)],

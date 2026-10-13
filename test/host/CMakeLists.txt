@@ -275,6 +275,8 @@ reflbo_host_test(test_ui_widget_fit ui)
 target_include_directories(test_ui_widget_fit PRIVATE ${REPO_ROOT}/components/ui) # ui_widget_draw(), fresh and stale
 reflbo_host_test(test_ui_titles ui)
 target_include_directories(test_ui_titles PRIVATE ${REPO_ROOT}/components/ui) # ui_widget_labelled() (D42)
+reflbo_host_test(test_ui_status_sync ui)
+target_include_directories(test_ui_status_sync PRIVATE ${REPO_ROOT}/components/ui) # ui_sync_time_text() (D43)
 reflbo_host_test(test_ui_menu ui)
 reflbo_host_test(test_ui_config ui)
 reflbo_host_test(test_ui_catalog ui cjson)

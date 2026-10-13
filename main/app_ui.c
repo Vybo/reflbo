@@ -216,7 +216,8 @@ void app_ui_context(ui_context_t *ctx)
                            .lat_e4 = s.settings.lat_e4, .lon_e4 = s.settings.lon_e4,
                            .sync = app_sync_running()  ? UI_SYNC_RUNNING
                                    : app_sync_failed() ? UI_SYNC_FAILED
-                                                       : UI_SYNC_IDLE };
+                                                       : UI_SYNC_IDLE,
+                           .sync_ok_at = app_sync_ok_at() };
     if (app_sync_holds_wifi() && !app_config_active()) { /* spec §5.2: sync mode `always` */
         netmgr_status_t ns;
         netmgr_status(&ns);

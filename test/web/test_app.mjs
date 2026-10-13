@@ -1064,6 +1064,20 @@ const inputsLabelled = (root, label) => below(root).flatMap((el) => el.children
   .filter(Boolean));
 const checkNamed = (root, name) => below(root).find((e) => e.tag === 'label' && text(e) === name).children[0];
 
+test('the status bar\'s last sync time is saved while ticked and left out when not (D43)', async () => {
+  const saved = [];
+  const { ctx, main } = await load(presetDevice(saved));
+  await ctx.presetsPage();
+  await change(checkNamed(main, 'Last sync time'), true);
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.deepEqual(saved.at(-1).presets.filter((p) => p.options && p.options.status_sync === true).length, 1);
+  await change(checkNamed(main, 'Last sync time'), false);
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.ok(saved.at(-1).presets.every((p) => !p.options || !('status_sync' in p.options)), JSON.stringify(saved.at(-1)));
+});
+
 test('a cell\'s title and its force are saved with it, and gone when cleared', async () => {
   const saved = [];
   const { ctx, main } = await load(splitDevice(saved, { field: 'env.temp' }));

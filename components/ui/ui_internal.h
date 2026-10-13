@@ -55,6 +55,11 @@ static inline const char *ui_label(const ui_value_t *v)
     return v->label;
 }
 void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, bool any_stale);
+/* The last good sync's time for the status bar (spec §5.2, D43): today "14:05", earlier in the week "Mon 14:05",
+ * else (a week or more, or a later day) the language's short date. `brief` drops an earlier day's time ("Mon"). */
+void ui_sync_time_text(const ui_context_t *ctx, time_t at, bool brief, char *out, size_t size);
+/* The longest of those forms that fits `room` px in `font`; false and "" when none does. */
+bool ui_sync_time_fit(const ui_context_t *ctx, time_t at, const gfx_font_t *font, int room, char *out, size_t size);
 /* Splits text that is wider than max_w into two lines at the last space that lets the first
  * line fit; each line is then cut with an ellipsis if it is still too wide. line2 is empty when
  * the text fits on one line. */

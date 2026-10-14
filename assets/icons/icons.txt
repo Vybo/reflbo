@@ -13,6 +13,7 @@ cloud          cloud                 16 24 48
 web            language              16
 sync           sync                  16
 sync_failed    cloud_off             16
+synced         cloud_done            16
 wifi           wifi                  16
 wifi_off       wifi_off              16
 air            air                   16 24 48

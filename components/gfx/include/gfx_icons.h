@@ -34,6 +34,7 @@ extern const gfx_bitmap_t gfx_icon_cloud_48;
 extern const gfx_bitmap_t gfx_icon_web_16;
 extern const gfx_bitmap_t gfx_icon_sync_16;
 extern const gfx_bitmap_t gfx_icon_sync_failed_16;
+extern const gfx_bitmap_t gfx_icon_synced_16;
 extern const gfx_bitmap_t gfx_icon_wifi_16;
 extern const gfx_bitmap_t gfx_icon_wifi_off_16;
 extern const gfx_bitmap_t gfx_icon_air_16;

@@ -6,6 +6,7 @@
 #include "dashboard_fixtures.h"
 #include "gfx.h"
 #include "gfx_fonts.h"
+#include "gfx_icons.h"
 #include "ui_internal.h"
 #include "unity.h"
 
@@ -165,6 +166,47 @@ static void test_status_sync_without_the_clock_fits_beside_three_marks(void)
     TEST_ASSERT_GREATER_THAN_INT(gfx_text_width(&gfx_font_sans_12, "20:0"), hi - lo + 1); /* all of "20:03" */
 }
 
+/* `b` gains what the option should add to it: the synced mark at `left` if `mark`, then the time. */
+static void add_expected(gfx_fb_t *b, const ui_context_t *ctx, time_t ok_at, int left, int right, bool mark)
+{
+    if (mark) {
+        gfx_bitmap(b, left, 2, &gfx_icon_synced_16, GFX_BLACK);
+        left += 20;
+    }
+    TEST_ASSERT_TRUE(ui_sync_time_fit(ctx, ok_at, &gfx_font_sans_12, right - 4 - left, s_text, sizeof(s_text)));
+    gfx_text_in_rect(b, &gfx_font_sans_12, (gfx_rect_t){ (int16_t)left, 0, (int16_t)(right - left), UI_STATUS_H },
+                     GFX_ALIGN_LEFT, s_text, GFX_BLACK);
+}
+
+static void assert_same(const gfx_fb_t *a, const gfx_fb_t *b)
+{
+    int lo, hi;
+    diff_columns(a, b, &lo, &hi);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-1, lo, "the frame differs from the mark and the time drawn alone");
+}
+
+/* With no mark before it, a lone time could pass for the clock: the synced mark goes first. */
+static void test_status_sync_alone_gets_the_synced_mark(void)
+{
+    gfx_fb_t a, b;
+    ui_context_t ctx = context();
+    render("home", true, FIX_NOW - 45 * 60, true, s_a, &a);
+    render("home", false, FIX_NOW - 45 * 60, true, s_b, &b);
+    add_expected(&b, &ctx, FIX_NOW - 45 * 60, 4, 120, true);
+    assert_same(&a, &b);
+}
+
+/* After other marks the time needs none of its own. */
+static void test_status_sync_after_marks_has_no_synced_mark(void)
+{
+    gfx_fb_t a, b;
+    ui_context_t ctx = context();
+    render("home_always_rejoining", true, WED_1405, true, s_a, &a);
+    render("home_always_rejoining", false, WED_1405, true, s_b, &b);
+    add_expected(&b, &ctx, WED_1405, 4 + 3 * 20, 120, false);
+    assert_same(&a, &b);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -176,5 +218,7 @@ int main(void)
     RUN_TEST(test_status_sync_off_unknown_or_unset_clock_draws_nothing_new);
     RUN_TEST(test_status_sync_goes_after_the_marks_and_before_the_clock);
     RUN_TEST(test_status_sync_without_the_clock_fits_beside_three_marks);
+    RUN_TEST(test_status_sync_alone_gets_the_synced_mark);
+    RUN_TEST(test_status_sync_after_marks_has_no_synced_mark);
     return UNITY_END();
 }

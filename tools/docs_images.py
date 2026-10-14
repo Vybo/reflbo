@@ -59,7 +59,7 @@ GRIDS = {"hero": (2, ["dash_home", "dash_weather_now", "dash_radar", "dash_fligh
 STATUS_ROWS = 22
 STRIPS = {"status-bars": ["dash_home_battery_details", "dash_home_syncing", "dash_home_sync_failed",
                           "dash_home_always", "dash_home_always_rejoining", "dash_home_stale_web",
-                          "dash_home_invalid"]}
+                          "dash_home_invalid", "dash_home_sync_time", "dash_home_sync_old"]}
 GAP = 16
 
 

@@ -80,9 +80,9 @@ A dashboard is a layout with a field in each of its slots. Each field draws at t
 
 ### The status bar
 
-The top 20 pixels show the state of the device. On the left: "Set time" while the clock is lost, a stale mark when a value on screen is old, a globe while a phone is logged in to the web page, a sync mark while a sync runs, and a crossed-out cloud after a scheduled sync failed. In sync mode Always on, a Wi-Fi mark shows whether the device is on your network. In the middle a preset can show a small clock. On the right are the battery's level, voltage and days left (the level by default), and a bolt while it charges.
+The top 20 pixels show the state of the device. On the left: "Set time" while the clock is lost, a stale mark when a value on screen is old, a globe while a phone is logged in to the web page, a sync mark while a sync runs, and a crossed-out cloud after a scheduled sync failed. In sync mode Always on, a Wi-Fi mark shows whether the device is on your network. A preset can add the time of the last good sync after these marks (Presets ▸ Last sync time): the time for today, the weekday and time for the past week, the date before that; with no mark before it, a cloud with a check goes first. In the middle a preset can show a small clock. On the right are the battery's level, voltage and days left (the level by default), and a bolt while it charges.
 
-<p><img src="images/panel/status-bars.png" width="600" alt="Seven status bars: a small clock with 87 %, 3.92 V and 8.5 days left; a sync running; a failed sync; on the network in sync mode Always on; a phone logged in, a failed sync and the network lost; stale values and a phone logged in; Set time with no battery reading yet"></p>
+<p><img src="images/panel/status-bars.png" width="600" alt="Nine status bars: a small clock with 87 %, 3.92 V and 8.5 days left; a sync running; a failed sync; on the network in sync mode Always on; a phone logged in, a failed sync and the network lost; stale values and a phone logged in; Set time with no battery reading yet; a cloud with a check and 20:03, the last good sync; a failed sync, then Wed 14:05 and the small clock"></p>
 
 ### Layouts
 

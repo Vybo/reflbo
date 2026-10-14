@@ -225,6 +225,16 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         ctx->wifi = UI_WIFI_REJOINING;
         ctx->sync = UI_SYNC_FAILED;
         ctx->web_session = true;
+    } else if (strcmp(name, "home_sync_time") == 0) { /* D43: today's good sync, after no mark */
+        *preset = fixture_preset("home");
+        preset->status_sync = true;
+        ctx->sync_ok_at = FIX_NOW - 45 * 60; /* 20:03 */
+    } else if (strcmp(name, "home_sync_old") == 0) { /* D43: failing since Wednesday, the clock in the middle */
+        *preset = fixture_preset("home");
+        preset->status_sync = true;
+        preset->status_clock = true;
+        ctx->sync = UI_SYNC_FAILED;
+        ctx->sync_ok_at = FIX_NOW - 2 * 86400 - 6 * 3600 - 43 * 60; /* Wednesday 14:05 */
     } else if (strcmp(name, "weather_rain") == 0) { /* M6 (D27): rain in the next 2 h for the hours */
         *preset = fixture_preset("weather");
         preset->slots[2] = UI_FIELD_WX_RAIN2H;
@@ -491,4 +501,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "weather_solar", "focus_solar", "solar", "solar_actual",
                                                     "solar_cs", "solar_none", "energy", "energy_battery",
                                                     "energy_night_cs", "energy_none", "energy_low",
-                                                    "grid_solar_low", "solar_evening", "split_titles" };
+                                                    "grid_solar_low", "solar_evening", "split_titles",
+                                                    "home_sync_time", "home_sync_old" };

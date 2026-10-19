@@ -277,6 +277,7 @@ target_compile_definitions(test_energy PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOUR
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
 reflbo_host_test(test_ui_pc ui pcstats_logic)
+reflbo_host_test(test_ui_history ui)
 reflbo_host_test(test_ui_split ui)
 reflbo_host_test(test_ui_schedule ui)
 reflbo_host_test(test_ui_window ui astro)

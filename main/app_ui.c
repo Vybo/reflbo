@@ -240,6 +240,9 @@ void app_ui_context(ui_context_t *ctx)
     ctx->radar = app_radar_ui(); /* M6 */
     ctx->solar = app_solar_ui(); /* M6d */
     ctx->pc_ids = s_presets.pc_ids; /* M7: the PC readings the presets name */
+    ctx->pc = app_pc_ui();
+    ctx->history = app_pc_history();
+    ctx->now_ms = (uint32_t)app_uptime_ms();
 }
 
 void app_ui_render(void)
@@ -458,6 +461,9 @@ void app_ui_sample(time_t now)
             ESP_LOGI(TAG, "battery recovered: %d mV", bat.smoothed_mv);
         }
         s.critical = critical;
+        if (critical) {
+            app_pc_end("critical battery"); /* spec §12a.4 */
+        }
         uint16_t curve[BATTERY_CURVE_POINTS];
         if (sensors_learn_take_curve(curve)) { /* D21: a full discharge reached its end */
             memcpy(s.settings.bat_learned_mv, curve, sizeof(curve));
@@ -473,11 +479,17 @@ void app_ui_sample(time_t now)
         ESP_LOGW(TAG, "battery: %s", esp_err_to_name(err));
     }
     ds_take_changes(&s.ds); /* every sample is followed by a render anyway */
+    app_pc_feed(true);      /* M7: the indoor values' charts, at each sample */
 }
 
 esp_err_t app_ui_save_presets(void)
 {
+    uint8_t shown = s_presets.active; /* a PC session's own preset isn't saved: the one before it is (spec §12a.4) */
+    const char *before = app_pc_saved_preset();
+    int i = before != NULL ? ui_presets_find(&s_presets, before) : -1;
+    s_presets.active = i >= 0 ? (uint8_t)i : shown;
     size_t n = ui_presets_to_json(&s_presets, s_file, sizeof(s_file));
+    s_presets.active = shown;
     if (n == 0) {
         ESP_LOGE(TAG, "presets.json does not fit %u bytes", (unsigned)sizeof(s_file));
         return ESP_ERR_INVALID_SIZE;
@@ -514,7 +526,10 @@ esp_err_t app_ui_save_settings(void)
         }
     }
     EXT_RAM_BSS_ATTR static char out[sizeof(s_settings_base)];
-    size_t n = settings_to_json(&s.settings, s_settings_base[0] ? s_settings_base : NULL, out, sizeof(out));
+    static settings_t saved; /* a PC session's `always` isn't saved: the mode before it is (spec §12a.4) */
+    saved = s.settings;
+    saved.sync_mode = app_pc_saved_mode(saved.sync_mode);
+    size_t n = settings_to_json(&saved, s_settings_base[0] ? s_settings_base : NULL, out, sizeof(out));
     if (n == 0) {
         ESP_LOGE(TAG, "settings.json does not fit %u bytes", (unsigned)sizeof(out));
         return ESP_ERR_INVALID_SIZE;
@@ -557,8 +572,20 @@ void app_ui_toggle_cycle(void)
     app_ui_set_cycle(!s_presets.cycle_enabled);
 }
 
+void app_ui_begin_night(time_t until)
+{
+    struct tm local;
+    localtime_r(&until, &local);
+    char text[48];
+    snprintf(text, sizeof(text), "%s %02d:%02d", lang_str(lang_get(s.settings.language), LS_T_NIGHT_UNTIL),
+             local.tm_hour, local.tm_min);
+    app_ui_start_night(until);
+    app_ui_toast(text);
+}
+
 void app_ui_start_night(time_t until)
 {
+    app_pc_end("night"); /* the console's night: what the session changed comes back first */
     s.night_until = until - until % 60;
     ESP_LOGI(TAG, "night until %lld", (long long)s.night_until);
 }
@@ -596,13 +623,13 @@ static void run_schedule(time_t now)
     int n = ui_schedule_step(&s_presets.schedule, &s.sched_checked, now, max_gap, order);
     for (int i = 0; i < n; i++) {
         const ui_schedule_entry_t *e = &s_presets.schedule.entries[order[i]];
+        if (e->action == UI_SCHED_NIGHT && app_pc_session()) {
+            ESP_LOGI(TAG, "schedule: the night waits for the PC session"); /* spec §12a.4 */
+            app_pc_defer_night(sched_next_weekly(now, e->until_min, 0x7F));
+            continue;
+        }
         if (e->action == UI_SCHED_NIGHT) {
-            char until[8], text[48];
-            time_t end = sched_next_weekly(now, e->until_min, 0x7F);
-            snprintf(until, sizeof(until), "%02d:%02d", e->until_min / 60, e->until_min % 60);
-            snprintf(text, sizeof(text), "%s %s", lang_str(lang_get(s.settings.language), LS_T_NIGHT_UNTIL), until);
-            app_ui_start_night(end);
-            app_ui_toast(text);
+            app_ui_begin_night(sched_next_weekly(now, e->until_min, 0x7F));
             break;
         }
         ESP_LOGI(TAG, "schedule: preset %s", s_presets.presets[e->preset].id);
@@ -631,6 +658,9 @@ void app_ui_tick(bool force)
     app_sync_tick();
     if (s_presets.cycle_enabled && (s.cycle_at == 0 || s.cycle_at - now > s_presets.cycle_interval_s)) {
         s.cycle_at = now + s_presets.cycle_interval_s; /* the first tick, or the clock moved back */
+    }
+    if (s_presets.cycle_enabled && now >= s.cycle_at && app_pc_pauses_cycle()) {
+        s.cycle_at = now + s_presets.cycle_interval_s; /* spec §12a.4: it waits while the session's preset shows */
     }
     if (s_presets.cycle_enabled && now >= s.cycle_at) {
         time_t at = timekeeping_valid() ? now : 0; /* without a valid clock every window is open (spec §5.4) */
@@ -725,6 +755,7 @@ esp_err_t app_ui_replace_presets(const ui_presets_t *presets)
     s.cycle_at = 0;              /* the next tick starts the cycle interval */
     s.sched_checked = time(NULL); /* entries don't run late for a new schedule */
     esp_err_t err = app_ui_save_presets();
+    app_pc_presets_changed(); /* M7: their charts' series */
     app_ui_render();
     return err;
 }

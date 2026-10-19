@@ -231,6 +231,10 @@ typedef enum {
     LS_PC,           /* a PC reading's label until its catalogue names it (M7, D44) */
     LS_PC_ASLEEP,    /* the PC layout without a session */
     LS_PC_SINCE,     /* "since %s": when the last session ended */
+    LS_M_PC_STATS,   /* Menu ▸ Sync ▸ PC (spec §12a.1) */
+    LS_M_PC_SESSION,
+    LS_PC_NONE,      /* its session's state: none yet, waiting for a sync */
+    LS_PC_OFF,       /* PC stats off */
     LS_COUNT,
 } lang_str_t;
 

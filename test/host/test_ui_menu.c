@@ -299,9 +299,10 @@ static void test_the_sync_section_offers_its_mode_and_quiet_hours(void)
     s_model.hidden[UI_MI_SYNC_INTERVAL] = true; /* the app hides it outside interval mode */
     open_item(UI_MI_SYNC);
     ui_menu_item_t items[UI_MI_COUNT];
-    const ui_menu_item_t expected[] = { UI_MI_SYNC_NOW, UI_MI_SYNC_MODE, UI_MI_QUIET_HOURS, UI_MI_SYNC_STEPS };
-    TEST_ASSERT_EQUAL_INT(4, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
-    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 4);
+    const ui_menu_item_t expected[] = { UI_MI_SYNC_NOW, UI_MI_SYNC_MODE, UI_MI_QUIET_HOURS, UI_MI_SYNC_STEPS,
+                                        UI_MI_SYNC_PC };
+    TEST_ASSERT_EQUAL_INT(5, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 5);
     ui_menu_intent_t in = open_item(UI_MI_SYNC_NOW);
     TEST_ASSERT_EQUAL(UI_MENU_ACTION, in.kind); /* no question: a sync loses nothing */
     TEST_ASSERT_EQUAL_INT(UI_MI_SYNC_NOW, in.item);
@@ -309,6 +310,29 @@ static void test_the_sync_section_offers_its_mode_and_quiet_hours(void)
     in = open_item(UI_MI_QUIET_HOURS);
     TEST_ASSERT_EQUAL(UI_MENU_SET, in.kind);
     TEST_ASSERT_EQUAL_INT(1, in.value);
+}
+
+/* Sync ▸ PC (M7, D44, spec §12a.1): PC stats on or off, and the session's state. */
+static void test_the_pc_section_switches_pc_stats_and_shows_the_session(void)
+{
+    open_item(UI_MI_SYNC);
+    open_item(UI_MI_SYNC_PC);
+    ui_menu_item_t items[UI_MI_COUNT];
+    const ui_menu_item_t expected[] = { UI_MI_PC_STATS, UI_MI_PC_SESSION };
+    TEST_ASSERT_EQUAL_INT(2, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 2);
+    const lang_t *en = lang_get("en"), *cs = lang_get("cs");
+    TEST_ASSERT_EQUAL_STRING("PC stats", ui_menu_label(UI_MI_PC_STATS, en));
+    TEST_ASSERT_EQUAL_STRING("Session", ui_menu_label(UI_MI_PC_SESSION, en));
+    TEST_ASSERT_EQUAL_STRING("Statistiky PC", ui_menu_label(UI_MI_PC_STATS, cs));
+    s_model.value[UI_MI_PC_STATS] = 0;
+    ui_menu_intent_t in = open_item(UI_MI_PC_STATS);
+    TEST_ASSERT_EQUAL(UI_MENU_SET, in.kind);
+    TEST_ASSERT_EQUAL_INT(1, in.value);
+    s_model.info[UI_MI_PC_SESSION] = "DESKTOP-PC, 1 s";
+    char text[48];
+    ui_menu_value_text(UI_MI_PC_SESSION, 0, &s_model, en, text, sizeof(text));
+    TEST_ASSERT_EQUAL_STRING("DESKTOP-PC, 1 s", text);
 }
 
 /* Sync ▸ Steps (M6d, D35): a switch for each data step; the time has none, as it always runs (spec §9.3). */
@@ -346,6 +370,7 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_the_sync_section_offers_its_mode_and_quiet_hours);
     RUN_TEST(test_the_sync_steps_switch_on_and_off);
+    RUN_TEST(test_the_pc_section_switches_pc_stats_and_shows_the_session);
     RUN_TEST(test_the_root_lists_the_sections_in_order);
     RUN_TEST(test_next_wraps_select_enters_and_back_returns_to_the_section);
     RUN_TEST(test_back_at_the_root_and_exit_anywhere_close_the_menu);

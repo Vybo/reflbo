@@ -62,6 +62,13 @@ bool ui_resolve_pc(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out
     return true;
 }
 
+void ui_pc_since_text(const ui_context_t *ctx, time_t since, char *out, size_t size)
+{
+    char when[24];
+    ui_sync_time_text(ctx, since, false, when, sizeof(when));
+    ui_fill(lang_str(ctx->lang, LS_PC_SINCE), when, out, size);
+}
+
 void ui_pc_draw_asleep(gfx_fb_t *fb, const ui_context_t *ctx)
 {
     const ui_pc_t *pc = ctx->pc;
@@ -72,9 +79,7 @@ void ui_pc_draw_asleep(gfx_fb_t *fb, const ui_context_t *ctx)
                      lang_str(ctx->lang, LS_PC_ASLEEP), GFX_BLACK);
     char since[32] = "", line[80];
     if (pc != NULL && pc->since != 0 && ctx->time_valid) {
-        char when[24];
-        ui_sync_time_text(ctx, pc->since, false, when, sizeof(when));
-        ui_fill(lang_str(ctx->lang, LS_PC_SINCE), when, since, sizeof(since));
+        ui_pc_since_text(ctx, pc->since, since, sizeof(since));
     }
     const char *name = pc != NULL ? pc->name : "";
     snprintf(line, sizeof(line), "%s%s%s", since, since[0] && name[0] ? " · " : "", name);

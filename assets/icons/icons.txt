@@ -27,6 +27,8 @@ solar          solar_power           16 24 48
 house          house                 16 24 48
 grid           electric_meter        16 24 48
 self_use       energy_savings_leaf   16 24 48
+# The PC's readings (M7, D44): a computer, the thermometer for a temperature.
+pc             computer              16 24 48
 # Weather codes (spec §11), day and night where they differ, and the sun's times (M5); 16 px for XS cells (M6c).
 wx_clear_day        wi:day-sunny                16 24 48
 wx_clear_night      wi:night-clear              16 24 48

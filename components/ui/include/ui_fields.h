@@ -7,6 +7,7 @@
 #include "datastore.h"
 #include "gfx.h"
 #include "lang.h"
+#include "pc_msg.h"
 #include "util_calendar.h"
 
 /*
@@ -87,14 +88,24 @@ typedef enum {
     UI_FIELD_COUNT,
 } ui_field_id_t;
 
+/* The PC's readings (M7, D44): `pc.<id>` fields are UI_FIELD_PC_FIRST + n, n an entry in the presets' own table of
+ * reading ids (ui_presets_t.pc_ids), so a reading keeps its slots whatever the catalogue's order. */
+#define UI_FIELD_PC_FIRST 128
+#define UI_PC_FIELDS PC_READINGS_MAX
+
+static inline bool ui_field_is_pc(ui_field_id_t field)
+{
+    return (int)field >= UI_FIELD_PC_FIRST && (int)field < UI_FIELD_PC_FIRST + UI_PC_FIELDS;
+}
+
 typedef struct {
-    const char *id; /* as in presets.json: "env.temp" */
+    const char *id; /* as in presets.json: "env.temp"; "pc" for every PC reading */
     ui_field_kind_t kind;
     lang_str_t label;
     int ds_field; /* ds_field_t, or -1 for a field computed from the clock */
 } ui_field_info_t;
 
-/* NULL for UI_FIELD_NONE and out-of-range values. */
+/* NULL for UI_FIELD_NONE and out-of-range values; one entry for every PC reading (a number). */
 const ui_field_info_t *ui_field_info(ui_field_id_t field);
 /* UI_FIELD_NONE for an unknown id. */
 ui_field_id_t ui_field_by_name(const char *id);
@@ -125,6 +136,7 @@ typedef struct {
 
 typedef struct ui_radar ui_radar_t; /* ui_radar.h */
 typedef struct ui_solar ui_solar_t; /* ui_solar.h */
+typedef struct ui_pc ui_pc_t;       /* ui_pc.h */
 
 /* Everything the dashboard reads, gathered by the app for one render. */
 typedef struct {
@@ -144,6 +156,8 @@ typedef struct {
     time_t sync_ok_at;      /* the last sync that succeeded (UTC); 0 = none since the cold boot (D43) */
     const ui_radar_t *radar; /* M6: the radars' map, frames and settings; NULL for none */
     const ui_solar_t *solar; /* M6d: the PV forecast and the house's energy; NULL for none */
+    const ui_pc_t *pc;       /* M7: the PC's catalogue and last readings; NULL for none */
+    const char (*pc_ids)[PC_ID_LEN]; /* the rendered presets' PC reading ids (ui_presets_t.pc_ids); NULL: none */
 } ui_context_t;
 
 typedef enum {

@@ -57,8 +57,13 @@ static const ui_field_info_t k_fields[UI_FIELD_COUNT] = {
     [UI_FIELD_EN_FLOW] = { "energy.flow", UI_FK_FLOW, LS_EN_FLOW, -1 },
 };
 
+static const ui_field_info_t k_pc_info = { "pc", UI_FK_NUMBER, LS_PC, -1 }; /* M7: the label is the PC app's */
+
 const ui_field_info_t *ui_field_info(ui_field_id_t field)
 {
+    if (ui_field_is_pc(field)) {
+        return &k_pc_info;
+    }
     if (field <= UI_FIELD_NONE || field >= UI_FIELD_COUNT) {
         return NULL;
     }
@@ -237,7 +242,7 @@ void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out)
     out->label = lang_str(ctx->lang, info->label);
     if (info->ds_field >= 0) {
         resolve_store(ctx, field, out);
-    } else if (!ui_resolve_forecast(ctx, field, out) && !ui_resolve_radar(ctx, field, out) &&
+    } else if (!ui_resolve_pc(ctx, field, out) && !ui_resolve_forecast(ctx, field, out) && !ui_resolve_radar(ctx, field, out) &&
                !ui_resolve_solar(ctx, field, out)) {
         resolve_clock(ctx, field, out);
     }

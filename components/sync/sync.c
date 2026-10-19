@@ -662,6 +662,10 @@ static void sync_task(void *arg)
     esp_err_t err = refresh ? ESP_OK : netmgr_join(JOIN_MAX_MS);
     if (refresh) {
         refresh_task(start);
+    } else if (err == ESP_OK && s_req.kind == SYNC_KIND_PC) { /* the PC page's Test (M7) */
+        s_report.result[SYNC_STEP_WIFI] = SYNC_STEP_OK;
+        s_step = SYNC_STEP_PC;
+        step_pc();
     } else if (err == ESP_OK && s_req.kind == SYNC_KIND_CHECK) { /* the Solar page's Check now */
         s_report.result[SYNC_STEP_WIFI] = SYNC_STEP_OK;
         s_step = SYNC_STEP_SOLAR;
@@ -688,6 +692,9 @@ static void sync_task(void *arg)
         const char *why = err == ESP_ERR_NOT_FOUND ? "no network saved" : err == ESP_ERR_INVALID_STATE ? "Wi-Fi busy"
                                                                                                     : "not joined";
         failed(SYNC_STEP_WIFI, why);
+        if (s_req.kind == SYNC_KIND_PC) {
+            failed(SYNC_STEP_PC, why); /* the PC page shows why its test brought nothing */
+        }
         if (s_req.kind == SYNC_KIND_CHECK) { /* the Solar page shows why its check brought nothing */
             if (s_req.solar.source != SOLAR_OFF) {
                 failed(SYNC_STEP_SOLAR, why);

@@ -224,7 +224,8 @@ document.getElementById('done').onclick = async () => {
 /* ---- pages ---- */
 
 const pages = { status: statusPage, wifi: wifiPage, place: placePage, sync: syncPage, radar: radarPage,
-                solar: solarPage, device: devicePage, presets: presetsPage, firmware: firmwarePage, backup: backupPage };
+                solar: solarPage, pc: pcPage, device: devicePage, presets: presetsPage, firmware: firmwarePage,
+                backup: backupPage };
 
 function route() {
   const name = location.hash.slice(1) || 'status';
@@ -307,7 +308,7 @@ async function statusPage() {
 /* ---- Sync (spec §9.3, D25) ---- */
 
 const SYNC_STEPS = [['wifi', 'Wi-Fi'], ['time', 'Time'], ['weather', 'Weather'], ['air', 'Air quality'],
-                    ['radar', 'Radar'], ['solar', 'Solar forecast'], ['energy', 'House energy']];
+                    ['radar', 'Radar'], ['solar', 'Solar forecast'], ['energy', 'House energy'], ['pc', 'PC']];
 /* The data steps a sync can leave out (D35): the time always runs, as the clock and its trim need it. */
 const STEP_SWITCHES = SYNC_STEPS.slice(2);
 const SYNC_INTERVALS = [15, 30, 60, 120, 180, 360, 720, 1440];
@@ -945,6 +946,163 @@ async function solarPage() {
       '4.0), Solcast (for personal use only, as its terms say). The house\'s readings: SolaX Cloud.' })));
 }
 
+/* ---- PC (spec §10.3, §12a, M7, D44) ---- */
+
+const HWINFO_STATES = { ok: 'running', 'not running': 'not running', 'shm off': 'running, its Shared Memory Support off',
+                        stale: 'not updating', unknown: '—' };
+/* The panel's frame time (ms) at the refresh rate on the Device page: a reading faster than it can't show. */
+const frameMs = (settings) => Math.round(1000 / ((settings.display || {}).lpm_hz || 1));
+const msLabel = (ms) => (ms < 1000 ? `${ms} ms` : `${+(ms / 1000).toFixed(2)} s`);
+
+async function pcPage() {
+  const [s, doc, pc] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/presets'), api('GET', '/api/pc')]);
+  const set = s.pc || {}, keys = set.keys || {};
+  const enabled = h('input', { type: 'checkbox', checked: !!set.enabled });
+  const host = h('input', { type: 'text', value: set.host || '', placeholder: '192.168.1.20 or desktop-pc.local',
+                            autocapitalize: 'off', spellcheck: 'false' });
+  const conn = { port: set.port ?? 47123, interval: set.interval_ms ?? 1000 };
+  const port = numberInput(conn, 'port', 1, 65535, 1);
+  const interval = numberInput(conn, 'interval', 250, 10000, 50);
+  const frame = frameMs(s);
+  const warning = h('p', { class: 'bad small' });
+  const warn = () => {
+    const ms = Number(conn.interval);
+    warning.hidden = !(ms < frame);
+    warning.textContent = `Shorter than the panel's frame time (${msLabel(frame)} at ${(s.display || {}).lpm_hz || 1} Hz, ` +
+      'on the Device page): the values in between don\'t show.';
+  };
+  interval.addEventListener('input', warn);
+  warn();
+  const token = secretInput('Token', !!keys.token, 'From the PC app\'s page: ABCDE-FGHIJ-…, with or without the dashes.');
+  const always = h('input', { type: 'checkbox', checked: set.auto_always !== false });
+  const preset = choose([['', 'None'], ...doc.presets.map((p) => [p.id, p.name])], set.preset ?? 'pc');
+  const note = h('p');
+  const save = card(null, note, actions(button('Save', () => busy(save, note, async () => {
+    const out = { pc: { enabled: enabled.checked, host: host.value.trim(), port: Number(conn.port),
+                        interval_ms: Number(conn.interval), auto_always: always.checked, preset: preset.value } };
+    const t = token.value();
+    if (t !== undefined) out.pc.token = t;
+    await api('PATCH', '/api/settings', out);
+    note.className = 'good';
+    note.textContent = 'Saved.';
+    toast('Saved');
+  }), 'primary')));
+
+  const nowBox = h('div');
+  const showNow = (x) => {
+    const age = x.age_ms ? msLabel(x.age_ms) + ' ago' : '—';
+    nowBox.replaceChildren(facts([
+      ['Session', x.demo ? 'the sample PC (pc demo)' : x.session ? (x.connected ? 'running' : 'running, reconnecting')
+        : x.since ? `none since ${when(x.since)}` : 'none yet'],
+      x.name ? ['PC', x.name] : null,
+      x.session ? ['HWiNFO', HWINFO_STATES[x.hwinfo] || x.hwinfo] : null,
+      x.session ? ['Last message', age] : null,
+      x.session && x.set_always ? ['Sync mode', 'Always on, until the session ends'] : null,
+      x.trouble ? ['Last trouble', x.trouble] : null,
+      x.step && x.step.at ? ['Last sync\'s PC step', `${x.step.result}${x.step.detail ? `: ${x.step.detail}` : ''}`] : null,
+      x.test && x.test.at ? ['Last test', `${when(x.test.at)}: ${x.test.result === 'ok' ? 'found' : 'not found'}` +
+        `${x.test.detail ? ` (${x.test.detail})` : ''}`] : null,
+    ]), ...(x.catalog && x.catalog.length ? [h('h3', { text: `Readings (${x.catalog.length})` }),
+      h('ul', { class: 'plain small' }, x.catalog.map((r) => h('li', {}, h('b', { text: r.label || r.id }),
+        ` pc.${r.id}${r.unit ? ` · ${r.unit}` : ''}`)))]
+      : [h('p', { class: 'muted small', text: 'No readings yet: they come with the first session, and stay for the ' +
+        'Presets page while the PC is off.' })]));
+  };
+  showNow(pc);
+  const testNote = h('p');
+  const nowCard = card('Now', nowBox, testNote, actions(button('Test', () => busy(nowCard, testNote, async () => {
+    const before = (pc.test || {}).at || 0;
+    await api('POST', '/api/pc/test');
+    testNote.className = 'muted';
+    testNote.textContent = 'Asking the PC…';
+    for (let i = 0; i < 20; i++) { /* joining Wi-Fi first can take some seconds */
+      await sleep(1000);
+      const now = await api('GET', '/api/pc');
+      if ((now.test || {}).at && now.test.at !== before) {
+        showNow(now);
+        const ok = now.test.result === 'ok';
+        testNote.className = ok ? 'good' : 'bad';
+        testNote.textContent = ok ? `Found ${now.name || 'the PC'}.` : sentence(`Not found: ${now.test.detail || 'no answer'}`);
+        return;
+      }
+    }
+    testNote.textContent = 'No answer yet.';
+  }))));
+
+  main.replaceChildren(h('h1', { text: 'PC' }),
+    card('PC stats', h('label', { class: 'check' }, enabled, 'On'),
+      h('p', { class: 'muted small', text: 'The PC runs reflbo-stats, which reads HWiNFO. A sync looks for it; while it ' +
+        'answers, its readings come live.' }),
+      field('Address', host), field('Port', port), token.el,
+      field('A reading every (ms)', interval, '250 ms to 10 s.'), warning),
+    card('When the PC is on', h('label', { class: 'check' }, always, 'Switch to Always on'),
+      h('p', { class: 'muted small', text: 'Without it, a session starts only in sync mode Always on.' }),
+      field('Show preset', preset, 'When the PC goes quiet, what you haven\'t changed comes back.')),
+    save, nowCard);
+}
+
+/* ---- Show as (spec §5.3, §10.3, M7, D44) ---- */
+
+const SHOW_AS = [['', 'Value'], ['chart', 'History chart'], ['bar', 'Bar'], ['ring', 'Ring'], ['gauge', 'Gauge']];
+const SPANS = [10, 30, 60, 300, 900, 1800, 3600, 7200, 21600, 43200, 86400];
+const spanLabel = (s) => (s % 3600 === 0 ? `${s / 3600} h` : s >= 120 && s % 60 === 0 ? `${s / 60} min` : `${s} s`);
+/* Whether a visual has room in w×h, by the rules GET /api/layouts publishes. */
+function showFits(as, w, hgt) {
+  const v = (catalogue.visuals || {})[as];
+  return !!v && w >= v.min_w && hgt >= v.min_h;
+}
+/* A slot's or a cell's visual, for a field that is a number: the visuals that fit, a minimum and maximum (empty for
+ * the field's own, auto for a chart's), a chart's span and its numbers. `set` gets the new one, or undefined. */
+/* The field a slot names: its catalogue's entry, or a PC reading the PC no longer sends, still a number. */
+const fieldNamed = (ed, id) => ed.fields.find((f) => f.id === id)
+  || (id && id.startsWith('pc.') ? { id, label: id, kind: 'number', numeric: true } : undefined);
+
+function showEditor(f, w, hgt, vis, set) {
+  if (!f || !f.numeric) return null;
+  let cur = vis; /* the controls below change it one after another, without a redraw between */
+  const update = (next, rerender) => {
+    cur = next;
+    set(next, rerender);
+  };
+  const offered = SHOW_AS.filter(([as]) => !as || showFits(as, w, hgt));
+  const as = vis && offered.some(([a]) => a === vis.as) ? vis.as : '';
+  const kind = choose(offered, as);
+  kind.addEventListener('change', (ev) => {
+    const a = ev.target.value;
+    update(!a ? undefined : a === 'chart' ? { as: a, span_s: 60, numbers: true } : { as: a }, true);
+  });
+  if (!as) return h('div', { class: 'show' }, field('Show as', kind));
+  const ownRange = f.min !== undefined && f.max !== undefined;
+  const bound = (key, label) => h('div', {}, field(label, h('input', {
+    type: 'text', inputmode: 'decimal', value: cur[key] === undefined ? '' : String(cur[key]),
+    placeholder: ownRange ? String(f[key]) : as === 'chart' ? 'auto' : '',
+    onchange: (ev) => {
+      const t = ev.target.value.trim().replace(',', '.'), next = { ...cur };
+      if (t === '') delete next[key];
+      else if (as === 'chart' && t.toLowerCase() === 'auto') next[key] = 'auto';
+      else if (Number.isFinite(Number(t))) next[key] = Number(t);
+      else {
+        ev.target.value = cur[key] === undefined ? '' : String(cur[key]);
+        return toast(as === 'chart' ? 'A number, or auto' : 'A number');
+      }
+      update(next, false);
+    } })));
+  const parts = [field('Show as', kind), h('div', { class: 'row' }, bound('min', 'Minimum'), bound('max', 'Maximum'))];
+  if (!ownRange && as !== 'chart') {
+    parts.push(h('p', { class: 'muted small', text: 'This field has no range of its own: left empty, it runs from 0 to ' +
+      'a round number past the value.' }));
+  }
+  if (as === 'chart') {
+    const spans = SPANS.includes(vis.span_s ?? 60) ? SPANS : [...SPANS, vis.span_s].sort((a, b) => a - b);
+    const span = choose(spans.map((x) => [String(x), spanLabel(x)]), String(vis.span_s ?? 60));
+    span.addEventListener('change', (ev) => update({ ...cur, span_s: Number(ev.target.value) }, false));
+    parts.push(field('Span', span, 'Up to 1 h from each value; longer from each minute\'s low, mean and high.'),
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: vis.numbers !== false,
+        onchange: (ev) => update({ ...cur, numbers: ev.target.checked }, false) }), 'Numbers over the chart'));
+  }
+  return h('div', { class: 'show' }, parts);
+}
+
 const LANGUAGES = [['en', 'English'], ['cs', 'Čeština']];
 const SENSOR_MIN = [1, 2, 5, 10, 15, 30];
 const RATES = [0.25, 0.5, 1, 2, 4, 8];
@@ -1030,8 +1188,8 @@ const NO_SLOTS = { radar: 'This layout draws the weather radar: its centre and z
                    energy: 'This layout draws the house\'s energy now: its source is on the Solar page.' };
 /* The sync step a field's data come from (spec §9.3, D35): a field whose step is off ages out. */
 const fieldStep = (id) => (/^(wx\.)/.test(id) ? 'weather' : /^(aq|pollen)\./.test(id) ? 'air' : id === 'rain.map' ? 'radar'
-  : id.startsWith('pv.') ? 'solar' : id.startsWith('energy.') ? 'energy' : null);
-const FIELD_GROUPS = [['solar', 'Solar forecast'], ['energy', 'House energy']];
+  : id.startsWith('pv.') ? 'solar' : id.startsWith('energy.') ? 'energy' : id.startsWith('pc.') ? 'pc' : null);
+const FIELD_GROUPS = [['solar', 'Solar forecast'], ['energy', 'House energy'], ['pc', 'PC']];
 
 /* A slot's or a cell's choices: the fields `fits` allows, the Solar and Energy ones in their groups, each marked
  * when its sync step is off. */
@@ -1039,7 +1197,10 @@ function fieldOptions(ed, fits, selected) {
   const option = (f) => h('option', { value: f.id, selected: selected === f.id },
     `${f.label} — ${f.value || 'no data yet'}${ed.stepsOff.has(fieldStep(f.id)) ? ' (its sync step is off)' : ''}`);
   const grouped = new Set(FIELD_GROUPS.map(([k]) => k));
-  return [h('option', { value: '' }, '(empty)'), fits.filter((f) => !grouped.has(fieldStep(f.id))).map(option),
+  /* a PC reading the PC no longer sends (spec §12a.3): it stays, named, until the slot changes */
+  const gone = selected && selected.startsWith('pc.') && !fits.some((f) => f.id === selected)
+    ? h('option', { value: selected, selected: true }, `${selected} (not sent now)`) : null;
+  return [h('option', { value: '' }, '(empty)'), gone, fits.filter((f) => !grouped.has(fieldStep(f.id))).map(option),
           FIELD_GROUPS.map(([k, label]) => {
             const list = fits.filter((f) => fieldStep(f.id) === k);
             return list.length ? h('optgroup', { label }, list.map(option)) : null;
@@ -1218,8 +1379,17 @@ const fieldPart = (cell) => {
   const out = { field: cell.field };
   if (cell.title) out.title = cell.title;
   if (cell.force_title) out.force_title = true;
+  if (cell.show) out.show = cell.show; /* M7: its visual, where it still fits */
   return out;
 };
+/* A cell's visual that has no room in r any more goes; true if one went. */
+function dropShow(cell, r) {
+  if (cell.show && !showFits(cell.show.as, r.w, r.h)) {
+    delete cell.show;
+    return true;
+  }
+  return false;
+}
 
 /* The preview's tags: each cell's number where a slot's name goes. */
 function slotsOf(p) {
@@ -1237,16 +1407,21 @@ function splitEditor(ed, p) {
       number++;
       const fits = ed.fields.filter((f) => splitSize(r.w, r.h, f.kind));
       const select = h('select', { onchange: (ev) => {
+        const was = fieldOf(node.field);
         if (ev.target.value) node.field = ev.target.value;
         else delete node.field;
-        changed(ed, false);
+        const now = fieldOf(node.field);
+        if (!now || !now.numeric) delete node.show; /* a visual shows a number (spec §5.4) */
+        changed(ed, !!(was && was.numeric) !== !!(now && now.numeric));
       } }, fieldOptions(ed, fits, node.field));
       const splitButton = (dir, text) => {
         const half = { split: dir, ratio: '1/2', line: true, a: {}, b: {} }; /* the field goes to the first part */
         const b = button(text, () => {
           const f = fieldOf(node.field), [a] = splitParts(half, r);
-          if (f && splitSize(a.w, a.h, f.kind)) half.a = fieldPart(node);
-          else if (f) toast(`No room for ${f.label}`);
+          if (f && splitSize(a.w, a.h, f.kind)) {
+            half.a = fieldPart(node);
+            if (dropShow(half.a, a)) toast(`No room for its ${node.show.as}`);
+          } else if (f) toast(`No room for ${f.label}`);
           set(half);
           changed(ed, true);
         });
@@ -1267,8 +1442,14 @@ function splitEditor(ed, p) {
           else delete node.force_title;
           changed(ed, false);
         } }), 'Always show the title') : null;
+      const show = showEditor(f || fieldNamed(ed, node.field), r.w, r.h, node.show, (v, rerender) => {
+        if (v) node.show = v;
+        else delete node.show;
+        changed(ed, rerender);
+      });
       return h('div', { class: 'cell' }, h('label', { class: 'cell-name', text: name }),
-        select, title, force, actions(splitButton('rows', 'Split into rows'), splitButton('columns', 'Split into columns')));
+        select, title, force, show,
+        actions(splitButton('rows', 'Split into rows'), splitButton('columns', 'Split into columns')));
     }
     const [ra, rb] = splitParts(node, r);
     const ratio = h('select', { onchange: (ev) => {
@@ -1277,10 +1458,13 @@ function splitEditor(ed, p) {
       for (const { node: cell, r: cr } of splitCells(p.split, splitArea())) {
         const f = fieldOf(cell.field);
         if (f && !splitSize(cr.w, cr.h, f.kind)) {
-          delete cell.field; /* its title and force with it */
+          delete cell.field; /* its title, force and visual with it */
           delete cell.title;
           delete cell.force_title;
+          delete cell.show;
           dropped.push(f.label);
+        } else if (f && cell.show && dropShow(cell, cr)) {
+          dropped.push(`${f.label}'s visual`);
         }
       }
       if (dropped.length) toast(`No room for ${dropped.join(', ')}`);
@@ -1360,8 +1544,9 @@ function renderPresets(ed) {
     const old = p.slots || {};
     const first = p.layout === 'split' ? firstField(p.split)
                                        : layoutOf(p.layout).slots.map((s) => old[s.id]).find(Boolean);
-    const oldTitles = p.titles || {};
+    const oldTitles = p.titles || {}, oldVisuals = p.visuals || {};
     delete p.titles;
+    delete p.visuals;
     p.layout = ev.target.value;
     if (p.layout === 'split') { /* spec §10.3: one cell, holding the first field */
       const f = ed.fields.find((x) => x.id === first), all = splitArea();
@@ -1371,24 +1556,33 @@ function renderPresets(ed) {
     }
     delete p.split;
     p.slots = {};
-    const titles = {};
-    for (const slot of layoutOf(p.layout).slots) { /* keep what still fits, with its title */
+    const titles = {}, visuals = {};
+    for (const slot of layoutOf(p.layout).slots) { /* keep what still fits, with its title and visual */
       const f = old[slot.id] && ed.fields.find((x) => x.id === old[slot.id]);
       if (f && slot.kinds.includes(f.kind)) {
         p.slots[slot.id] = f.id;
         if (oldTitles[slot.id]) titles[slot.id] = oldTitles[slot.id];
+        const v = oldVisuals[slot.id];
+        if (v && showFits(v.as, slot.w, slot.h)) visuals[slot.id] = v;
       }
     }
     if (Object.keys(titles).length) p.titles = titles;
+    if (Object.keys(visuals).length) p.visuals = visuals;
     changed(ed, true);
   } }, catalogue.layouts.map((l) => h('option', { value: l.id, selected: l.id === p.layout }, LAYOUT_NAMES[l.id] || l.id)));
   const slots = p.layout === 'split' ? splitEditor(ed, p)
     : h('div', { class: 'slots' }, layoutOf(p.layout).slots.map((slot) => h('div', { class: 'slot' },
     h('label', { text: `${slot.id} · ${slot.size}` }),
     h('select', { onchange: (ev) => {
+      const fieldOf = (id) => ed.fields.find((f) => f.id === id), was = fieldOf(p.slots[slot.id]);
       if (ev.target.value) p.slots[slot.id] = ev.target.value;
       else delete p.slots[slot.id];
-      changed(ed, false);
+      const now = fieldOf(p.slots[slot.id]);
+      if ((!now || !now.numeric) && p.visuals && p.visuals[slot.id]) { /* a visual shows a number (spec §5.4) */
+        delete p.visuals[slot.id];
+        if (!Object.keys(p.visuals).length) delete p.visuals;
+      }
+      changed(ed, !!(was && was.numeric) !== !!(now && now.numeric));
     } }, fieldOptions(ed, ed.fields.filter((f) => slot.kinds.includes(f.kind)), p.slots[slot.id])),
     titleInput((p.titles || {})[slot.id], ed.fields.find((f) => f.id === p.slots[slot.id]), (v) => {
       const titles = { ...p.titles };
@@ -1397,7 +1591,16 @@ function renderPresets(ed) {
       if (Object.keys(titles).length) p.titles = titles;
       else delete p.titles;
       changed(ed, false);
-    }))));
+    }),
+    showEditor(fieldNamed(ed, p.slots[slot.id]), slot.w, slot.h, (p.visuals || {})[slot.id],
+      (v, rerender) => {
+        const visuals = { ...p.visuals };
+        if (v) visuals[slot.id] = v;
+        else delete visuals[slot.id];
+        if (Object.keys(visuals).length) p.visuals = visuals;
+        else delete p.visuals;
+        changed(ed, rerender);
+      }))));
 
   const o = p.options;
   const check = (key, text) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!o[key],

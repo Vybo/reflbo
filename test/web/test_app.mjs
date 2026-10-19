@@ -1253,3 +1253,254 @@ test('a bare preset without slots or a tree imports as an empty one, and the pag
   assert.deepEqual([split.name, split.split, split.slots], ['Bare split', {}, undefined]);
   assert.deepEqual([classic.name, classic.slots, classic.split], ['Bare classic', {}, undefined]);
 });
+
+/* ---- M7 (D44): the PC page, Show as, the PC's readings in the editor ---- */
+
+const PC_SETTINGS = { schema: 1, display: { update_min: 1, lpm_hz: 1 },
+                      pc: { enabled: false, host: '', port: 47123, interval_ms: 1000, auto_always: true, preset: 'pc',
+                            keys: { token: false } } };
+const PC_PRESETS = { schema: 1, active: 'home', presets: [preset('home', 'Home', true), { ...preset('pc', 'PC', false),
+                     layout: 'pc' }], cycle: { enabled: false, interval_s: 60 }, schedule: { enabled: false, entries: [] } };
+const PC_STATE = { enabled: false, session: false, connected: false, demo: false, set_always: false, name: '',
+                   hwinfo: 'unknown', preset: '', since: 0, age_ms: 0, trouble: '', catalog: [],
+                   step: { at: 0, result: 'not run', detail: '' }, test: { at: 0, result: 'not run', detail: '' },
+                   testing: false };
+
+function pcDevice(patches, settings = PC_SETTINGS, states = [PC_STATE], extra = {}) {
+  let n = 0;
+  return {
+    'GET /api/settings': () => reply(200, settings),
+    'GET /api/presets': () => reply(200, PC_PRESETS),
+    'GET /api/pc': () => reply(200, states[Math.min(n++, states.length - 1)]),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, settings); },
+    ...extra,
+  };
+}
+
+test('the PC page saves the address, the port, the interval and what a session switches', async () => {
+  const patches = [];
+  const { ctx, main } = await load(pcDevice(patches));
+  await ctx.pcPage();
+  checkNamed(main, 'On').checked = true;
+  await type(inputNamed(main, 'Address'), ' 192.168.1.20 ');
+  await type(inputNamed(main, 'Port'), '47200');
+  await type(inputNamed(main, 'A reading every (ms)'), '2000');
+  checkNamed(main, 'Switch to Always on').checked = false;
+  await change(control(main, 'Show preset'), '');
+  await buttonNamed(main, 'Save').click();
+  assert.deepEqual(patches.at(-1), { pc: { enabled: true, host: '192.168.1.20', port: 47200, interval_ms: 2000,
+                                           auto_always: false, preset: '' } });
+  assert.deepEqual(options(control(main, 'Show preset')), ['', 'home', 'pc']); /* none, or any preset */
+});
+
+test('the PC\'s token is write-only: the page says whether one is set and sends only what you type', async () => {
+  const patches = [];
+  const settings = { ...PC_SETTINGS, pc: { ...PC_SETTINGS.pc, keys: { token: true } } };
+  const { ctx, main } = await load(pcDevice(patches, settings));
+  await ctx.pcPage();
+  const token = inputNamed(main, 'Token');
+  assert.equal(token.attrs.type, 'password');
+  assert.match(text(main), /A key is set/);
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.at(-1).pc.token, undefined); /* nothing typed: it stays */
+  await type(token, 'ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z');
+  await buttonNamed(main, 'Save').click();
+  assert.equal(patches.at(-1).pc.token, 'ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z'); /* as typed (spec §12a.1) */
+});
+
+test('an interval shorter than the panel\'s frame time shows a warning', async () => {
+  const { ctx, main } = await load(pcDevice([]));
+  await ctx.pcPage();
+  const warning = below(main).find((e) => /frame time/.test(e.textContent));
+  assert.ok(warning, 'the warning is there');
+  assert.equal(warning.hidden, true); /* 1 s at 1 Hz */
+  await type(inputNamed(main, 'A reading every (ms)'), '500');
+  assert.equal(warning.hidden, false);
+  assert.match(warning.textContent, /1 s at 1 Hz/);
+  const fast = { ...PC_SETTINGS, display: { lpm_hz: 2 } }; /* 500 ms at 2 Hz */
+  const page = await load(pcDevice([], fast));
+  await page.ctx.pcPage();
+  await type(inputNamed(page.main, 'A reading every (ms)'), '500');
+  assert.equal(below(page.main).find((e) => /frame time/.test(e.textContent)).hidden, true);
+});
+
+test('Test asks the PC at once and says what came back', async () => {
+  const found = { ...PC_STATE, session: true, connected: true, name: 'DESKTOP-PC', hwinfo: 'ok',
+                  test: { at: 1800000000, result: 'ok', detail: '' } };
+  const tested = [];
+  const { ctx, main } = await load(pcDevice([], PC_SETTINGS, [PC_STATE, PC_STATE, found], {
+    'POST /api/pc/test': () => { tested.push(true); return reply(202, { started: true }); },
+  }));
+  ctx.setTimeout = (fn) => { fn(); return 0; }; /* sleep() returns at once */
+  await ctx.pcPage();
+  await buttonNamed(main, 'Test').click();
+  await settle();
+  assert.equal(tested.length, 1);
+  assert.match(text(main), /Found DESKTOP-PC\./);
+  assert.match(text(main), /HWiNFO\s*running/);
+  const refused = { ...PC_STATE, test: { at: 1800000000, result: 'failed', detail: 'wrong token' } };
+  const page = await load(pcDevice([], PC_SETTINGS, [PC_STATE, refused], {
+    'POST /api/pc/test': () => reply(202, { started: true }),
+  }));
+  page.ctx.setTimeout = (fn) => { fn(); return 0; };
+  await page.ctx.pcPage();
+  await buttonNamed(page.main, 'Test').click();
+  await settle();
+  assert.match(text(page.main), /Not found: wrong token\./);
+});
+
+test('the PC page shows the session and the readings it knows', async () => {
+  const state = { ...PC_STATE, session: true, connected: true, name: 'DESKTOP-PC', hwinfo: 'stale', age_ms: 400,
+                  set_always: true, catalog: [{ id: 'cpu_load', label: 'CPU load', unit: '%' },
+                                              { id: 'ram_used', label: 'RAM', unit: 'GB' }] };
+  const { ctx, main } = await load(pcDevice([], PC_SETTINGS, [state]));
+  await ctx.pcPage();
+  const all = text(main);
+  assert.match(all, /Session\s*running/);
+  assert.match(all, /HWiNFO\s*not updating/);
+  assert.match(all, /400 ms ago/);
+  assert.match(all, /Always on, until the session ends/);
+  assert.match(all, /Readings \(2\)/);
+  assert.match(all, /CPU load pc\.cpu_load · %/);
+});
+
+/* The device's rules for the visuals (GET /api/layouts, ui_catalog.c). */
+const VISUALS = { visuals: { chart: { min_w: 80, min_h: 40 }, bar: { min_w: 60, min_h: 16 },
+                             ring: { min_w: 40, min_h: 40 }, gauge: { min_w: 60, min_h: 40 } },
+                  spans: { min_s: 10, values_max_s: 3600, hours_min_s: 7200, max_s: 86400 } };
+const SHOW_FIELDS = { fields: [{ id: 'time.clock', kind: 'time', label: 'Time', value: '12:15' },
+                               { id: 'env.temp', kind: 'number', label: 'Temperature', value: '23.7 °C', numeric: true },
+                               { id: 'env.hum', kind: 'number', label: 'Humidity', value: '45 %', numeric: true,
+                                 min: 0, max: 100 },
+                               { id: 'pc.cpu_load', kind: 'number', label: 'CPU load', value: '55 %', numeric: true,
+                                 min: 0, max: 100, group: 'pc' }] };
+
+function showDevice(saved, slots, tree) {
+  const catalogue = { ...SPLIT_CATALOGUE, ...VISUALS, layouts: [{ id: 'classic', slots }, { id: 'split', slots: [] }] };
+  const home = tree ? { id: 'home', name: 'Home', layout: 'split', in_cycle: true, split: tree, options: {} }
+                    : { id: 'home', name: 'Home', layout: 'classic', in_cycle: true, slots: { s1: 'env.temp' },
+                        options: {} };
+  const doc = { schema: 1, active: 'home', presets: [home], cycle: { enabled: false, interval_s: 60 },
+                schedule: { enabled: false, entries: [] } };
+  return {
+    'GET /api/layouts': () => reply(200, catalogue),
+    'GET /api/presets': () => reply(200, JSON.parse(JSON.stringify(doc))),
+    'GET /api/fields': () => reply(200, SHOW_FIELDS),
+    'POST /api/preview.bmp': () => reply(200, 'BM', 'image/bmp'),
+    'PUT /api/presets': (init) => { saved.push(JSON.parse(init.body)); return reply(200, JSON.parse(init.body)); },
+  };
+}
+const BIG = [{ id: 's1', x: 0, y: 172, w: 200, h: 128, size: 'S', kinds: ['number', 'time'] }];
+
+test('a number offers Show as, with only the visuals that fit its slot', async () => {
+  const { ctx, main } = await load(showDevice([], BIG));
+  await ctx.presetsPage();
+  assert.deepEqual(options(control(main, 'Show as')), ['', 'chart', 'bar', 'ring', 'gauge']);
+  const small = [{ id: 's1', x: 0, y: 172, w: 70, h: 30, size: 'XS', kinds: ['number', 'time'] }];
+  const page = await load(showDevice([], small));
+  await page.ctx.presetsPage();
+  assert.deepEqual(options(control(page.main, 'Show as')), ['', 'bar']); /* 70×30: a bar alone */
+});
+
+test('a chart is saved in the preset\'s visuals with its span, bounds and numbers', async () => {
+  const saved = [];
+  const { ctx, main } = await load(showDevice(saved, BIG));
+  await ctx.presetsPage();
+  await change(control(main, 'Show as'), 'chart');
+  await change(control(main, 'Span'), '7200');
+  await type(inputNamed(main, 'Minimum'), 'auto');
+  await type(inputNamed(main, 'Maximum'), '30');
+  checkNamed(main, 'Numbers over the chart').checked = false;
+  await Promise.all(checkNamed(main, 'Numbers over the chart').listeners.change.map((fn) => fn({ target: { checked: false } })));
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.deepEqual(saved.at(-1).presets[0].visuals, { s1: { as: 'chart', span_s: 7200, numbers: false, min: 'auto',
+                                                           max: 30 } });
+});
+
+test('a field\'s own range shows where a bound is left empty', async () => {
+  const { ctx, main } = await load(showDevice([], BIG));
+  await ctx.presetsPage();
+  const select = below(main).find((e) => e.tag === 'select' && options(e).includes('env.hum'));
+  await change(select, 'env.hum');
+  await change(control(main, 'Show as'), 'gauge');
+  assert.equal(inputNamed(main, 'Minimum').attrs.placeholder, '0');
+  assert.equal(inputNamed(main, 'Maximum').attrs.placeholder, '100');
+  await change(select, 'env.temp'); /* no range of its own: the page says what empty means */
+  await change(control(main, 'Show as'), 'bar');
+  assert.match(text(main), /no range of its own/);
+});
+
+test('a field that isn\'t a number takes its slot\'s visual away', async () => {
+  const saved = [];
+  const { ctx, main } = await load(showDevice(saved, BIG));
+  await ctx.presetsPage();
+  await change(control(main, 'Show as'), 'ring');
+  const select = below(main).find((e) => e.tag === 'select' && options(e).includes('time.clock'));
+  await change(select, 'time.clock');
+  assert.ok(!below(main).some((e) => e.tag === 'label' && text(e) === 'Show as'), 'no Show as for a time');
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.equal(saved.at(-1).presets[0].visuals, undefined);
+});
+
+test('a cell\'s visual goes with its field on Split, and stays out where it has no room', async () => {
+  const saved = [];
+  const { ctx, main } = await load(showDevice(saved, BIG, { field: 'env.temp', show: { as: 'chart', span_s: 60,
+                                                                                   numbers: true } }));
+  await ctx.presetsPage();
+  await buttonNamed(main, 'Split into rows').click(); /* 400×139: the chart still fits */
+  let p = await savedTree(main, saved);
+  assert.deepEqual(p.split.a, { field: 'env.temp', show: { as: 'chart', span_s: 60, numbers: true } });
+  const page = await load(showDevice(saved, BIG, { field: 'env.temp', show: { as: 'gauge' } }));
+  await page.ctx.presetsPage();
+  const ratio = { split: 'columns', ratio: '1/2', line: true, a: { field: 'env.temp', show: { as: 'gauge' } }, b: {} };
+  const narrow = await load(showDevice(saved, BIG, ratio));
+  await narrow.ctx.presetsPage();
+  await change(ratioSelects(narrow.main)[0], '1/4'); /* 100 px: a gauge's 60 px still fit */
+  p = await savedTree(narrow.main, saved);
+  assert.deepEqual(p.split.a.show, { as: 'gauge' });
+});
+
+test('the field lists group the PC\'s readings', async () => {
+  const { ctx, main } = await load(showDevice([], BIG));
+  await ctx.presetsPage();
+  const groups = below(main).filter((e) => e.tag === 'optgroup').map((g) => g.attrs.label);
+  assert.ok(groups.includes('PC'), groups.join());
+  assert.ok(below(main).filter((e) => e.tag === 'option').map(text).includes('CPU load — 55 %'));
+});
+
+test('the Sync page switches the PC step too', async () => {
+  const patches = [];
+  const settings = { ...STEP_SETTINGS, sync: { ...STEP_SETTINGS.sync, steps: ['weather', 'pc'] } };
+  const { ctx, main } = await load({
+    'GET /api/settings': () => reply(200, settings),
+    'GET /api/status': () => reply(200, syncStatus({ mode: 'times', running: false })),
+    'PATCH /api/settings': (init) => { patches.push(JSON.parse(init.body)); return reply(200, settings); },
+  });
+  await ctx.syncPage();
+  const box = (name) => below(main).find((e) => e.tag === 'label' && text(e) === name).children[0];
+  assert.equal(box('PC').checked, true);
+  box('PC').checked = false;
+  await buttonNamed(main, 'Save steps').click();
+  assert.deepEqual(patches.at(-1), { sync: { steps: ['weather'] } });
+});
+
+test('a slot\'s PC reading the PC no longer sends stays, named, with its visual', async () => {
+  const saved = [];
+  const device = showDevice(saved, BIG);
+  const doc = { schema: 1, active: 'home', presets: [{ id: 'home', name: 'Home', layout: 'classic', in_cycle: true,
+                slots: { s1: 'pc.gone' }, visuals: { s1: { as: 'ring' } }, options: {} }],
+                cycle: { enabled: false, interval_s: 60 }, schedule: { enabled: false, entries: [] } };
+  device['GET /api/presets'] = () => reply(200, JSON.parse(JSON.stringify(doc)));
+  const { ctx, main } = await load(device);
+  await ctx.presetsPage();
+  const select = below(main).find((e) => e.tag === 'select' && options(e).includes('pc.gone'));
+  assert.ok(select, 'the slot still names it');
+  assert.ok(select.children.some((o) => o instanceof FakeElement && o.value === 'pc.gone' && o.selected));
+  assert.ok(below(main).filter((e) => e.tag === 'option').map(text).some((t) => /^pc\.gone \(not sent now\)$/.test(t)));
+  assert.equal(control(main, 'Show as').value, 'ring');
+  await buttonNamed(main, 'Save').click();
+  await settle();
+  assert.deepEqual(saved.at(-1).presets[0].visuals, { s1: { as: 'ring' } });
+});

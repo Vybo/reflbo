@@ -280,6 +280,17 @@ const ui_history_t *app_pc_history(void); /* NULL until a chart needs it */
 void app_pc_status(app_pc_status_t *out);
 void app_pc_demo(bool on);         /* `pc demo on|off` */
 void app_pc_state_text(char *out, size_t size); /* Menu ▸ Sync ▸ PC ▸ Session: "DESKTOP-PC, 1 s", "since 18:12" */
+void app_pc_tested(const sync_report_t *r);     /* the PC page's Test: its result, and a session if found */
+/* The PC page's Test (spec §10.3): the PC step alone, now. ESP_ERR_INVALID_ARG without PC stats on and an address,
+ * ESP_ERR_NOT_FOUND without a saved network, ESP_ERR_INVALID_STATE while a sync runs or the battery is critical. */
+esp_err_t app_sync_pc_test(void);
+/* The last Test's outcome: when (UTC; 0 for none), its sync_step_result_t and its detail. */
+typedef struct {
+    time_t at;
+    uint8_t result;
+    char detail[SYNC_DETAIL_LEN];
+} app_pc_test_t;
+const app_pc_test_t *app_pc_last_test(void);
 
 /* Config mode (main/app_config.c, spec §10.2). */
 esp_err_t app_net_init(void); /* the Wi-Fi manager, started on first use */

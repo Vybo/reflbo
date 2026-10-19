@@ -40,6 +40,7 @@ static struct {
     char host[SETTINGS_HOST_LEN];
     uint16_t port, interval_ms;
 } s_seen; /* the settings the session runs with */
+static app_pc_test_t s_test; /* the PC page's last Test */
 static ui_pc_t s_view;
 static ui_history_t s_hist;
 static ui_series_t *s_series; /* PSRAM, from the first chart */
@@ -536,4 +537,18 @@ void app_pc_state_text(char *out, size_t size)
         bool told = sync->last_at != 0 && sync->last_detail[SYNC_STEP_PC][0] != '\0';
         snprintf(out, size, "%s", told ? sync->last_detail[SYNC_STEP_PC] : lang_str(lang, LS_PC_NONE));
     }
+}
+
+void app_pc_tested(const sync_report_t *r)
+{
+    s_test = (app_pc_test_t){ .at = time(NULL), .result = r->result[SYNC_STEP_PC] };
+    snprintf(s_test.detail, sizeof(s_test.detail), "%s", r->detail[SYNC_STEP_PC]);
+    ESP_LOGI(TAG, "test: %s%s%s", s_test.result == SYNC_STEP_OK ? "found" : "nothing", s_test.detail[0] ? ": " : "",
+             s_test.detail);
+    app_pc_report(r); /* found: as a sync's step, a session may start (the owner asked) */
+}
+
+const app_pc_test_t *app_pc_last_test(void)
+{
+    return &s_test;
 }

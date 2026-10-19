@@ -95,6 +95,12 @@ target_include_directories(sync_logic PUBLIC ${REPO_ROOT}/components/sync/includ
 target_compile_options(sync_logic PRIVATE ${REFLBO_WARNINGS})
 target_link_libraries(sync_logic PUBLIC scheduler)
 
+# pcstats: the PC app's messages (spec §12a, D44) and the session's rules build on the host; the WebSocket does not.
+add_library(pcstats_logic STATIC ${REPO_ROOT}/components/pcstats/pc_msg.c)
+target_include_directories(pcstats_logic PUBLIC ${REPO_ROOT}/components/pcstats/include)
+target_compile_options(pcstats_logic PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(pcstats_logic PRIVATE cjson util)
+
 # board: only the pure gesture recogniser builds on the host.
 add_library(board_logic STATIC ${REPO_ROOT}/components/board/gesture.c)
 target_include_directories(board_logic PUBLIC ${REPO_ROOT}/components/board/include)
@@ -265,6 +271,7 @@ reflbo_host_test(test_solar solar_logic)
 target_compile_definitions(test_solar PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/solar")
 reflbo_host_test(test_energy energy_logic)
 reflbo_host_test(test_energy_dev energy_logic)
+reflbo_host_test(test_pcstats pcstats_logic)
 target_compile_definitions(test_energy PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/energy")
 reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)

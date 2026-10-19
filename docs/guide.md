@@ -144,12 +144,12 @@ A preset is a layout, its fields and its options. The device holds up to 16. It 
 | Focus clock | Focus |
 | Rain radar | Radar |
 | Flights | Flights; the cycle visits it only in sync mode Always on |
-| Solar | Solar; outside the cycle until you add it, then shown from sunrise to sunset |
+| Solar | Solar; outside the cycle until you add it. On a new device it comes with a window from sunrise to sunset; a device updated from an earlier version keeps its Solar as it was |
 | Energy | Energy; outside the cycle until you add it |
 
 KEY steps through the presets marked "cycle". KEY double starts or stops the auto-cycle, which switches every 10 s to 1 h. A preset chosen by hand stays chosen after a restart.
 
-A preset in the cycle can have a window: the auto-cycle then shows it only between two times of day, on the days you tick. Each end is a time, or sunrise or sunset at the device's location, up to 3 hours before or after (30 minutes before sunset, say). An end before the start runs past midnight, so sunset to sunrise covers the night. While a preset's window is closed the auto-cycle steps past it, and when no other preset is open it keeps the one on screen; a preset on screen when its window closes stays until the next step. KEY, the schedule, the menu and the web page still reach it at any time. Until the clock is set, every window counts as open.
+A preset in the cycle can have a window: the auto-cycle then shows it only between two times of day, on the days you tick. Each end is a time, or sunrise or sunset at the device's location, up to 3 hours before or after (30 minutes before sunset, say). A window from the evening to the morning runs past midnight, so sunset to sunrise covers the night, as does one between two times whose end comes first (22:00 to 06:00). On a day when the sun puts the end before the start, as with 18:00 to sunset in winter, the window stays closed. While a preset's window is closed the auto-cycle steps past it, and when no other preset is open it keeps the one on screen; a preset on screen when its window closes stays until the next step. KEY, the schedule, the menu and the web page still reach it at any time. Until the clock is set, every window counts as open.
 
 The console sets a window too, `preset window solar sunrise sunset-30` (and `preset window solar off`), and `preset list` says whether each window is open now and until when.
 

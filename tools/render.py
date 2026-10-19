@@ -12,7 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import pbm_png  # noqa: E402
 
 # Renderers that take a fixture name; `--list` prints their fixtures (test/host/*_fixtures.h).
-LISTED = {"dash": "render_dashboard", "screen": "render_screen"}
+LISTED = {"dash": "render_dashboard", "screen": "render_screen", "vis": "render_visual"}
 
 
 def renderers(build_dir):

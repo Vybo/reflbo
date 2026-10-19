@@ -40,7 +40,7 @@ The images are the firmware's own output. The panel images are the host build's 
 | PCF85063 | The clock, which also wakes the board |
 | 18650 cell holder and charger | Runs the board for days without a cable |
 | KEY, BOOT and PWR buttons | KEY and BOOT drive everything; PWR switches the board on and off in hardware |
-| Speaker, microphones, microSD slot | Not used yet: audio comes in M8, microSD in M9 |
+| Speaker, microphones, microSD slot | Not used yet: audio comes in M9, microSD in M10 |
 
 The firmware sleeps between updates. It wakes once a minute to redraw, every 5 minutes to read the sensors, and once a day to sync over Wi-Fi. Wi-Fi is off the rest of the time.
 
@@ -360,8 +360,9 @@ tools/idf.sh exec python tools/devlog.py --cmd "field set env.temp -5.5" --cmd "
 
 ## Coming next
 
-- **MQTT and Home Assistant (M7, designed).** The device's sensors and state in Home Assistant through MQTT discovery; its preset as a select; Sync now and Next preset as buttons; key presses as device triggers; a message from Home Assistant as a banner; and values from Home Assistant or other devices as fields on the dashboard.
-- **Audio (M8, planned).** Alarms that ring from sleep, with snooze; internet radio.
-- **microSD (M9, planned).** Uses to be agreed, such as history and graphs, sounds and station lists, or a detailed map.
+- **Your PC's sensors (M7, designed).** A small Windows app reads HWiNFO and streams the sensors you pick to the device over your network. When a sync finds the PC on, the device can stay online and switch to a PC preset; when the PC sleeps, your dashboards come back. Any number on the device can then show as a history chart, a bar, a ring or a gauge.
+- **MQTT and Home Assistant (M8, designed).** The device's sensors and state in Home Assistant through MQTT discovery; its preset as a select; Sync now and Next preset as buttons; key presses as device triggers; a message from Home Assistant as a banner; and values from Home Assistant or other devices as fields on the dashboard.
+- **Audio (M9, planned).** Alarms that ring from sleep, with snooze; internet radio.
+- **microSD (M10, planned).** Uses to be agreed, such as history and graphs, sounds and station lists, or a detailed map.
 
 The roadmap is in [AGENTS.md](../AGENTS.md#2-status-and-roadmap).

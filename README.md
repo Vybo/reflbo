@@ -4,7 +4,7 @@ Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-
 
 <p align="center"><img src="docs/images/panel/hero.png" width="820" alt="Four dashboards: a large clock with the date, indoor temperature, humidity, the moon and the battery; the current weather with today's forecast and the next hours; a rain radar map of Czechia; a flight radar with aircraft around Brno"></p>
 
-**Status:** version 0.1.0-dev. Milestones M0 to M6e are built: dashboards and presets, the on-device menu, Wi-Fi with a web configurator, syncing, weather and air quality, both radars, layouts of your own down to the status bar's size, the solar forecast with the house's energy, and presets that join the auto-cycle only at the hours you choose. MQTT and Home Assistant (M7) are designed; audio and microSD come after. The **[user guide](docs/guide.md)** describes every feature.
+**Status:** version 0.1.0-dev. Milestones M0 to M6e are built: dashboards and presets, the on-device menu, Wi-Fi with a web configurator, syncing, weather and air quality, both radars, layouts of your own down to the status bar's size, the solar forecast with the house's energy, and presets that join the auto-cycle only at the hours you choose. Live values from your Windows PC (M7) and MQTT with Home Assistant (M8) are designed; audio and microSD come after. The **[user guide](docs/guide.md)** describes every feature.
 
 ## Features
 
@@ -112,9 +112,10 @@ python3 tools/docs_images.py     # the panel images in docs/images from the gold
 | M6c: smaller split cells, down to the status bar's size | Built |
 | M6d: solar forecast and the house's energy (SolaX Cloud) | Built |
 | M6e: cycle windows per preset | Built |
-| M7: MQTT and Home Assistant | Designed |
-| M8: alarms and internet radio | Planned |
-| M9: microSD | Planned |
+| M7: the PC's sensors, with charts, bars and gauges | Designed |
+| M8: MQTT and Home Assistant | Designed |
+| M9: alarms and internet radio | Planned |
+| M10: microSD | Planned |
 
 "Built" milestones wait for some of the owner's checks on the board; [AGENTS.md](AGENTS.md#2-status-and-roadmap) lists them.
 

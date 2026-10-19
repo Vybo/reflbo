@@ -1216,7 +1216,7 @@ The owner's Windows PC runs **reflbo-stats**, a tray app in its own repository (
 ### 12a.1 Settings
 
 - `pc` in `settings.json`: `enabled` (default off), `host` (an IP address or a name), `port` (default 47123), `interval_ms` (250–10 000, default 1 000), `auto_always` (default on) and `preset` (a preset id, or "" for none; default `pc`).
-- The token is a secret in NVS (§14.2), write-only like the others (§10.4) and never in a backup.
+- The token is a secret in NVS (`secrets/pc_token`, §14.2), write-only like the others (§10.4) and never in a backup. It is 128 random bits as 26 base32 characters (A–Z, 2–7); the app shows it in groups of five (`ABCDE-FGHIJ-…`, 31 characters) and takes it with or without the dashes and spaces, in either case. The board keeps it as typed, so its field takes at least 31 characters, and sends it in the header unchanged.
 - Menu ▸ Sync ▸ PC: PC stats on or off, and the session's state.
 
 ### 12a.2 Finding the PC
@@ -1300,7 +1300,7 @@ The owner's Windows PC runs **reflbo-stats**, a tray app in its own repository (
 |---|---|
 | `sys` | Device id, AP password (`ap_pass`), schema version, idle strategy override (`idle`), come back in config mode after a web restart (`resume_cfg`, §10.2), the RTC trim (`rtc_trim`, §7), the MQTT discovery hash (`mqtt_disc`, §12.3, M7) |
 | `wifi` | Saved networks with their passwords and fast-connect cache (`nets`, one versioned blob) |
-| `secrets` | MQTT password; the web UI password's salted hash (`web_pass`, D18); from M6d Forecast.Solar's key (`fs_key`), Solcast's key and site ids (`solcast_key`, `solcast_site1`, `solcast_site2`), and SolaX's token and registration number (`solax_token`, `solax_sn`) or the Developer API's Client ID and Client Secret (`solax_client_id`, `solax_secret`; D37) |
+| `secrets` | MQTT password; the web UI password's salted hash (`web_pass`, D18); from M6d Forecast.Solar's key (`fs_key`), Solcast's key and site ids (`solcast_key`, `solcast_site1`, `solcast_site2`), and SolaX's token and registration number (`solax_token`, `solax_sn`) or the Developer API's Client ID and Client Secret (`solax_client_id`, `solax_secret`; D37); from M7 the PC app's token (`pc_token`, D44) |
 | `ctr` | Counters: boots, sync statistics |
 
 ### 14.3 LittleFS layout
@@ -1681,3 +1681,4 @@ Owner question, 2026-10-01, after the flight radar; MeteoPlaneRadar shows one to
 | r50 | 2026-10-19 | A forecast's gaps keep only a forecast for the same place, source and roof (§11.5); the snapshot with it (§6) |
 | r51 | 2026-10-19 | The owner's request (D44): the PC's sensors as the new M7 (§1.2, §1.3, §1.4, §3.1, §5.1, §5.2, §5.3, §5.4, §6, §9.3, §10.3, §12a, §15, §17, §18, §19, §20); MQTT and Home Assistant become M8, audio M9, microSD M10 |
 | r52 | 2026-10-19 | The visuals and the PC layout as the owner approved them from the spike's renders (§5.2, §5.3) |
+| r53 | 2026-10-19 | The PC app's review: the token's form (§12a.1) and its NVS key (§14.2) |

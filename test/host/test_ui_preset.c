@@ -197,6 +197,17 @@ static void test_bad_windows_are_rejected_with_a_reason(void)
     }
 }
 
+/* The longest reason, a window's with a 15-character id, fits UI_PRESET_ERR_LEN whole: the page shows it. */
+static void test_the_longest_reason_fits_ui_preset_err_len(void)
+{
+    char err[UI_PRESET_ERR_LEN];
+    const char *json = "{\"schema\": 1, \"presets\": [{\"id\": \"abcdefghijklmno\", \"layout\": \"grid\", "
+                       "\"window\": {\"from\": \"07:00\", \"until\": \"dusk\"}}]}";
+    TEST_ASSERT_FALSE(ui_presets_from_json(json, &s_p, err, sizeof(err)));
+    TEST_ASSERT_EQUAL_STRING("preset \"abcdefghijklmno\": window: until must be HH:MM, or sunrise or sunset "
+                             "with an offset of 1-180 minutes", err);
+}
+
 /* A presets.json saved by M5: the four presets of its day, no marker. */
 static const char k_m5_file[] =
     "{\"schema\":1,\"active\":\"weather\",\"presets\":["
@@ -956,6 +967,7 @@ int main(void)
     RUN_TEST(test_a_window_survives_a_round_trip);
     RUN_TEST(test_a_window_without_days_opens_every_day);
     RUN_TEST(test_bad_windows_are_rejected_with_a_reason);
+    RUN_TEST(test_the_longest_reason_fits_ui_preset_err_len);
     RUN_TEST(test_a_file_from_before_m6_gains_the_radars_once);
     RUN_TEST(test_a_file_from_m6c_gains_solar_and_energy_once);
     RUN_TEST(test_the_radars_need_room_and_a_free_id);

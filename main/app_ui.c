@@ -28,7 +28,7 @@ static app_ui_state_t s;
 /* The config files' text: scratch buffers in PSRAM (AGENTS.md §8). */
 EXT_RAM_BSS_ATTR static char s_file[UI_PRESETS_JSON_MAX];
 EXT_RAM_BSS_ATTR static char s_settings_base[SETTINGS_FILE_MAX]; /* settings.json as read: unknown keys stay */
-static char s_err[96];
+static char s_err[UI_PRESET_ERR_LEN];
 static char s_toast[64];
 static int64_t s_toast_until_ms;
 

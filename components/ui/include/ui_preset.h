@@ -17,6 +17,7 @@
 #define UI_PRESET_MAX 16
 #define UI_PRESET_ID_LEN 16   /* with the terminator */
 #define UI_PRESET_NAME_LEN 24
+#define UI_PRESET_ERR_LEN 128 /* fits ui_presets_from_json()'s longest reason: a window's, with a 15-character id */
 #define UI_CYCLE_MIN_S 10
 #define UI_CYCLE_MAX_S 3600
 #define UI_SCHEDULE_MAX 8

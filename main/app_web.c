@@ -327,7 +327,7 @@ static void preview(const char *method, const char *query, const char *body, uin
                     webui_reply_t *reply)
 {
     EXT_RAM_BSS_ATTR static ui_presets_t doc; /* scratch buffers in PSRAM (AGENTS.md §8) */
-    char id[UI_PRESET_ID_LEN] = "", err[96];
+    char id[UI_PRESET_ID_LEN] = "", err[UI_PRESET_ERR_LEN];
     const char *eq = strstr(query, "preset=");
     if (eq != NULL) {
         snprintf(id, sizeof(id), "%.*s", (int)strcspn(eq + 7, "&"), eq + 7);
@@ -495,7 +495,7 @@ static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *
     EXT_RAM_BSS_ATTR static char buf[WEBUI_BODY_MAX];
     EXT_RAM_BSS_ATTR static ui_presets_t presets;
     backup_file_t files[8];
-    char err[112];
+    char err[UI_PRESET_ERR_LEN + 16]; /* a file's name before its reason */
     int n = backup_split(body, files, 8, buf, sizeof(buf), err, sizeof(err));
     if (n < 0) {
         reply_error(reply, out, size, 400, err);
@@ -512,7 +512,7 @@ static void restore(const char *body, uint8_t *out, size_t size, webui_reply_t *
             cJSON_AddItemToArray(skipped, cJSON_CreateString(files[i].name)); /* from a later firmware */
         }
     }
-    char why[96];
+    char why[UI_PRESET_ERR_LEN];
     EXT_RAM_BSS_ATTR static char clean[SETTINGS_FILE_MAX];
     EXT_RAM_BSS_ATTR static settings_secrets_t dropped;
     EXT_RAM_BSS_ATTR static settings_t next;
@@ -561,7 +561,7 @@ void app_web_api(const char *method, const char *path, const char *query, const 
                  size_t size, webui_reply_t *reply)
 {
     EXT_RAM_BSS_ATTR static ui_presets_t presets;
-    char err[112];
+    char err[UI_PRESET_ERR_LEN];
     bool get = strcmp(method, "GET") == 0;
     if (strcmp(path, "/api/status") == 0 && get) {
         get_status(out, size, reply);

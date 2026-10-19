@@ -18,7 +18,7 @@
 
 #define SOLAR_PATH "/fs/state/solar.bin"
 #define SOLAR_MAGIC 0x7266736cu /* "rfsl" */
-#define SOLAR_FILE_VERSION 2 /* 2: the Developer API's plant (D37) */
+#define SOLAR_FILE_VERSION 3 /* 2: the Developer API's plant (D37); 3: the forecast's setup */
 #define READINGS_SAVE_S (30 * 60) /* spec §11.6: the readings go to the file at most every 30 min */
 
 static const char *TAG = "app_solar";

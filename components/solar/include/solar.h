@@ -34,6 +34,7 @@ typedef struct {
 typedef struct {
     int32_t day;                /* the local day of q[0], days since 1970-01-01; 0 = no forecast */
     uint32_t fetched;           /* when it came, UTC */
+    uint32_t setup;             /* what it is for, solar_setup_id(); 0 = unknown */
     uint16_t q[2][SOLAR_STEPS]; /* each quarter hour's mean power, in SOLAR_UNIT_W: `day`, `day` + 1 */
     uint32_t wh[SOLAR_DAYS];    /* each day's energy, Wh, or SOLAR_WH_NONE; the first two are q's */
 } solar_forecast_t;
@@ -42,6 +43,7 @@ typedef struct {
  * local day of the fetch, and which of them the reply covered. */
 typedef struct {
     int32_t day;
+    uint32_t setup; /* what it is for, solar_setup_id(); its gaps keep only a forecast for the same */
     float wh[SOLAR_DAYS][SOLAR_STEPS];
     bool got[SOLAR_DAYS][SOLAR_STEPS];
 } solar_acc_t;
@@ -50,6 +52,9 @@ typedef struct {
  * × (1 − losses), with T_cell = T_air + 0.031 × GTI; never below 0. */
 float solar_model_w(float kwp, float gti_w_m2, float t_air_c, int losses_pct);
 
+/* What a forecast is for: the place (1e-4 degrees), the source and the roof, as a number that is never 0. */
+uint32_t solar_setup_id(int32_t lat_e4, int32_t lon_e4, solar_source_t source, const solar_plane_t *planes, int count,
+                        int losses_pct, float inverter_w);
 /* Starts with nothing from the local day of `now`. */
 void solar_acc_init(solar_acc_t *acc, time_t now);
 /* A period's mean power, from `seconds` before `end` to `end` (UTC), over the quarter hours it covers. */

@@ -291,6 +291,8 @@ static void step_solar(void)
         return;
     }
     solar_acc_init(&s_solar, (time_t)now);
+    s_solar.setup = solar_setup_id(s_req.lat_e4, s_req.lon_e4, (solar_source_t)q->source, q->planes, q->plane_count,
+                                   q->losses_pct, q->inverter_w); /* the reply's gaps keep only this setup's */
     char url[SOLAR_URL_MAX];
     if (q->source == SOLAR_OPEN_METEO) {
         for (int i = 0; i < q->plane_count && i < SOLAR_PLANES_MAX; i++) {

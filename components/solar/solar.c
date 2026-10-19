@@ -5,6 +5,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "util_crc32.h"
 #include "util_time.h"
 
 /* Our PV model and the local quarter hours (spec §11.5). */
@@ -28,6 +29,22 @@ static int32_t local_day(time_t t, int *quarter)
     localtime_r(&t, &lt);
     *quarter = lt.tm_hour * 4 + lt.tm_min / 15;
     return (int32_t)util_days_from_civil(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday);
+}
+
+uint32_t solar_setup_id(int32_t lat_e4, int32_t lon_e4, solar_source_t source, const solar_plane_t *planes, int count,
+                        int losses_pct, float inverter_w)
+{
+    int32_t words[4 + 3 * SOLAR_PLANES_MAX + 2] = { lat_e4, lon_e4, (int32_t)source, count };
+    int n = 4;
+    for (int i = 0; i < count && i < SOLAR_PLANES_MAX; i++) {
+        words[n++] = (int32_t)lroundf(planes[i].kwp * 100.0f);
+        words[n++] = planes[i].tilt;
+        words[n++] = planes[i].azimuth;
+    }
+    words[n++] = losses_pct;
+    words[n++] = (int32_t)lroundf(inverter_w);
+    uint32_t id = util_crc32(0, words, (size_t)n * sizeof(words[0]));
+    return id != 0 ? id : 1; /* 0 is a forecast from before setups */
 }
 
 void solar_acc_init(solar_acc_t *acc, time_t now)
@@ -115,13 +132,14 @@ void solar_acc_finish(const solar_acc_t *acc, const solar_forecast_t *old, uint3
                       solar_forecast_t *out)
 {
     solar_forecast_t before;
-    bool keep = old != NULL && old->day != 0;
+    bool keep = old != NULL && old->day != 0 && old->setup == acc->setup; /* never another place's or roof's */
     if (keep) {
         before = *old; /* `out` may be `old` */
     }
     memset(out, 0, sizeof(*out));
     out->day = acc->day;
     out->fetched = fetched;
+    out->setup = acc->setup;
     for (int k = 0; k < SOLAR_DAYS; k++) {
         const uint16_t *kept = keep && k < 2 ? solar_day(&before, acc->day + k) : NULL;
         bool any = false;

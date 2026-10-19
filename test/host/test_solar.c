@@ -250,6 +250,46 @@ static void test_quarter_hours_a_reply_leaves_out_keep_the_last_forecast(void)
     TEST_ASSERT_EQUAL_UINT32(SOLAR_WH_NONE, f.wh[1]);
 }
 
+/* Only a forecast for the same place, source and roof fills a reply's gaps: after a move the old place's
+ * quarter hours never stay (seen on the board: Sydney's day in Brno's night). */
+static void test_gaps_keep_only_a_forecast_for_the_same_setup(void)
+{
+    solar_forecast_t old;
+    memset(&old, 0, sizeof(old));
+    old.day = day_of(2026, 10, 5);
+    old.setup = 1;
+    old.q[0][12] = 280; /* 03:00: another place's day */
+    old.wh[0] = 700;
+    old.wh[1] = SOLAR_WH_NONE;
+    old.wh[2] = SOLAR_WH_NONE;
+    solar_acc_t acc;
+    solar_acc_init(&acc, local(2026, 10, 5, 11, 0));
+    acc.setup = 2;
+    solar_acc_period(&acc, local(2026, 10, 5, 12, 15), 900, 3000.0f);
+    solar_forecast_t f;
+    solar_acc_finish(&acc, &old, 0, &f);
+    TEST_ASSERT_EQUAL_UINT16(0, f.q[0][12]);
+    TEST_ASSERT_EQUAL_UINT32(750, f.wh[0]);
+    TEST_ASSERT_EQUAL_UINT32(2, f.setup);
+}
+
+/* A forecast's setup names its place, source and roof: any of them changing makes it another one. */
+static void test_the_setup_names_the_place_the_source_and_the_roof(void)
+{
+    solar_plane_t planes[2] = { { .kwp = 7.2f, .tilt = 35, .azimuth = -15 }, { .kwp = 3.0f, .tilt = 20, .azimuth = 90 } };
+    uint32_t base = solar_setup_id(491951, 166068, SOLAR_FORECAST_SOLAR, planes, 2, 14, 6000.0f);
+    TEST_ASSERT_EQUAL_UINT32(base, solar_setup_id(491951, 166068, SOLAR_FORECAST_SOLAR, planes, 2, 14, 6000.0f));
+    TEST_ASSERT_NOT_EQUAL(base, solar_setup_id(-338688, 1512093, SOLAR_FORECAST_SOLAR, planes, 2, 14, 6000.0f));
+    TEST_ASSERT_NOT_EQUAL(base, solar_setup_id(491951, 166068, SOLAR_OPEN_METEO, planes, 2, 14, 6000.0f));
+    TEST_ASSERT_NOT_EQUAL(base, solar_setup_id(491951, 166068, SOLAR_FORECAST_SOLAR, planes, 1, 14, 6000.0f));
+    TEST_ASSERT_NOT_EQUAL(base, solar_setup_id(491951, 166068, SOLAR_FORECAST_SOLAR, planes, 2, 10, 6000.0f));
+    TEST_ASSERT_NOT_EQUAL(base, solar_setup_id(491951, 166068, SOLAR_FORECAST_SOLAR, planes, 2, 14, 0.0f));
+    solar_plane_t other[2] = { planes[0], planes[1] };
+    other[1].tilt = 25;
+    TEST_ASSERT_NOT_EQUAL(base, solar_setup_id(491951, 166068, SOLAR_FORECAST_SOLAR, other, 2, 14, 6000.0f));
+    TEST_ASSERT_NOT_EQUAL(0, base); /* 0 is no setup: a forecast from before setups */
+}
+
 static void test_yesterdays_forecast_gives_today_its_tomorrow(void)
 {
     solar_forecast_t old;
@@ -596,6 +636,8 @@ int main(void)
     RUN_TEST(test_times_far_off_count_only_within_the_three_days);
     RUN_TEST(test_power_out_of_reason_stays_within_bounds);
     RUN_TEST(test_quarter_hours_a_reply_leaves_out_keep_the_last_forecast);
+    RUN_TEST(test_gaps_keep_only_a_forecast_for_the_same_setup);
+    RUN_TEST(test_the_setup_names_the_place_the_source_and_the_roof);
     RUN_TEST(test_yesterdays_forecast_gives_today_its_tomorrow);
     RUN_TEST(test_today_and_tomorrow_follow_the_local_day);
     RUN_TEST(test_what_is_left_counts_the_rest_of_the_day);

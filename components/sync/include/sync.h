@@ -7,6 +7,7 @@
 #include "energy.h"
 #include "energy_dev.h"
 #include "esp_err.h"
+#include "pc_msg.h"
 #include "radar_fetch.h"
 #include "settings.h"
 #include "solar.h"
@@ -14,7 +15,7 @@
 
 /*
  * The sync (spec §9.3): Wi-Fi, the time, the weather, the air quality, the weather radar, the PV
- * forecast and the house's energy, on a task of its own; in sync mode `always` also a refresh of the
+ * forecast, the house's energy and the PC (M7), on a task of its own; in sync mode `always` also a refresh of the
  * radar and the house's reading, and from the Solar page a check of the last two. It only fetches:
  * the app task applies the report, as it owns the clock, the RTC, the datastore, the radar's frames
  * and the solar state (spec §3.2). Wi-Fi stays on afterwards; the app turns it off unless config mode
@@ -56,6 +57,14 @@ typedef struct {
     energy_dev_site_t site;            /* the plant and its devices found before; plant_id "" for none yet */
 } sync_energy_req_t;
 
+/* The PC step's request (spec §12a.2, M7): the token stays in it, never in a log. */
+typedef struct {
+    bool enabled;                    /* PC stats on */
+    char host[SETTINGS_HOST_LEN];    /* "" for none: the step is skipped */
+    uint16_t port;
+    char token[SETTINGS_SECRET_LEN]; /* as typed */
+} sync_pc_req_t;
+
 typedef struct {
     uint8_t kind;  /* sync_kind_t */
     uint8_t steps; /* settings_step_t bits: the data steps that run (D35); the time always does */
@@ -67,6 +76,7 @@ typedef struct {
     bool refresh_energy;     /* SYNC_KIND_REFRESH: the house's reading (D36) */
     sync_solar_req_t solar;
     sync_energy_req_t energy;
+    sync_pc_req_t pc; /* M7: a full sync's only */
 } sync_request_t;
 
 typedef struct {
@@ -87,6 +97,7 @@ typedef struct {
     uint32_t energy_access_until;
     bool energy_access_dropped;    /* the kept token was refused and no new one came: the app forgets it */
     energy_dev_site_t energy_site; /* the plant and its devices when the step found them anew; plant_id "" otherwise */
+    pc_info_t pc;                  /* SYNC_STEP_PC ok: the PC app's /v1/info, for the session to start (M7) */
 } sync_report_t;
 
 /* Starts a sync; `done` runs on the sync task when it ends, and must hand the report to the app task
@@ -96,7 +107,7 @@ esp_err_t sync_start(const sync_request_t *req, void (*done)(sync_report_t *repo
 bool sync_running(void);
 /* The step running now, for the progress the web UI shows; SYNC_STEP_COUNT when none runs. */
 sync_step_t sync_step(void);
-const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air", "radar", "solar", "energy" */
+const char *sync_step_name(sync_step_t step); /* "wifi", "time", "weather", "air", "radar", "solar", "energy", "pc" */
 /* The Developer API's last data replies, for `energy raw` (D37): the inverter's, the battery's and the meter's
  * real-time data and the month's statistics; "" for none. Never the token's. Read them while no sync runs. */
 #define SYNC_ENERGY_RAW_COUNT 4

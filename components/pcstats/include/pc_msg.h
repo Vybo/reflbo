@@ -74,6 +74,25 @@ size_t pc_catalog_json(const pc_catalog_t *cat, char *out, size_t size);
 /* A reading's id: 1-15 characters of a-z, 0-9 and _ (spec §12a.3); presets.json's `pc.<id>` keeps the same rule. */
 bool pc_id_valid(const char *id);
 
+/* What the PC step found (spec §9.3, §12a.2). */
+typedef enum {
+    PC_PROBE_FOUND,   /* a session may start; the detail names HWiNFO's trouble, "" when it is fine */
+    PC_PROBE_OFF,     /* no answer: the PC asleep, no failure */
+    PC_PROBE_REFUSED, /* a wrong token, another protocol, another app: the step fails */
+} pc_probe_t;
+
+/* GET /v1/info's outcome: its HTTP status (0 for no reply) and body; `info` filled when found, the step's detail in
+ * `detail`: "off", "wrong token", "HTTP 503", "protocol 2", "not reflbo-stats", "HWiNFO stale" or "". */
+pc_probe_t pc_probe_result(int status, const char *body, size_t len, pc_info_t *info, char *detail, size_t size);
+
+/* What a closed stream means for its session (spec §12a.3, the PC app's spec §6): the app quitting (close 1001) or
+ * turning the board away (1008: a new token, another protocol) ends it at once, as a refused upgrade does (HTTP 401,
+ * 503 with eight boards already); anything else waits for the silence rule: a lost connection, or the app's 1001
+ * "no pong" when the board's answers to its pings were lost. `why` gets the reason: "the PC app quit", "new token",
+ * "wrong token", "HTTP 503", "no pong", "closed". */
+typedef enum { PC_CLOSE_WAIT, PC_CLOSE_END } pc_close_t;
+pc_close_t pc_close_action(int close_code, const char *reason, int http_status, char *why, size_t size);
+
 /* The index of the reading with `id`, or -1. */
 int pc_catalog_find(const pc_catalog_t *cat, const char *id);
 

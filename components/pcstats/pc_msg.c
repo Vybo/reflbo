@@ -196,6 +196,58 @@ bool pc_parse_info(const char *json, size_t len, pc_info_t *info, char *err, siz
     return ok;
 }
 
+pc_probe_t pc_probe_result(int status, const char *body, size_t len, pc_info_t *info, char *detail, size_t size)
+{
+    memset(info, 0, sizeof(*info));
+    if (status == 0) {
+        snprintf(detail, size, "off");
+        return PC_PROBE_OFF;
+    }
+    if (status != 200) {
+        if (status == 401) {
+            snprintf(detail, size, "wrong token");
+        } else {
+            snprintf(detail, size, "HTTP %d", status);
+        }
+        return PC_PROBE_REFUSED;
+    }
+    if (!pc_parse_info(body, len, info, detail, size)) {
+        return PC_PROBE_REFUSED;
+    }
+    if (info->hwinfo == PC_HW_OK) {
+        detail[0] = '\0';
+    } else {
+        snprintf(detail, size, "HWiNFO %s", pc_hwinfo_name(info->hwinfo));
+    }
+    return PC_PROBE_FOUND;
+}
+
+pc_close_t pc_close_action(int close_code, const char *reason, int http_status, char *why, size_t size)
+{
+    if (http_status == 401) {
+        snprintf(why, size, "wrong token");
+        return PC_CLOSE_END;
+    }
+    if (http_status != 0 && http_status != 101) {
+        snprintf(why, size, "HTTP %d", http_status);
+        return PC_CLOSE_END;
+    }
+    if (close_code == 1001 && reason != NULL && strcmp(reason, "no pong") == 0) { /* its pings lost: reconnect */
+        snprintf(why, size, "no pong");
+        return PC_CLOSE_WAIT;
+    }
+    if (close_code == 1001) { /* going away: the PC app quit */
+        snprintf(why, size, "the PC app quit");
+        return PC_CLOSE_END;
+    }
+    if (close_code == 1008) { /* policy: a new token, another protocol, no hello */
+        snprintf(why, size, "%s", reason != NULL && reason[0] ? reason : "refused");
+        return PC_CLOSE_END;
+    }
+    snprintf(why, size, "closed");
+    return PC_CLOSE_WAIT;
+}
+
 size_t pc_catalog_json(const pc_catalog_t *cat, char *out, size_t size)
 {
     cJSON *root = cJSON_CreateObject();

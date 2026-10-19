@@ -479,10 +479,24 @@ static void test_a_sync_fails_on_any_step_but_the_energy(void)
     TEST_ASSERT_EQUAL_INT(SYNC_STEP_WIFI, sync_first_failed(r));
 }
 
+/* Nor for the PC (M7, D44): a wrong token or another protocol shows on the Sync page and in Info, no retry. */
+static void test_a_sync_never_fails_on_the_pc(void)
+{
+    uint8_t r[SYNC_STEP_COUNT];
+    for (int i = 0; i < SYNC_STEP_COUNT; i++) {
+        r[i] = SYNC_STEP_OK;
+    }
+    r[SYNC_STEP_PC] = SYNC_STEP_FAILED;
+    TEST_ASSERT_FALSE(sync_report_failed(r));
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_PC, sync_first_failed(r));
+    TEST_ASSERT_EQUAL_INT(SYNC_STEP_ENERGY + 1, SYNC_STEP_PC); /* after the others */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_a_daily_time_runs_today_then_tomorrow);
+    RUN_TEST(test_a_sync_never_fails_on_the_pc);
     RUN_TEST(test_several_times_wrap_past_midnight);
     RUN_TEST(test_interval_slots_align_to_local_midnight);
     RUN_TEST(test_an_interval_out_of_range_is_clamped);

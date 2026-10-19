@@ -279,6 +279,8 @@ const lang_t lang_cs = {
         [LS_NO_ENERGY] = "Ze střídače zatím nic",
         [LS_M_SYNC_STEPS] = "Kroky",
         [LS_PC] = "PC",
+        [LS_PC_ASLEEP] = "PC spí",
+        [LS_PC_SINCE] = "od %s",
     },
     .weekdays = { "Neděle", "Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek", "Sobota" },
     .weekdays_short = { "Ne", "Po", "Út", "St", "Čt", "Pá", "So" },

@@ -36,6 +36,14 @@ static const ui_slot_t k_focus[] = {
     { "s2", { 200, 212, 200, 88 }, UI_SIZE_M, UI_KINDS_M },
 };
 
+/* M7 (D44): the spike's, approved on 2026-10-19. */
+static const ui_slot_t k_pc[] = {
+    { "c1", { 0, 21, 199, 99 }, UI_SIZE_M, UI_KINDS_M },    { "c2", { 201, 21, 199, 99 }, UI_SIZE_M, UI_KINDS_M },
+    { "c3", { 0, 122, 199, 99 }, UI_SIZE_M, UI_KINDS_M },   { "c4", { 201, 122, 199, 99 }, UI_SIZE_M, UI_KINDS_M },
+    { "b1", { 0, 223, 132, 77 }, UI_SIZE_S, UI_KINDS_S },   { "b2", { 134, 223, 132, 77 }, UI_SIZE_S, UI_KINDS_S },
+    { "b3", { 268, 223, 132, 77 }, UI_SIZE_S, UI_KINDS_S },
+};
+
 static const ui_layout_t k_layouts[UI_LAYOUT_COUNT] = {
     [UI_LAYOUT_CLASSIC] = { "classic", k_classic, sizeof(k_classic) / sizeof(k_classic[0]) },
     [UI_LAYOUT_WEATHER] = { "weather", k_weather, sizeof(k_weather) / sizeof(k_weather[0]) },
@@ -46,6 +54,7 @@ static const ui_layout_t k_layouts[UI_LAYOUT_COUNT] = {
     [UI_LAYOUT_SPLIT] = { "split", NULL, 0 },
     [UI_LAYOUT_SOLAR] = { "solar", NULL, 0 },
     [UI_LAYOUT_ENERGY] = { "energy", NULL, 0 },
+    [UI_LAYOUT_PC] = { "pc", k_pc, sizeof(k_pc) / sizeof(k_pc[0]) },
 };
 
 const ui_layout_t *ui_layout(ui_layout_id_t id)

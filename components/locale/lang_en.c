@@ -239,6 +239,8 @@ const lang_t lang_en = {
         [LS_NO_ENERGY] = "No data from the inverter yet",
         [LS_M_SYNC_STEPS] = "Steps",
         [LS_PC] = "PC",
+        [LS_PC_ASLEEP] = "PC asleep",
+        [LS_PC_SINCE] = "since %s",
     },
     .weekdays = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" },
     .weekdays_short = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" },

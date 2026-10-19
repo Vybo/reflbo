@@ -50,6 +50,7 @@ static void kwh_text(const lang_t *lang, uint32_t wh, char *out, size_t size)
  * from 10 kW whole; whole watts have none. */
 static void set_kw(const lang_t *lang, int32_t w, ui_value_t *out)
 {
+    ui_set_num(out, (float)w / 1000.0f); /* kW, signed, whatever the text's unit (M7) */
     snprintf(out->unit, sizeof(out->unit), "%s", power_text(lang, w, out->text, sizeof(out->text)));
     long a = magnitude(w);
     if (a >= 10000) {
@@ -62,6 +63,7 @@ static void set_kw(const lang_t *lang, int32_t w, ui_value_t *out)
 /* An energy and its shorter form: whole kWh from 10 kWh. */
 static void set_kwh(const lang_t *lang, uint32_t wh, ui_value_t *out)
 {
+    ui_set_num(out, (float)wh / 1000.0f); /* kWh (M7) */
     kwh_text(lang, wh, out->text, sizeof(out->text));
     if (wh >= 9950) {
         snprintf(out->short_text, sizeof(out->short_text), "%lu", (unsigned long)((wh + 500) / 1000));
@@ -136,6 +138,7 @@ static void resolve_forecast(const ui_context_t *ctx, const ui_solar_t *s, ui_fi
     }
     if (wh != SOLAR_WH_NONE) {
         set_kwh(lang, wh, out);
+        out->has_num = field != UI_FIELD_PV_CHART; /* the chart draws itself: no visual over it (M7) */
         out->state = UI_VALUE_FRESH;
     }
     if (out->state == UI_VALUE_FRESH) {
@@ -176,6 +179,8 @@ static void resolve_house(const ui_context_t *ctx, const ui_solar_t *s, ui_field
             break;
         }
         out->percent = r->soc;
+        ui_set_num(out, (float)r->soc);
+        ui_set_range(out, 0.0f, 100.0f);
         out->battery = flow_dir(r->bat_w) > 0 ? DS_BAT_CHARGING : DS_BAT_DISCHARGING;
         out->trend = flow_dir(r->bat_w) < 0 ? -1 : 0;
         snprintf(out->text, sizeof(out->text), "%d", r->soc);
@@ -206,6 +211,8 @@ static void resolve_house(const ui_context_t *ctx, const ui_solar_t *s, ui_field
         } else {
             snprintf(out->text, sizeof(out->text), "%d", pct);
             snprintf(out->unit, sizeof(out->unit), "%%");
+            ui_set_num(out, (float)pct);
+            ui_set_range(out, 0.0f, 100.0f);
         }
         break;
     }

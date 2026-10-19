@@ -47,6 +47,20 @@ bool ui_widget_labelled(gfx_fb_t *fb, gfx_rect_t r, ui_size_t size, const ui_val
 /* Whether the stale policy leaves the slot empty: nothing drawn, not even a title. */
 bool ui_widget_hidden(const ui_value_t *v, ui_stale_policy_t policy);
 /* A widget's label, where it draws it: notes it for ui_widget_labelled() (D42). */
+/* M7: a numeric value's number, and its own range (spec §5.3). */
+static inline void ui_set_num(ui_value_t *v, float num)
+{
+    v->has_num = true;
+    v->num = num;
+}
+
+static inline void ui_set_range(ui_value_t *v, float lo, float hi)
+{
+    v->has_range = true;
+    v->range_min = lo;
+    v->range_max = hi;
+}
+
 static inline const char *ui_label(const ui_value_t *v)
 {
     if (v->label_shown != NULL) {

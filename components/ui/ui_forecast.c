@@ -330,6 +330,7 @@ static void resolve_air(const ui_context_t *ctx, ui_field_id_t field, ui_value_t
     }
     if (field == UI_FIELD_AQ_UV) { /* D26: read rounded, in the WHO's bands */
         static const lang_str_t k_uv[] = { LS_UV_LOW, LS_UV_MODERATE, LS_UV_HIGH, LS_UV_VERY_HIGH, LS_UV_EXTREME };
+        ui_set_num(out, (float)series[h] / 10.0f);
         snprintf(out->text, sizeof(out->text), "%u", (unsigned)((series[h] + 5) / 10));
         out->percent = (int)weather_uv_band(series[h]);
         out->bands = 5;
@@ -337,6 +338,7 @@ static void resolve_air(const ui_context_t *ctx, ui_field_id_t field, ui_value_t
         return;
     }
     snprintf(out->text, sizeof(out->text), "%u", series[h]);
+    ui_set_num(out, (float)series[h]);
     if (field == UI_FIELD_AQ_INDEX) {
         out->bands = 6;
         out->percent = (int)weather_aq_band(series[h]);

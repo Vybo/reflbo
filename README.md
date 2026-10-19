@@ -4,11 +4,11 @@ Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-
 
 <p align="center"><img src="docs/images/panel/hero.png" width="820" alt="Four dashboards: a large clock with the date, indoor temperature, humidity, the moon and the battery; the current weather with today's forecast and the next hours; a rain radar map of Czechia; a flight radar with aircraft around Brno"></p>
 
-**Status:** version 0.1.0-dev. Milestones M0 to M6d are built: dashboards and presets, the on-device menu, Wi-Fi with a web configurator, syncing, weather and air quality, both radars, layouts of your own down to the status bar's size, and the solar forecast with the house's energy. MQTT and Home Assistant (M7) are designed; audio and microSD come after. The **[user guide](docs/guide.md)** describes every feature.
+**Status:** version 0.1.0-dev. Milestones M0 to M6e are built: dashboards and presets, the on-device menu, Wi-Fi with a web configurator, syncing, weather and air quality, both radars, layouts of your own down to the status bar's size, the solar forecast with the house's energy, and presets that join the auto-cycle only at the hours you choose. MQTT and Home Assistant (M7) are designed; audio and microSD come after. The **[user guide](docs/guide.md)** describes every feature.
 
 ## Features
 
-- **Dashboards.** Nine layouts and up to 16 presets. KEY switches them, an auto-cycle steps through them, and a schedule changes them by the time of day or turns the screen off for the night.
+- **Dashboards.** Nine layouts and up to 16 presets. KEY switches them, an auto-cycle steps through them, each within its own hours if you like (sunrise to sunset, say), and a schedule changes them by the time of day or turns the screen off for the night.
 - **Your own layouts.** Split the screen into up to 24 cells, as small as the status bar, on the web page, with a live preview drawn by the device.
 - **Indoor climate.** Temperature and humidity with their trends, the dew point, and the day's low and high.
 - **Weather and air.** From [Open-Meteo](https://open-meteo.com): now, today, the next hours and days, rain in the next 2 hours, air quality, PM2.5 and PM10, UV and pollen. Sunrise and sunset are computed on the device.
@@ -111,6 +111,7 @@ python3 tools/docs_images.py     # the panel images in docs/images from the gold
 | M6b: layouts of your own, BOOT double for Always on | Built |
 | M6c: smaller split cells, down to the status bar's size | Built |
 | M6d: solar forecast and the house's energy (SolaX Cloud) | Built |
+| M6e: cycle windows per preset | Built |
 | M7: MQTT and Home Assistant | Designed |
 | M8: alarms and internet radio | Planned |
 | M9: microSD | Planned |

@@ -144,10 +144,14 @@ A preset is a layout, its fields and its options. The device holds up to 16. It 
 | Focus clock | Focus |
 | Rain radar | Radar |
 | Flights | Flights; the cycle visits it only in sync mode Always on |
-| Solar | Solar; outside the cycle until you add it |
+| Solar | Solar; outside the cycle until you add it, then shown from sunrise to sunset |
 | Energy | Energy; outside the cycle until you add it |
 
 KEY steps through the presets marked "cycle". KEY double starts or stops the auto-cycle, which switches every 10 s to 1 h. A preset chosen by hand stays chosen after a restart.
+
+A preset in the cycle can have a window: the auto-cycle then shows it only between two times of day, on the days you tick. Each end is a time, or sunrise or sunset at the device's location, up to 3 hours before or after (30 minutes before sunset, say). An end before the start runs past midnight, so sunset to sunrise covers the night. While a preset's window is closed the auto-cycle steps past it, and when no other preset is open it keeps the one on screen; a preset on screen when its window closes stays until the next step. KEY, the schedule, the menu and the web page still reach it at any time. Until the clock is set, every window counts as open.
+
+The console sets a window too, `preset window solar sunrise sunset-30` (and `preset window solar off`), and `preset list` says whether each window is open now and until when.
 
 The schedule switches presets at set times of day, on chosen days. It can also start a night: the screen goes blank and the device sleeps until the morning time, unless a button wakes it for a minute. Up to 8 entries.
 
@@ -155,7 +159,7 @@ Presets, the auto-cycle and the schedule are edited on the web page, with a live
 
 A preset can move to another device. **Export**, in the preset's editor, saves it as a file named after the preset. **Import…**, under the list, reads such a file and adds the preset after the selected one, with a name of its own, in the cycle; Save keeps it. The device checks the preset first, as it checks any save, and says why if it can't show it.
 
-<p><img src="images/web/presets.png" width="260" alt="The Presets page: Home, Indoor, Weather, My weather (active), Focus clock, Rain radar and Flights in the cycle, Solar and Energy outside it"> <img src="images/web/presets-edit.png" width="260" alt="Editing My weather: a preview with numbered cells, the name, the layout Split and its first split, rows at 3/4"></p>
+<p><img src="images/web/presets.png" width="260" alt="The Presets page: Home, Indoor, Weather, My weather (active), Focus clock, Rain radar, Flights and Solar in the cycle, Solar from sunrise to sunset-30, Energy outside it"> <img src="images/web/presets-edit.png" width="260" alt="Editing My weather: a preview with numbered cells, the name, the layout Split and its first split, rows at 3/4"> <img src="images/web/presets-window.png" width="260" alt="Solar's In the cycle: within a window from sunrise until 30 minutes before sunset, every day ticked; below it the time format, the options and the status bar's boxes"></p>
 
 ## Your own layout
 

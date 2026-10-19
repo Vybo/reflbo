@@ -239,6 +239,42 @@ static void test_polar_days_and_nights(void)
     TEST_ASSERT_EQUAL_INT64(0, (int64_t)change);
 }
 
+/* With a sun end, a window runs past midnight only from an evening end (sunset, a time from 12:00) to a morning
+ * end (sunrise, a time before 12:00): on days its ends swap order it stays closed rather than a day long. */
+static void test_a_window_whose_ends_swap_with_the_seasons_stays_closed(void)
+{
+    ui_window_t dusk = window("18:00", "sunset", 127);
+    assert_state(&dusk, local_time(2026, 12, 21, 9, 0), false, 0); /* sunset before 18:00 for weeks */
+    astro_sun_t june21 = sun(2026, 6, 21, BRNO_LAT, BRNO_LON);
+    assert_state(&dusk, local_time(2026, 6, 21, 19, 0), true, (time_t)june21.sunset);
+    ui_window_t dawn = window("06:00", "sunrise", 127);
+    assert_state(&dawn, local_time(2026, 6, 21, 12, 0), false, 0); /* sunrise before 06:00 for weeks */
+    astro_sun_t dec21 = sun(2026, 12, 21, BRNO_LAT, BRNO_LON);
+    assert_state(&dawn, local_time(2026, 12, 21, 7, 0), true, (time_t)dec21.sunrise);
+    ui_window_t morning = window("sunrise", "07:30", 127);
+    assert_state(&morning, local_time(2026, 12, 21, 12, 0), false, 0);
+    ui_window_t late = window("sunset+180", "23:00", 127);
+    assert_state(&late, local_time(2026, 6, 21, 15, 0), false, 0);
+    ui_window_t night = window("sunset", "06:00", 127); /* evening to morning: still the night */
+    assert_state(&night, local_time(2026, 12, 21, 23, 0), true, local_time(2026, 12, 22, 6, 0));
+}
+
+/* So sunrise to sunset never runs past midnight: the first day after a polar night opens at its sunrise, and a
+ * window from sunrise stays closed through a polar night. */
+static void test_a_polar_night_keeps_sunrise_windows_closed(void)
+{
+    int y = 2027, mo = 2, d = 1;
+    while (sun(y, mo, d, SVALBARD_LAT, SVALBARD_LON).kind != ASTRO_NORMAL) {
+        d++;
+    }
+    TEST_ASSERT_EQUAL(ASTRO_POLAR_NIGHT, sun(y, mo, d - 1, SVALBARD_LAT, SVALBARD_LON).kind);
+    astro_sun_t first = sun(y, mo, d, SVALBARD_LAT, SVALBARD_LON);
+    ui_window_t day = window("sunrise", "sunset", 127);
+    assert_state_at(&day, local_time(y, mo, d, 0, 30), SVALBARD_LAT, SVALBARD_LON, false, (time_t)first.sunrise);
+    ui_window_t mixed = window("sunrise", "22:00", 127);
+    assert_state_at(&mixed, local_time(2026, 12, 21, 12, 0), SVALBARD_LAT, SVALBARD_LON, false, 0);
+}
+
 /* What `preset list` prints: the window, its days when not every day, and its state now. */
 static void test_the_console_text(void)
 {
@@ -274,6 +310,8 @@ int main(void)
     RUN_TEST(test_a_window_can_start_the_evening_before_its_day);
     RUN_TEST(test_dst_changes);
     RUN_TEST(test_polar_days_and_nights);
+    RUN_TEST(test_a_window_whose_ends_swap_with_the_seasons_stays_closed);
+    RUN_TEST(test_a_polar_night_keeps_sunrise_windows_closed);
     RUN_TEST(test_the_console_text);
     return UNITY_END();
 }

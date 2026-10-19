@@ -179,6 +179,22 @@ static int64_t local_day(time_t t)
     return util_days_from_civil(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
 }
 
+static bool is_evening(int16_t b)
+{
+    return is_sun(b) ? !is_sunrise(b) : b >= 12 * 60;
+}
+
+/* Whether the window runs past midnight, decided by its ends, not by a day's sun: two clock ends by the clock face
+ * (02:00-02:30 in a spring gap, both 03:00, is empty that night rather than a day long); with a sun end, from an
+ * evening end to a morning one, so ends that swap order with the seasons leave it closed rather than a day long. */
+static bool crosses_midnight(const ui_window_t *w)
+{
+    if (!is_sun(w->from) && !is_sun(w->until)) {
+        return w->until <= w->from;
+    }
+    return is_evening(w->from) && !is_evening(w->until);
+}
+
 /* The window that opens on `day`, [*start, *end); false when it doesn't open that day or would be empty. */
 static bool span(const ui_window_t *w, int64_t day, int32_t lat_e4, int32_t lon_e4, time_t *start, time_t *end)
 {
@@ -187,13 +203,7 @@ static bool span(const ui_window_t *w, int64_t day, int32_t lat_e4, int32_t lon_
         return false;
     }
     *start = bound_at(w->from, day, lat_e4, lon_e4);
-    *end = bound_at(w->until, day, lat_e4, lon_e4);
-    /* Two clock ends cross midnight by the clock face: 02:00-02:30 in a spring gap, both 03:00, is empty that
-     * night rather than a day long. */
-    bool clock = !is_sun(w->from) && !is_sun(w->until);
-    if (clock ? w->until <= w->from : *end <= *start) {
-        *end = bound_at(w->until, day + 1, lat_e4, lon_e4);
-    }
+    *end = bound_at(w->until, crosses_midnight(w) ? day + 1 : day, lat_e4, lon_e4);
     return *end > *start;
 }
 

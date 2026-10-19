@@ -1456,7 +1456,8 @@ function renderPresets(ed) {
     field('In the cycle', cycleWindow, 'The auto-cycle skips this preset while its window is closed; KEY still reaches it.'),
     p.window ? [field('From', bound('from')), field('Until', bound('until')), field('Days', windowDays()),
                 h('p', { class: 'muted small', text: 'Sunrise and sunset are the location\'s, with minutes after (+) or ' +
-                  'before (-). An end before the start runs past midnight.' })] : null,
+                  'before (-). Evening to morning runs past midnight (sunset to sunrise, 22:00 to 06:00), as do two ' +
+                  'times whose end comes first; a day when the sun puts the end before the start has no window.' })] : null,
     field('Time format', clock), check('seconds', 'Show seconds'),
     o.seconds ? h('p', { class: 'bad small', text: 'Seconds wake the device every second: the battery lasts far less.' }) : null,
     check('invert', 'White on black'), field('Old or missing data', stale),

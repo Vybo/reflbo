@@ -49,11 +49,13 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      15 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
+#define SNAP_VERSION      16 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
                                    9: 24 cells (M6c); 10: the solar state and the sync's two steps (M6d);
                                    11: the Developer API's plant (D37); 12: the presets' cycle windows (D41);
                                    13: the presets' titles (D42); 14: the last good sync and the presets'
-                                   status_sync (D43); 15: the forecast's setup */
+                                   status_sync (D43); 15: the forecast's setup; 16: the presets apart (M7) */
+#define PRESETS_MAGIC     0x7266707au /* "rfpz": the presets' block */
+#define PRESETS_VERSION   1
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */
 #define NIGHT_RECHECK_S   60    /* a night sleep with a button held looks again this often (D16) */
 #define CRITICAL_RECHECK_S 600  /* the critical sleep checks again this often if KEY is held */
@@ -102,6 +104,17 @@ typedef struct {
 _Static_assert(sizeof(app_snapshot_t) <= 7168, "the RTC-RAM snapshot is at most 7 KB (spec §6, M6c, D42)");
 
 static RTC_DATA_ATTR app_snapshot_t s_snap;
+
+/* The presets, with their titles and from M7 the PC ids and the visuals, in RTC FAST memory, which deep sleep keeps
+ * powered as it holds heap too (CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP): RTC slow memory had 330 bytes
+ * left (spec §6). Its own seal, so either block found broken makes the wake cold. */
+typedef struct {
+    util_snapshot_hdr_t hdr;
+    ui_presets_t presets;
+} app_presets_snapshot_t;
+_Static_assert(sizeof(app_presets_snapshot_t) <= 4608,
+               "the presets' block leaves RTC FAST memory 3.5 KB of heap at least (spec §6, M7)");
+static RTC_FAST_ATTR app_presets_snapshot_t s_presets_snap;
 static QueueHandle_t s_queue;
 static time_t s_next_alarm; /* the RTC alarm: the next minute slot */
 static time_t s_wake_at;    /* the earliest wake: the alarm, or a cycle switch or seconds tick before it */
@@ -445,13 +458,16 @@ static bool prepare_deep_sleep(void)
     sensors_export(&s_snap.sensors);
     display_export(&s_snap.display);
     app_ui_export(&s_snap.ui);
+    app_ui_export_presets(&s_presets_snap.presets);
     s_snap.next_alarm = s_next_alarm;
     util_snapshot_seal(&s_snap, sizeof(s_snap), SNAP_MAGIC, SNAP_VERSION);
+    util_snapshot_seal(&s_presets_snap, sizeof(s_presets_snap), PRESETS_MAGIC, PRESETS_VERSION);
     esp_err_t err = display_prepare_deep_sleep();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "panel pins: %s; light sleep this time", esp_err_to_name(err));
         display_cancel_deep_sleep();
         s_snap.hdr.magic = 0;
+        s_presets_snap.hdr.magic = 0;
         return false;
     }
     return true;
@@ -583,9 +599,11 @@ static esp_err_t boot(void)
         resume_config_set(false);
     }
     ESP_RETURN_ON_ERROR(err, TAG, "power");
-    bool warm = wake != POWER_WAKE_COLD && util_snapshot_valid(&s_snap, sizeof(s_snap), SNAP_MAGIC, SNAP_VERSION);
+    bool warm = wake != POWER_WAKE_COLD && util_snapshot_valid(&s_snap, sizeof(s_snap), SNAP_MAGIC, SNAP_VERSION) &&
+                util_snapshot_valid(&s_presets_snap, sizeof(s_presets_snap), PRESETS_MAGIC, PRESETS_VERSION);
     if (warm) {
         app_ui_import(&s_snap.ui); /* routine wakes skip storage: everything is in RTC RAM */
+        app_ui_import_presets(&s_presets_snap.presets);
         s_next_alarm = s_snap.next_alarm;
     } else {
         app_ui_defaults();

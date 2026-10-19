@@ -56,8 +56,7 @@ typedef struct {
 
 typedef struct {
     ds_t ds;
-    settings_t settings;
-    ui_presets_t presets;
+    settings_t settings; /* the presets are apart: their own block in RTC FAST memory (M7, spec §6) */
     time_t cycle_at;      /* next auto-cycle switch; 0 = not armed (cycling off, or no tick yet) */
     time_t done_slot;     /* the last minute slot that was sampled and rendered */
     time_t night_until;   /* night sleep ends here (UTC, on a minute); 0 = no night (spec §9.1) */
@@ -80,6 +79,9 @@ app_ui_state_t *app_state(void); /* the menu edits it (main/app_menu.c) */
 const settings_t *app_settings(void);
 ds_t *app_ds(void);
 ui_presets_t *app_presets(void);
+/* The presets through deep sleep, apart from app_ui_state_t: RTC slow memory can't hold them as they grow. */
+void app_ui_export_presets(ui_presets_t *out);
+void app_ui_import_presets(const ui_presets_t *in);
 
 /* Applies the settings that live outside the app: time zone, sensor offsets, freshness, panel rate. */
 void app_ui_apply_settings(void);

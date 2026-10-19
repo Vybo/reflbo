@@ -25,6 +25,7 @@
 static const char *TAG = "app_ui";
 
 static app_ui_state_t s;
+static ui_presets_t s_presets; /* through deep sleep in their own block (app_ui_export_presets) */
 /* The config files' text: scratch buffers in PSRAM (AGENTS.md §8). */
 EXT_RAM_BSS_ATTR static char s_file[UI_PRESETS_JSON_MAX];
 EXT_RAM_BSS_ATTR static char s_settings_base[SETTINGS_FILE_MAX]; /* settings.json as read: unknown keys stay */
@@ -68,7 +69,7 @@ void app_ui_defaults(void)
     memset(&s, 0, sizeof(s));
     ds_init(&s.ds);
     default_settings(&s.settings);
-    ui_presets_defaults(&s.presets);
+    ui_presets_defaults(&s_presets);
 }
 
 static bool parse_settings(const char *text, void *ctx)
@@ -114,7 +115,7 @@ void app_ui_load(void)
     EXT_RAM_BSS_ATTR static ui_presets_t presets_defaults; /* 2 KB with 24 cells (M6c): not on the app task's stack */
     ui_presets_defaults(&presets_defaults);
     s.settings = settings_defaults;
-    s.presets = presets_defaults;
+    s_presets = presets_defaults;
     s.cycle_at = 0; /* armed by the first tick, once the RTC has set the clock */
     s_settings_base[0] = '\0';
     esp_err_t err = storage_init();
@@ -128,9 +129,9 @@ void app_ui_load(void)
         s_settings_base[0] = '\0'; /* nothing worth keeping in it */
     }
     s.first_run = settings == ESP_ERR_NOT_FOUND; /* a new board, or a factory reset (spec §5.5) */
-    esp_err_t presets = load_one(STORAGE_PRESETS_PATH, s_file, sizeof(s_file), parse_presets, &s.presets,
-                                 sizeof(s.presets), &presets_defaults);
-    if (presets == ESP_OK && ui_presets_offer_builtins(&s.presets)) { /* spec §5.4: the radars, once */
+    esp_err_t presets = load_one(STORAGE_PRESETS_PATH, s_file, sizeof(s_file), parse_presets, &s_presets,
+                                 sizeof(s_presets), &presets_defaults);
+    if (presets == ESP_OK && ui_presets_offer_builtins(&s_presets)) { /* spec §5.4: the radars, once */
         ESP_LOGI(TAG, "presets.json: offered the built-in presets it didn't have");
         app_ui_save_presets();
     }
@@ -147,6 +148,16 @@ void app_ui_export(app_ui_state_t *out)
 void app_ui_import(const app_ui_state_t *in)
 {
     s = *in;
+}
+
+void app_ui_export_presets(ui_presets_t *out)
+{
+    *out = s_presets;
+}
+
+void app_ui_import_presets(const ui_presets_t *in)
+{
+    s_presets = *in;
 }
 
 app_ui_state_t *app_state(void)
@@ -166,7 +177,7 @@ ds_t *app_ds(void)
 
 ui_presets_t *app_presets(void)
 {
-    return &s.presets;
+    return &s_presets;
 }
 
 void app_ui_apply_settings(void)
@@ -232,7 +243,7 @@ void app_ui_context(ui_context_t *ctx)
 void app_ui_render(void)
 {
     gfx_fb_t *fb = display_fb();
-    const ui_preset_t *active = &s.presets.presets[s.presets.active];
+    const ui_preset_t *active = &s_presets.presets[s_presets.active];
     bool flights = fb != NULL && !display_asleep() && !app_menu_is_open() && !s.critical &&
                    !app_config_shows_setup() && !s.first_run && active->layout == UI_LAYOUT_FLIGHTS;
     app_flights_tick(flights); /* spec §11.3: it polls only while the Flights view shows */
@@ -254,8 +265,8 @@ void app_ui_render(void)
         ui_draw_first_run(fb, &ctx);
     } else {
         ui_titles_t titles; /* the preset's own (spec §5.4, D42) */
-        ui_presets_titles(&s.presets, s.presets.active, &titles);
-        ui_draw_dashboard(fb, &ctx, &s.presets.presets[s.presets.active], &titles);
+        ui_presets_titles(&s_presets, s_presets.active, &titles);
+        ui_draw_dashboard(fb, &ctx, &s_presets.presets[s_presets.active], &titles);
     }
     if (app_ui_toast_active()) {
         ui_draw_toast(fb, s_toast);
@@ -464,7 +475,7 @@ void app_ui_sample(time_t now)
 
 esp_err_t app_ui_save_presets(void)
 {
-    size_t n = ui_presets_to_json(&s.presets, s_file, sizeof(s_file));
+    size_t n = ui_presets_to_json(&s_presets, s_file, sizeof(s_file));
     if (n == 0) {
         ESP_LOGE(TAG, "presets.json does not fit %u bytes", (unsigned)sizeof(s_file));
         return ESP_ERR_INVALID_SIZE;
@@ -517,14 +528,14 @@ esp_err_t app_ui_save_settings(void)
 
 void app_ui_select(int index, bool persist)
 {
-    if (index < 0 || index >= s.presets.count) {
+    if (index < 0 || index >= s_presets.count) {
         return;
     }
-    s.presets.active = (uint8_t)index;
-    if (s.presets.cycle_enabled) {
-        s.cycle_at = time(NULL) + s.presets.cycle_interval_s; /* a switch restarts the interval */
+    s_presets.active = (uint8_t)index;
+    if (s_presets.cycle_enabled) {
+        s.cycle_at = time(NULL) + s_presets.cycle_interval_s; /* a switch restarts the interval */
     }
-    ESP_LOGI(TAG, "preset %s", s.presets.presets[index].id);
+    ESP_LOGI(TAG, "preset %s", s_presets.presets[index].id);
     app_ui_render();
     if (persist) {
         app_ui_save_presets();
@@ -533,15 +544,15 @@ void app_ui_select(int index, bool persist)
 
 void app_ui_set_cycle(bool enabled)
 {
-    s.presets.cycle_enabled = enabled;
-    s.cycle_at = enabled ? time(NULL) + s.presets.cycle_interval_s : 0;
+    s_presets.cycle_enabled = enabled;
+    s.cycle_at = enabled ? time(NULL) + s_presets.cycle_interval_s : 0;
     ESP_LOGI(TAG, "auto-cycle %s", enabled ? "on" : "off");
     app_ui_save_presets();
 }
 
 void app_ui_toggle_cycle(void)
 {
-    app_ui_set_cycle(!s.presets.cycle_enabled);
+    app_ui_set_cycle(!s_presets.cycle_enabled);
 }
 
 void app_ui_start_night(time_t until)
@@ -564,7 +575,7 @@ bool app_ui_night(void)
 
 static bool schedule_runs(void)
 {
-    return s.presets.schedule.enabled && s.presets.schedule.count > 0 && timekeeping_valid() && s.night_until == 0 &&
+    return s_presets.schedule.enabled && s_presets.schedule.count > 0 && timekeeping_valid() && s.night_until == 0 &&
            !s.critical; /* the critical screen stays put, and a night would take its place */
 }
 
@@ -580,9 +591,9 @@ static void run_schedule(time_t now)
      * sleep no entry could end, such as the critical one. */
     time_t max_gap = (time_t)s.settings.display_every_min * 60 + 300;
     int order[UI_SCHEDULE_MAX];
-    int n = ui_schedule_step(&s.presets.schedule, &s.sched_checked, now, max_gap, order);
+    int n = ui_schedule_step(&s_presets.schedule, &s.sched_checked, now, max_gap, order);
     for (int i = 0; i < n; i++) {
-        const ui_schedule_entry_t *e = &s.presets.schedule.entries[order[i]];
+        const ui_schedule_entry_t *e = &s_presets.schedule.entries[order[i]];
         if (e->action == UI_SCHED_NIGHT) {
             char until[8], text[48];
             time_t end = sched_next_weekly(now, e->until_min, 0x7F);
@@ -592,7 +603,7 @@ static void run_schedule(time_t now)
             app_ui_toast(text);
             break;
         }
-        ESP_LOGI(TAG, "schedule: preset %s", s.presets.presets[e->preset].id);
+        ESP_LOGI(TAG, "schedule: preset %s", s_presets.presets[e->preset].id);
         app_ui_select(e->preset, false);
     }
 }
@@ -605,7 +616,7 @@ void app_ui_tick(bool force)
     }
     time_t slot = now - now % 60;
     bool new_slot = slot != s.done_slot;
-    bool render = force || s.presets.presets[s.presets.active].seconds;
+    bool render = force || s_presets.presets[s_presets.active].seconds;
     if (force || (new_slot && scheduler_is_slot(slot, s.settings.sensors_every_min))) {
         app_ui_sample(now);
         render = true;
@@ -616,12 +627,12 @@ void app_ui_tick(bool force)
     s.done_slot = slot;
     run_schedule(now);
     app_sync_tick();
-    if (s.presets.cycle_enabled && (s.cycle_at == 0 || s.cycle_at - now > s.presets.cycle_interval_s)) {
-        s.cycle_at = now + s.presets.cycle_interval_s; /* the first tick, or the clock moved back */
+    if (s_presets.cycle_enabled && (s.cycle_at == 0 || s.cycle_at - now > s_presets.cycle_interval_s)) {
+        s.cycle_at = now + s_presets.cycle_interval_s; /* the first tick, or the clock moved back */
     }
-    if (s.presets.cycle_enabled && now >= s.cycle_at) {
+    if (s_presets.cycle_enabled && now >= s.cycle_at) {
         time_t at = timekeeping_valid() ? now : 0; /* without a valid clock every window is open (spec §5.4) */
-        app_ui_select(ui_presets_cycle_next(&s.presets, s.settings.sync_mode == SETTINGS_SYNC_ALWAYS, at,
+        app_ui_select(ui_presets_cycle_next(&s_presets, s.settings.sync_mode == SETTINGS_SYNC_ALWAYS, at,
                                             s.settings.lat_e4, s.settings.lon_e4),
                       false); /* renders; not saved, the cycle will move on */
         return;
@@ -638,9 +649,9 @@ sched_wake_t app_ui_next_wake(time_t now)
         .now = now,
         .display_every_min = s.settings.display_every_min,
         .sensors_every_min = s.settings.sensors_every_min,
-        .cycle_at = s.presets.cycle_enabled ? s.cycle_at : 0,
-        .every_second = s.presets.presets[s.presets.active].seconds,
-        .schedule_at = schedule_runs() ? ui_schedule_next(&s.presets.schedule, now, &index) : 0,
+        .cycle_at = s_presets.cycle_enabled ? s.cycle_at : 0,
+        .every_second = s_presets.presets[s_presets.active].seconds,
+        .schedule_at = schedule_runs() ? ui_schedule_next(&s_presets.schedule, now, &index) : 0,
         .sync_at = s.critical || s.night_until != 0 ? 0 : app_sync_due(),
     };
     return scheduler_next_wake(&in);
@@ -706,9 +717,9 @@ esp_err_t app_ui_patch_settings(const char *patch, char *err, size_t err_size)
 
 esp_err_t app_ui_replace_presets(const ui_presets_t *presets)
 {
-    uint8_t offered = s.presets.offered;
-    s.presets = *presets;
-    s.presets.offered |= offered; /* a page or backup without the marker: what was offered stays offered */
+    uint8_t offered = s_presets.offered;
+    s_presets = *presets;
+    s_presets.offered |= offered; /* a page or backup without the marker: what was offered stays offered */
     s.cycle_at = 0;              /* the next tick starts the cycle interval */
     s.sched_checked = time(NULL); /* entries don't run late for a new schedule */
     esp_err_t err = app_ui_save_presets();

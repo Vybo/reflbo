@@ -135,17 +135,17 @@ static void build_model(void)
     ui_menu_model_t *m = &s_model;
     memset(m, 0, sizeof(*m));
 
-    for (int i = 0; i < st->presets.count; i++) {
-        s_preset_names[i] = st->presets.presets[i].name;
+    for (int i = 0; i < app_presets()->count; i++) {
+        s_preset_names[i] = app_presets()->presets[i].name;
     }
     m->choices[UI_MI_ACTIVE_PRESET] = s_preset_names;
-    m->choice_count[UI_MI_ACTIVE_PRESET] = st->presets.count;
-    m->value[UI_MI_ACTIVE_PRESET] = st->presets.active;
-    m->value[UI_MI_AUTO_CYCLE] = st->presets.cycle_enabled;
+    m->choice_count[UI_MI_ACTIVE_PRESET] = app_presets()->count;
+    m->value[UI_MI_ACTIVE_PRESET] = app_presets()->active;
+    m->value[UI_MI_AUTO_CYCLE] = app_presets()->cycle_enabled;
     m->choices[UI_MI_CYCLE_INTERVAL] = k_cycle_labels;
     m->choice_count[UI_MI_CYCLE_INTERVAL] = CYCLE_COUNT;
-    m->value[UI_MI_CYCLE_INTERVAL] = nearest_index(k_cycle_s, CYCLE_COUNT, st->presets.cycle_interval_s);
-    m->value[UI_MI_SCHEDULE] = st->presets.schedule.enabled;
+    m->value[UI_MI_CYCLE_INTERVAL] = nearest_index(k_cycle_s, CYCLE_COUNT, app_presets()->cycle_interval_s);
+    m->value[UI_MI_SCHEDULE] = app_presets()->schedule.enabled;
 
     time_t now = time(NULL);
     localtime_r(&now, &m->local);
@@ -266,14 +266,14 @@ static void apply(const ui_menu_intent_t *in)
             app_ui_set_cycle(in->value != 0);
             break;
         case UI_MI_CYCLE_INTERVAL:
-            st->presets.cycle_interval_s = k_cycle_s[in->value < CYCLE_COUNT ? in->value : 0];
-            if (st->presets.cycle_enabled) {
-                st->cycle_at = time(NULL) + st->presets.cycle_interval_s;
+            app_presets()->cycle_interval_s = k_cycle_s[in->value < CYCLE_COUNT ? in->value : 0];
+            if (app_presets()->cycle_enabled) {
+                st->cycle_at = time(NULL) + app_presets()->cycle_interval_s;
             }
             save_presets = true;
             break;
         case UI_MI_SCHEDULE:
-            st->presets.schedule.enabled = in->value != 0;
+            app_presets()->schedule.enabled = in->value != 0;
             st->sched_checked = time(NULL);
             save_presets = true;
             break;

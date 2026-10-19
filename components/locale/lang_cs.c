@@ -215,6 +215,7 @@ const lang_t lang_cs = {
         [LS_SYNC_STEP_RADAR] = "Radar",
         [LS_SYNC_STEP_SOLAR] = "Předpověď FVE",
         [LS_SYNC_STEP_ENERGY] = "Energie domu",
+        [LS_SYNC_STEP_PC] = "PC",
         [LS_SYNC_NEVER] = "Nikdy",
         [LS_SYNC_RUNNING] = "Probíhá",
         [LS_T_SYNC_STARTED] = "Synchronizuji…",

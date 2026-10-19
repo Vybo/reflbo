@@ -59,6 +59,7 @@ static void default_settings(settings_t *out)
     settings_sync_defaults(out);
     settings_radar_defaults(out);
     settings_solar_defaults(out);
+    settings_pc_defaults(out); /* M7 */
     snprintf(out->place, sizeof(out->place), "%s", CONFIG_REFLBO_LOCATION_NAME);
     snprintf(out->tz_posix, sizeof(out->tz_posix), "%s", CONFIG_REFLBO_TZ);
     snprintf(out->tz_iana, sizeof(out->tz_iana), "%s", CONFIG_REFLBO_TZ_NAME);

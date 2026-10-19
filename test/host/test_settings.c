@@ -19,6 +19,7 @@ void setUp(void)
                                .ntp = { "cz.pool.ntp.org", "pool.ntp.org" } };
     settings_radar_defaults(&s_defaults);
     settings_solar_defaults(&s_defaults);
+    settings_pc_defaults(&s_defaults);
     memset(&s_out, 0xAA, sizeof(s_out));
     s_err[0] = '\0';
 }
@@ -514,7 +515,8 @@ static void test_the_solar_defaults_are_the_specs(void)
 
 static void test_the_sync_steps_parse_and_round_trip(void)
 {
-    const char *json = "{\"schema\":1,\"sync\":{\"steps\":[\"weather\",\"radar\",\"energy\",\"time\",\"tides\"]}}";
+    const char *json = "{\"schema\":1,\"pc\":{},\"sync\":{\"steps\":[\"weather\",\"radar\",\"energy\",\"time\","
+                       "\"tides\"]}}";
     TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_STEP_WEATHER | SETTINGS_STEP_RADAR | SETTINGS_STEP_ENERGY, s_out.sync_steps);
     TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
@@ -522,7 +524,7 @@ static void test_the_sync_steps_parse_and_round_trip(void)
     settings_t again;
     TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &again, s_err, sizeof(s_err)), s_err);
     TEST_ASSERT_EQUAL_UINT8(s_out.sync_steps, again.sync_steps);
-    json = "{\"schema\":1,\"sync\":{\"steps\":[]}}"; /* every data step off: the time still runs */
+    json = "{\"schema\":1,\"pc\":{},\"sync\":{\"steps\":[]}}"; /* every data step off: the time still runs */
     TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
     TEST_ASSERT_EQUAL_UINT8(0, s_out.sync_steps);
     json = "{\"schema\":1,\"sync\":{\"steps\":\"all\"}}"; /* not a list: all of them */
@@ -628,7 +630,8 @@ static void test_secrets_never_reach_the_file(void)
     const char *patch = "{\"solar\":{\"source\":\"solcast\",\"solcast_key\":\"Kk_1-2\","
                         "\"solcast_sites\":[\"ab12-cd34\",\"ef56\"],\"fs_key\":\"AbC123\"},"
                         "\"energy\":{\"solax_token\":\"20200722\",\"solax_sn\":\"SXA1B2C3D4\",\"battery\":\"off\","
-                        "\"solax_client_id\":\"Cid-1\",\"solax_client_secret\":\"Sec_2\"}}";
+                        "\"solax_client_id\":\"Cid-1\",\"solax_client_secret\":\"Sec_2\"},"
+                        "\"pc\":{\"enabled\":true,\"token\":\"ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z\"}}";
     settings_secrets_t secrets;
     char clean[512];
     TEST_ASSERT_TRUE_MESSAGE(settings_take_secrets(patch, clean, sizeof(clean), &secrets, s_err, sizeof(s_err)) > 0,
@@ -648,7 +651,11 @@ static void test_secrets_never_reach_the_file(void)
     TEST_ASSERT_EQUAL_STRING("AbC123", secrets.value[SETTINGS_SECRET_FS_KEY]);
     TEST_ASSERT_EQUAL_STRING("20200722", secrets.value[SETTINGS_SECRET_SOLAX_TOKEN]);
     TEST_ASSERT_EQUAL_STRING("SXA1B2C3D4", secrets.value[SETTINGS_SECRET_SOLAX_SN]);
+    TEST_ASSERT_EQUAL_STRING("ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z", secrets.value[SETTINGS_SECRET_PC_TOKEN]); /* as typed */
+    TEST_ASSERT_NULL(strstr(clean, "token"));
+    TEST_ASSERT_NOT_NULL(strstr(clean, "\"enabled\":true"));
     TEST_ASSERT_EQUAL_STRING("solcast_site2", settings_secret_key(SETTINGS_SECRET_SOLCAST_SITE2));
+    TEST_ASSERT_EQUAL_STRING("pc_token", settings_secret_key(SETTINGS_SECRET_PC_TOKEN)); /* spec §14.2 */
     TEST_ASSERT_TRUE(settings_patch("{\"schema\":1}", clean, s_json, sizeof(s_json), s_err, sizeof(s_err)) > 0);
     TEST_ASSERT_NULL(strstr(s_json, "Kk_1"));
 }
@@ -712,6 +719,7 @@ static void test_secrets_the_requests_cannot_carry_are_refused(void)
         { "{\"solar\":{\"solcast_sites\":\"a\"}}", "solar.solcast_sites: a list" },
         { "{\"energy\":{\"solax_token\":\"20\\r\\n20\"}}", "energy.solax_token: letters and digits only" },
         { "{\"energy\":{\"solax_sn\":42}}", "energy.solax_sn: a string" },
+        { "{\"pc\":{\"token\":\"ABCDE/FGHIJ\"}}", "pc.token: letters, digits, - and spaces only" },
         { "{\"energy\":{\"solax_sn\":\"0123456789012345678901234567890123456789012345678901234567890123\"}}",
           "energy.solax_sn: 63 characters at most" },
     };
@@ -735,6 +743,63 @@ static void test_a_second_plane_needs_a_forecast_solar_key(void)
     TEST_ASSERT_TRUE(settings_check_solar(&s, true, s_err, sizeof(s_err)));
     s.solar_source = SETTINGS_SOLAR_OPEN_METEO; /* our model takes both */
     TEST_ASSERT_TRUE(settings_check_solar(&s, false, s_err, sizeof(s_err)));
+}
+
+static void test_the_pc_defaults_are_the_specs(void)
+{
+    settings_t d;
+    memset(&d, 0xAA, sizeof(d));
+    settings_pc_defaults(&d); /* spec §12a.1 */
+    TEST_ASSERT_FALSE(d.pc_enabled);
+    TEST_ASSERT_EQUAL_STRING("", d.pc_host);
+    TEST_ASSERT_EQUAL_UINT16(47123, d.pc_port);
+    TEST_ASSERT_EQUAL_UINT16(1000, d.pc_interval_ms);
+    TEST_ASSERT_TRUE(d.pc_auto_always);
+    TEST_ASSERT_EQUAL_STRING("pc", d.pc_preset);
+    TEST_ASSERT_EQUAL_STRING("pc", settings_step_name(SETTINGS_STEP_PC));
+}
+
+static void test_the_pc_settings_parse_clamp_and_round_trip(void)
+{
+    const char *json = "{\"schema\":1,\"pc\":{\"enabled\":true,\"host\":\"desktop-pc.local\",\"port\":47200,"
+                       "\"interval_ms\":100,\"auto_always\":false,\"preset\":\"gaming\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_TRUE(s_out.pc_enabled);
+    TEST_ASSERT_EQUAL_STRING("desktop-pc.local", s_out.pc_host);
+    TEST_ASSERT_EQUAL_UINT16(47200, s_out.pc_port);
+    TEST_ASSERT_EQUAL_UINT16(250, s_out.pc_interval_ms); /* clamped to 250 ms-10 s */
+    TEST_ASSERT_FALSE(s_out.pc_auto_always);
+    TEST_ASSERT_EQUAL_STRING("gaming", s_out.pc_preset);
+    TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
+    settings_t again;
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(s_json, &s_defaults, &again, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_MEMORY(&s_out, &again, sizeof(again));
+    /* one bad value at a time takes its default; "" is no preset */
+    json = "{\"schema\":1,\"pc\":{\"host\":\"bad host/\",\"port\":0,\"interval_ms\":60000,\"preset\":\"\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("", s_out.pc_host);
+    TEST_ASSERT_EQUAL_UINT16(47123, s_out.pc_port);
+    TEST_ASSERT_EQUAL_UINT16(10000, s_out.pc_interval_ms);
+    TEST_ASSERT_EQUAL_STRING("", s_out.pc_preset);
+    json = "{\"schema\":1,\"pc\":{\"host\":\"192.168.1.20\",\"preset\":\"Not An Id\"}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_STRING("192.168.1.20", s_out.pc_host);
+    TEST_ASSERT_EQUAL_STRING("pc", s_out.pc_preset);
+}
+
+/* A steps list from before M7 never names the PC step: a file without a "pc" object runs it. */
+static void test_an_older_files_steps_run_the_pc_step(void)
+{
+    const char *json = "{\"schema\":1,\"sync\":{\"steps\":[\"weather\",\"energy\"]}}";
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_STEP_WEATHER | SETTINGS_STEP_ENERGY | SETTINGS_STEP_PC, s_out.sync_steps);
+    json = "{\"schema\":1,\"pc\":{},\"sync\":{\"steps\":[\"weather\",\"energy\"]}}"; /* M7's own: as it says */
+    TEST_ASSERT_TRUE_MESSAGE(settings_from_json(json, &s_defaults, &s_out, s_err, sizeof(s_err)), s_err);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_STEP_WEATHER | SETTINGS_STEP_ENERGY, s_out.sync_steps);
+    s_out.sync_steps |= SETTINGS_STEP_PC;
+    TEST_ASSERT_TRUE(settings_to_json(&s_out, NULL, s_json, sizeof(s_json)) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"steps\":\t[\"weather\", \"energy\", \"pc\"]"));
+    TEST_ASSERT_NOT_NULL(strstr(s_json, "\"pc\":\t{"));
 }
 
 static void test_the_largest_settings_fit_the_file_buffer(void)
@@ -769,6 +834,11 @@ static void test_the_largest_settings_fit_the_file_buffer(void)
     }
     s.solar_source = SETTINGS_SOLAR_FORECAST_SOLAR;
     s.solar_inverter_kw_e2 = 9999;
+    memset(s.pc_host, 'h', SETTINGS_HOST_LEN - 1); /* M7 */
+    s.pc_host[SETTINGS_HOST_LEN - 1] = '\0';
+    memset(s.pc_preset, 'p', sizeof(s.pc_preset) - 1);
+    s.pc_preset[sizeof(s.pc_preset) - 1] = '\0';
+    s.pc_interval_ms = 10000;
     size_t n = settings_to_json(&s, NULL, s_json, sizeof(s_json));
     TEST_ASSERT_TRUE(n > 0);
     TEST_ASSERT_TRUE(n < SETTINGS_FILE_MAX / 2); /* room for keys a later firmware adds (M7's mqtt.*) */
@@ -815,6 +885,9 @@ int main(void)
     RUN_TEST(test_a_solcast_key_or_site_starts_its_budget_over);
     RUN_TEST(test_secrets_the_requests_cannot_carry_are_refused);
     RUN_TEST(test_a_second_plane_needs_a_forecast_solar_key);
+    RUN_TEST(test_the_pc_defaults_are_the_specs);
+    RUN_TEST(test_the_pc_settings_parse_clamp_and_round_trip);
+    RUN_TEST(test_an_older_files_steps_run_the_pc_step);
     RUN_TEST(test_the_largest_settings_fit_the_file_buffer);
     return UNITY_END();
 }

@@ -50,6 +50,7 @@ static const node_t k_nodes[UI_MI_COUNT] = {
     [UI_MI_STEP_RADAR] = { .label = LS_SYNC_STEP_RADAR, .kind = K_TOGGLE, .parent = UI_MI_SYNC_STEPS },
     [UI_MI_STEP_SOLAR] = { .label = LS_SYNC_STEP_SOLAR, .kind = K_TOGGLE, .parent = UI_MI_SYNC_STEPS },
     [UI_MI_STEP_ENERGY] = { .label = LS_SYNC_STEP_ENERGY, .kind = K_TOGGLE, .parent = UI_MI_SYNC_STEPS },
+    [UI_MI_STEP_PC] = { .label = LS_SYNC_STEP_PC, .kind = K_TOGGLE, .parent = UI_MI_SYNC_STEPS },
     [UI_MI_TIME] = { .label = LS_M_TIME, .kind = K_SECTION, .parent = UI_MI_ROOT },
     [UI_MI_SET_DATETIME] = { .label = LS_M_SET_DATETIME, .kind = K_DATETIME, .parent = UI_MI_TIME },
     [UI_MI_CLOCK_24H] = { .label = LS_M_CLOCK_24H, .kind = K_TOGGLE, .parent = UI_MI_TIME },

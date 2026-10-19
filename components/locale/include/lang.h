@@ -164,6 +164,7 @@ typedef enum {
     LS_SYNC_STEP_RADAR,
     LS_SYNC_STEP_SOLAR,  /* M6d (D35, D36) */
     LS_SYNC_STEP_ENERGY,
+    LS_SYNC_STEP_PC, /* M7 */
     LS_SYNC_NEVER,
     LS_SYNC_RUNNING,
     LS_T_SYNC_STARTED,

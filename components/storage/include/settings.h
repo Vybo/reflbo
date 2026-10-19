@@ -47,8 +47,9 @@ typedef enum {
     SETTINGS_STEP_RADAR = 1 << 2,
     SETTINGS_STEP_SOLAR = 1 << 3,
     SETTINGS_STEP_ENERGY = 1 << 4,
+    SETTINGS_STEP_PC = 1 << 5, /* M7 (D44): finding the PC app (spec §12a.2) */
 } settings_step_t;
-#define SETTINGS_STEPS_ALL 0x1F
+#define SETTINGS_STEPS_ALL 0x3F
 
 /* solar.source (spec §11.5); the values match solar_source_t in the solar component. */
 typedef enum {
@@ -66,6 +67,12 @@ typedef enum { SETTINGS_REGION_EU, SETTINGS_REGION_CN, SETTINGS_REGION_IN } sett
 typedef enum { SETTINGS_BATTERY_AUTO, SETTINGS_BATTERY_ON, SETTINGS_BATTERY_OFF } settings_energy_battery_t;
 
 #define SETTINGS_PLANES_MAX 2
+
+/* pc (spec §12a.1, M7, D44). */
+#define SETTINGS_PC_PORT 47123
+#define SETTINGS_PC_INTERVAL_MIN_MS 250
+#define SETTINGS_PC_INTERVAL_MAX_MS 10000
+#define SETTINGS_PC_PRESET_LEN 16 /* a preset id, as UI_PRESET_ID_LEN */
 
 /* A roof plane (spec §11.5). */
 typedef struct {
@@ -117,6 +124,12 @@ typedef struct {
     uint8_t energy_source;         /* settings_energy_source_t */
     uint8_t energy_battery;        /* settings_energy_battery_t */
     uint8_t energy_region;         /* settings_energy_region_t: the Developer API's */
+    bool pc_enabled;                     /* PC stats (M7, D44) */
+    char pc_host[SETTINGS_HOST_LEN];     /* the PC's address or name; "" for none */
+    uint16_t pc_port;                    /* 1..65535 */
+    uint16_t pc_interval_ms;             /* 250..10000: how often the PC app sends its readings */
+    bool pc_auto_always;                 /* a session switches to sync mode `always` */
+    char pc_preset[SETTINGS_PC_PRESET_LEN]; /* and shows this preset; "" for none */
 } settings_t;
 
 /* The sync's and the NTP servers' defaults (spec §14.3): times mode at 05:30, a 60 min interval,
@@ -141,7 +154,10 @@ void settings_radar_defaults(settings_t *out);
 /* The steps', the PV forecast's and the house's defaults (spec §14.3): every step on; no source; one
  * plane of 5 kWp tilted 35° to the south, 14 % losses, no inverter limit; the battery on auto. */
 void settings_solar_defaults(settings_t *out);
-/* A step's name in sync.steps: "weather", "air", "radar", "solar", "energy". */
+/* The PC's defaults (spec §12a.1): off, no address, port 47123, a reading a second, a session that switches to sync
+ * mode `always` and to the preset `pc`. */
+void settings_pc_defaults(settings_t *out);
+/* A step's name in sync.steps: "weather", "air", "radar", "solar", "energy", "pc". */
 const char *settings_step_name(settings_step_t step);
 /* Forecast.Solar takes a second plane only with a key (spec §11.5): false with the reason. */
 bool settings_check_solar(const settings_t *s, bool fs_key_set, char *err, size_t err_size);
@@ -157,6 +173,7 @@ typedef enum {
     SETTINGS_SECRET_SOLAX_SN,      /* energy.solax_sn */
     SETTINGS_SECRET_SOLAX_CLIENT_ID,     /* energy.solax_client_id: the Developer API's application (D37) */
     SETTINGS_SECRET_SOLAX_CLIENT_SECRET, /* energy.solax_client_secret */
+    SETTINGS_SECRET_PC_TOKEN,            /* pc.token: the PC app's, kept as typed (spec §12a.1, M7) */
     SETTINGS_SECRET_COUNT,
 } settings_secret_t;
 #define SETTINGS_SECRET_LEN 64
@@ -169,8 +186,8 @@ typedef struct {
 /* Its key in NVS `secrets`: "fs_key", "solcast_key", "solcast_site1", ... */
 const char *settings_secret_key(settings_secret_t secret);
 /* `patch` without its secrets into `out`, the secrets into `secrets`. Each must be one the requests
- * can carry: letters and digits (the Solcast key also - and _, its sites -), 63 at most. Returns the
- * length written, or 0 with the reason in `err`. */
+ * can carry: letters and digits (the Solcast key also - and _, its sites -, the PC's token - and spaces), 63 at
+ * most. Returns the length written, or 0 with the reason in `err`. */
 size_t settings_take_secrets(const char *patch, char *out, size_t size, settings_secrets_t *secrets, char *err,
                              size_t err_size);
 /* Whether `secrets` sets or clears Solcast's key or a site: its budget then starts over (spec §11.5). */

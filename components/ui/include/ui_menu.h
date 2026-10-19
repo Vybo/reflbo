@@ -36,6 +36,7 @@ typedef enum {
     UI_MI_STEP_RADAR,
     UI_MI_STEP_SOLAR,
     UI_MI_STEP_ENERGY,
+    UI_MI_STEP_PC, /* M7 (D44): finding the PC */
     UI_MI_TIME,
     UI_MI_SET_DATETIME, /* the date-time editor */
     UI_MI_CLOCK_24H,    /* toggle */

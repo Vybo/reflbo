@@ -225,7 +225,7 @@ static void read_radar(const cJSON *radar, settings_t *out)
     out->fl_max = (uint8_t)read_scaled(fl, "max", out->fl_max, 1, 1, 100);
 }
 
-static const char *const k_steps[] = { "weather", "air", "radar", "solar", "energy" };
+static const char *const k_steps[] = { "weather", "air", "radar", "solar", "energy", "pc" };
 static const char *const k_solar_sources[] = { [SETTINGS_SOLAR_OFF] = "off", [SETTINGS_SOLAR_OPEN_METEO] = "open-meteo",
                                                [SETTINGS_SOLAR_FORECAST_SOLAR] = "forecast-solar",
                                                [SETTINGS_SOLAR_SOLCAST] = "solcast" };
@@ -302,6 +302,50 @@ void settings_solar_defaults(settings_t *out)
     out->energy_source = SETTINGS_ENERGY_OFF;
     out->energy_battery = SETTINGS_BATTERY_AUTO;
     out->energy_region = SETTINGS_REGION_EU;
+}
+
+void settings_pc_defaults(settings_t *out)
+{
+    out->pc_enabled = false;
+    out->pc_host[0] = '\0';
+    out->pc_port = SETTINGS_PC_PORT;
+    out->pc_interval_ms = 1000;
+    out->pc_auto_always = true;
+    snprintf(out->pc_preset, sizeof(out->pc_preset), "%s", "pc");
+}
+
+/* A preset id's characters: a-z, 0-9, - and _ (ui_preset_json.c), 15 at most. */
+static bool preset_id(const char *s)
+{
+    size_t n = strlen(s);
+    for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_')) {
+            return false;
+        }
+    }
+    return n < SETTINGS_PC_PRESET_LEN;
+}
+
+/* pc (spec §12a.1): each bad value keeps its default. */
+static void read_pc(const cJSON *pc, settings_t *out)
+{
+    read_bool(pc, "enabled", &out->pc_enabled);
+    const cJSON *host = child(pc, "host");
+    if (cJSON_IsString(host) && (host->valuestring[0] == '\0' || host_name(host->valuestring))) {
+        snprintf(out->pc_host, sizeof(out->pc_host), "%s", host->valuestring);
+    }
+    const cJSON *port = child(pc, "port");
+    if (cJSON_IsNumber(port) && port->valuedouble >= 1 && port->valuedouble <= 65535) {
+        out->pc_port = (uint16_t)port->valuedouble;
+    }
+    out->pc_interval_ms = (uint16_t)read_scaled(pc, "interval_ms", out->pc_interval_ms, 1, SETTINGS_PC_INTERVAL_MIN_MS,
+                                                SETTINGS_PC_INTERVAL_MAX_MS);
+    read_bool(pc, "auto_always", &out->pc_auto_always);
+    const cJSON *preset = child(pc, "preset");
+    if (cJSON_IsString(preset) && preset_id(preset->valuestring)) {
+        snprintf(out->pc_preset, sizeof(out->pc_preset), "%s", preset->valuestring);
+    }
 }
 
 const char *settings_step_name(settings_step_t step)
@@ -431,7 +475,11 @@ bool settings_from_json(const char *json, const settings_t *defaults, settings_t
     read_sync(child(root, "sync"), out);
     read_radar(child(root, "radar"), out); /* after the location, which its centres may follow */
     read_steps(child(child(root, "sync"), "steps"), out);
+    if (!cJSON_IsObject(child(root, "pc"))) {
+        out->sync_steps |= SETTINGS_STEP_PC; /* a steps list from before M7 never names it */
+    }
     read_solar(child(root, "solar"), child(root, "energy"), out);
+    read_pc(child(root, "pc"), out);
     cJSON_Delete(root);
     return true;
 }
@@ -575,6 +623,13 @@ size_t settings_to_json(const settings_t *s, const char *base_json, char *out, s
     put(energy, "source", cJSON_CreateString(k_energy_sources[energy_source]));
     put(energy, "battery", cJSON_CreateString(k_batteries[energy_battery]));
     put(energy, "region", cJSON_CreateString(k_regions[energy_region]));
+    cJSON *pc = object_at(root, "pc");
+    put(pc, "enabled", cJSON_CreateBool(s->pc_enabled));
+    put(pc, "host", cJSON_CreateString(s->pc_host));
+    put(pc, "port", cJSON_CreateNumber(s->pc_port));
+    put(pc, "interval_ms", cJSON_CreateNumber(s->pc_interval_ms));
+    put(pc, "auto_always", cJSON_CreateBool(s->pc_auto_always));
+    put(pc, "preset", cJSON_CreateString(s->pc_preset));
     bool ok = size > 0 && cJSON_PrintPreallocated(root, out, (int)size, true);
     cJSON_Delete(root);
     return ok ? strlen(out) : 0;
@@ -630,6 +685,7 @@ size_t settings_patch(const char *base_json, const char *patch, char *out, size_
 static const char *const k_secret_keys[SETTINGS_SECRET_COUNT] = {
     "fs_key", "solcast_key", "solcast_site1", "solcast_site2", "solax_token", "solax_sn",
     "solax_client_id", "solax_secret", /* NVS keys have 15 characters at most */
+    "pc_token",                        /* M7 (spec §14.2) */
 };
 
 const char *settings_secret_key(settings_secret_t secret)
@@ -699,7 +755,7 @@ static bool take_sites(cJSON *solar, settings_secrets_t *secrets, char *err, siz
     return ok;
 }
 
-/* The keys of every "solar" and "energy" object, and the flags a GET adds ("keys"), out of `root`. */
+/* The keys of every "solar", "energy" and "pc" object, and the flags a GET adds ("keys"), out of `root`. */
 static bool take_all(cJSON *root, settings_secrets_t *secrets, char *err, size_t err_size)
 {
     static const char k_alnum[] = "letters and digits only";
@@ -708,11 +764,17 @@ static bool take_all(cJSON *root, settings_secrets_t *secrets, char *err, size_t
     for (cJSON *c = root->child; ok && c != NULL; c = c->next) {
         bool solar = c->string != NULL && strcmp(c->string, "solar") == 0;
         bool energy = c->string != NULL && strcmp(c->string, "energy") == 0;
-        if (!cJSON_IsObject(c) || !(solar || energy)) {
+        bool pc = c->string != NULL && strcmp(c->string, "pc") == 0;
+        if (!cJSON_IsObject(c) || !(solar || energy || pc)) {
             continue;
         }
         for (cJSON *flags; (flags = cJSON_DetachItemFromObjectCaseSensitive(c, "keys")) != NULL;) {
             cJSON_Delete(flags);
+        }
+        if (pc) { /* the PC app's token, as typed: groups of five with dashes or spaces (spec §12a.1) */
+            ok = take(c, "token", "pc.token", "- ", "letters, digits, - and spaces only", secrets,
+                      SETTINGS_SECRET_PC_TOKEN, err, err_size);
+            continue;
         }
         ok = solar ? take(c, "fs_key", "solar.fs_key", "", k_alnum, secrets, SETTINGS_SECRET_FS_KEY, err, err_size) &&
                          take(c, "solcast_key", "solar.solcast_key", "-_", "letters, digits, - and _ only", secrets,

@@ -169,15 +169,46 @@ ui_field_id_t ui_presets_field_by_name(ui_presets_t *p, const char *name)
 
 size_t ui_presets_field_name(const ui_presets_t *p, ui_field_id_t field, char *out, size_t size)
 {
-    int n = 0;
-    if (ui_field_is_pc(field)) {
-        const char *id = p->pc_ids[field - UI_FIELD_PC_FIRST];
-        n = id[0] ? snprintf(out, size, "pc.%s", id) : snprintf(out, size, "%s", "");
-    } else {
-        const ui_field_info_t *info = ui_field_info(field);
-        n = snprintf(out, size, "%s", info != NULL ? info->id : "");
+    return ui_field_name(p->pc_ids, field, out, size);
+}
+
+const ui_visual_t *ui_presets_visual(const ui_presets_t *p, int preset, int slot)
+{
+    for (int i = 0; i < p->visual_count; i++) {
+        if (p->visuals[i].preset == preset && p->visuals[i].slot == slot) {
+            return &p->visuals[i].vis;
+        }
     }
-    return n > 0 && (size_t)n < size ? (size_t)n : 0;
+    return NULL;
+}
+
+bool ui_presets_set_visual(ui_presets_t *p, int preset, int slot, const ui_visual_t *vis)
+{
+    if (preset < 0 || preset >= UI_PRESET_MAX || slot < 0 || slot >= UI_SLOT_MAX) {
+        return false;
+    }
+    int key = preset * UI_SLOT_MAX + slot, at = 0;
+    while (at < p->visual_count && p->visuals[at].preset * UI_SLOT_MAX + p->visuals[at].slot < key) {
+        at++;
+    }
+    bool here = at < p->visual_count && p->visuals[at].preset == preset && p->visuals[at].slot == slot;
+    if (vis == NULL || vis->as == UI_VIS_VALUE) {
+        if (here) {
+            memmove(&p->visuals[at], &p->visuals[at + 1], (size_t)(p->visual_count - at - 1) * sizeof(p->visuals[0]));
+            p->visual_count--;
+            memset(&p->visuals[p->visual_count], 0, sizeof(p->visuals[0]));
+        }
+        return true;
+    }
+    if (!here) {
+        if (p->visual_count >= UI_VISUALS_MAX) {
+            return false;
+        }
+        memmove(&p->visuals[at + 1], &p->visuals[at], (size_t)(p->visual_count - at) * sizeof(p->visuals[0]));
+        p->visual_count++;
+    }
+    p->visuals[at] = (ui_visual_entry_t){ .preset = (uint8_t)preset, .slot = (uint8_t)slot, .vis = *vis };
+    return true;
 }
 
 const char *ui_presets_title(const ui_presets_t *p, int preset, int slot)
@@ -227,6 +258,11 @@ bool ui_presets_set_title(ui_presets_t *p, int preset, int slot, const char *tex
 void ui_presets_titles(const ui_presets_t *p, int preset, ui_titles_t *out)
 {
     memset(out, 0, sizeof(*out));
+    for (int i = 0; i < p->visual_count; i++) {
+        if (p->visuals[i].preset == preset && p->visuals[i].slot < UI_SLOT_MAX) {
+            out->visual[p->visuals[i].slot] = &p->visuals[i].vis;
+        }
+    }
     int n;
     for (size_t at = 0; (n = record_len(p->titles, at)) >= 0; at += 3 + (size_t)n) {
         if (p->titles[at] == preset && p->titles[at + 1] < UI_SLOT_MAX) {

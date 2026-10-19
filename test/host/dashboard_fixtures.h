@@ -1,11 +1,13 @@
 #pragma once
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "context_fixtures.h"
 #include "radar_fixtures.h"
 #include "solar_fixtures.h"
 #include "ui_dashboard.h"
+#include "ui_history.h"
 
 /* The dashboard fixtures for the golden renders (test_ui_dashboard_golden.c, render_dashboard.c):
  * a context and a preset each, on top of context_fixtures.h. */
@@ -95,6 +97,29 @@ static inline void fixture_solar_ctx(ui_context_t *ctx, bool live, bool battery)
     w.now_temp_c10 = 196;
     ds_set_weather(&s_fix_ds, &w);
     ctx->solar = fixture_solar(ctx->now, live, battery);
+}
+
+#define FIX_HISTORY_MS 7200000u /* the history's clock: two hours after the start */
+
+/* M7: two hours of the indoor temperature, every 5 min, for the charts. */
+static inline const ui_history_t *fixture_history(void)
+{
+    static ui_history_t h;
+    static ui_series_t *mem;
+    if (mem == NULL) {
+        mem = calloc(UI_HIST_SERIES, sizeof(ui_series_t));
+        ui_history_init(&h, mem);
+        const char *const names[] = { "env.temp" };
+        ui_history_track(&h, names, 1);
+        uint32_t seed = 7;
+        for (int i = 0; i <= 24; i++) {
+            seed = seed * 1103515245u + 12345u;
+            float jitter = (float)((seed >> 8) & 0xFF) / 255.0f * 0.3f;
+            ui_series_push(ui_history_find(&h, "env.temp"), FIX_HISTORY_MS - (uint32_t)(24 - i) * 300000,
+                           21.2f + 0.09f * (float)i + jitter);
+        }
+    }
+    return &h;
 }
 
 /* Each fixture: a context and a preset. */
@@ -382,6 +407,20 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         preset->force_title = 1u << 1 | 1u << 2 | 1u << 4 | 1u << 5; /* fixture_titles(): 0, 1, 3 and 4 have their own */
         fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
         ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "classic_visuals") == 0) { /* M7: the small slots as visuals (fixture_titles()) */
+        *preset = fixture_preset("home");
+        fixture_solar_ctx(ctx, true, false);
+        preset->slots[4] = UI_FIELD_PV_NOW;
+        ctx->history = fixture_history();
+        ctx->now_ms = FIX_HISTORY_MS;
+    } else if (strcmp(name, "split_visuals") == 0) { /* M7: cells as visuals, one with its own title */
+        *preset = fixture_preset("weather");
+        static const uint8_t k_fields[] = { UI_FIELD_ENV_TEMP, UI_FIELD_ENV_HUM,  UI_FIELD_EN_LOAD,
+                                            UI_FIELD_EN_SELF,  UI_FIELD_BAT_LEVEL, UI_FIELD_PV_TODAY };
+        fixture_grid_split(preset, 2, 3, 0, k_fields, sizeof(k_fields));
+        fixture_solar_ctx(ctx, true, false);
+        ctx->history = fixture_history();
+        ctx->now_ms = FIX_HISTORY_MS;
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -476,6 +515,30 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
 static inline const ui_titles_t *fixture_titles(const char *name)
 {
     static const ui_titles_t k_split_titles = { .text = { [0] = "Venku", [1] = "Praha", [3] = "Slunce", [4] = "Dnes" } };
+    /* M7: Classic's s1-s4, the split's cells */
+    static const ui_visual_t k_chart = { .as = UI_VIS_CHART, .span_s = 3600, .numbers = true };
+    static const ui_visual_t k_chart2h = { .as = UI_VIS_CHART, .span_s = 7200, .numbers = false,
+                                           .min_mode = UI_LIMIT_AUTO, .max_mode = UI_LIMIT_AUTO };
+    static const ui_visual_t k_ring = { .as = UI_VIS_RING };
+    static const ui_visual_t k_bar = { .as = UI_VIS_BAR };
+    static const ui_visual_t k_pv = { .as = UI_VIS_GAUGE, .min_mode = UI_LIMIT_VALUE, .max_mode = UI_LIMIT_VALUE,
+                                      .min = 0, .max = 7 };
+    static const ui_visual_t k_load = { .as = UI_VIS_GAUGE, .min_mode = UI_LIMIT_VALUE, .max_mode = UI_LIMIT_VALUE,
+                                        .min = 0, .max = 5 };
+    static const ui_visual_t k_pv_day = { .as = UI_VIS_BAR, .min_mode = UI_LIMIT_VALUE, .max_mode = UI_LIMIT_VALUE,
+                                          .min = 0, .max = 40 };
+    static const ui_titles_t k_classic_visuals = { .text = { [2] = "Indoor", [4] = "Solar" },
+                                                   .visual = { [2] = &k_chart, [3] = &k_ring, [4] = &k_pv,
+                                                               [5] = &k_bar } };
+    static const ui_titles_t k_split_visuals = { .text = { [1] = "Obývák" },
+                                                 .visual = { &k_chart2h, &k_ring, &k_load, &k_bar, &k_ring,
+                                                             &k_pv_day } };
+    if (strcmp(name, "classic_visuals") == 0) {
+        return &k_classic_visuals;
+    }
+    if (strcmp(name, "split_visuals") == 0) {
+        return &k_split_visuals;
+    }
     return strcmp(name, "split_titles") == 0 ? &k_split_titles : NULL;
 }
 
@@ -502,4 +565,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "solar_cs", "solar_none", "energy", "energy_battery",
                                                     "energy_night_cs", "energy_none", "energy_low",
                                                     "grid_solar_low", "solar_evening", "split_titles",
-                                                    "home_sync_time", "home_sync_old" };
+                                                    "home_sync_time", "home_sync_old", "classic_visuals",
+                                                    "split_visuals" };

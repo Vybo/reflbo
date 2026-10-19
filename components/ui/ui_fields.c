@@ -80,6 +80,25 @@ ui_field_id_t ui_field_by_name(const char *id)
     return UI_FIELD_NONE;
 }
 
+size_t ui_field_name(const char (*pc_ids)[PC_ID_LEN], ui_field_id_t field, char *out, size_t size)
+{
+    int n;
+    if (ui_field_is_pc(field)) {
+        const char *id = pc_ids != NULL ? pc_ids[field - UI_FIELD_PC_FIRST] : "";
+        n = id[0] ? snprintf(out, size, "pc.%s", id) : snprintf(out, size, "%s", "");
+    } else {
+        const ui_field_info_t *info = ui_field_info(field);
+        n = snprintf(out, size, "%s", info != NULL ? info->id : "");
+    }
+    return n > 0 && (size_t)n < size ? (size_t)n : 0;
+}
+
+bool ui_field_numeric(ui_field_id_t field)
+{
+    const ui_field_info_t *info = ui_field_info(field);
+    return info != NULL && (info->kind == UI_FK_NUMBER || info->kind == UI_FK_BATTERY || info->kind == UI_FK_LEVEL);
+}
+
 static int trend_sign(int32_t trend, int32_t threshold)
 {
     if (trend == DS_NO_TREND) {

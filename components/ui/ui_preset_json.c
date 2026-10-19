@@ -1,5 +1,7 @@
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cJSON.h"
@@ -110,6 +112,128 @@ static bool parse_titles(const cJSON *titles, const ui_layout_t *layout, ui_pres
     return true;
 }
 
+static const char *const k_visual_names[UI_VIS_COUNT] = {
+    [UI_VIS_CHART] = "chart", [UI_VIS_BAR] = "bar", [UI_VIS_RING] = "ring", [UI_VIS_GAUGE] = "gauge",
+};
+
+/* A visual's bound (spec §5.4, M7): left out for the field's own, a number, or "auto" for a chart's. */
+static bool parse_bound(const cJSON *b, uint8_t as, uint8_t *mode, float *out, const char *id, char *err, size_t size)
+{
+    if (b == NULL || cJSON_IsNull(b)) {
+        *mode = UI_LIMIT_FIELD;
+        return true;
+    }
+    if (cJSON_IsString(b) && strcmp(b->valuestring, "auto") == 0) {
+        if (as != UI_VIS_CHART) {
+            return fail(err, size, "preset \"%s\": only a chart's min and max can be auto", id);
+        }
+        *mode = UI_LIMIT_AUTO;
+        return true;
+    }
+    if (!cJSON_IsNumber(b) || !isfinite((float)b->valuedouble)) {
+        return fail(err, size, "preset \"%s\": a visual's min and max are numbers", id);
+    }
+    *mode = UI_LIMIT_VALUE;
+    *out = (float)b->valuedouble;
+    return true;
+}
+
+/* How slot `slot` (named `what` in a reason) shows its field, which must be a number (spec §5.4, M7, D44). */
+static bool parse_visual(const cJSON *o, ui_presets_t *all, int index, int slot, const char *what, char *err,
+                         size_t size)
+{
+    const char *id = all->presets[index].id;
+    if (!cJSON_IsObject(o)) {
+        return fail(err, size, "preset \"%s\": a visual must be an object", id);
+    }
+    if (!ui_field_numeric((ui_field_id_t)all->presets[index].slots[slot])) {
+        return fail(err, size, "preset \"%s\": %s shows no number", id, what);
+    }
+    const cJSON *as = cJSON_GetObjectItemCaseSensitive(o, "as");
+    ui_visual_t vis = { .as = UI_VIS_VALUE, .span_s = UI_SPAN_DEFAULT_S };
+    for (int a = UI_VIS_CHART; a < UI_VIS_COUNT && cJSON_IsString(as); a++) {
+        if (strcmp(as->valuestring, k_visual_names[a]) == 0) {
+            vis.as = (uint8_t)a;
+        }
+    }
+    if (vis.as == UI_VIS_VALUE) {
+        return fail(err, size, "preset \"%s\": a visual is chart, bar, ring or gauge", id);
+    }
+    if (!parse_bound(cJSON_GetObjectItemCaseSensitive(o, "min"), vis.as, &vis.min_mode, &vis.min, id, err, size) ||
+        !parse_bound(cJSON_GetObjectItemCaseSensitive(o, "max"), vis.as, &vis.max_mode, &vis.max, id, err, size)) {
+        return false;
+    }
+    if (vis.min_mode == UI_LIMIT_VALUE && vis.max_mode == UI_LIMIT_VALUE && !(vis.min < vis.max)) {
+        return fail(err, size, "preset \"%s\": a visual's min must be below its max", id);
+    }
+    if (vis.as == UI_VIS_CHART) {
+        const cJSON *span = cJSON_GetObjectItemCaseSensitive(o, "span_s");
+        if (span != NULL && !cJSON_IsNull(span)) {
+            double s = cJSON_IsNumber(span) ? span->valuedouble : -1.0;
+            if (s != floor(s) || s < 0 || s > UI_SPAN_MAX_S || !ui_visual_span_ok((uint32_t)s)) {
+                return fail(err, size, "preset \"%s\": a chart's span is 10-3600 s, or whole hours up to 24 h", id);
+            }
+            vis.span_s = (uint32_t)s;
+        }
+        vis.numbers = optional_bool(o, "numbers", true);
+    }
+    if (!ui_presets_set_visual(all, index, slot, &vis)) {
+        return fail(err, size, "preset \"%s\": %d visuals at most in all presets", id, UI_VISUALS_MAX);
+    }
+    return true;
+}
+
+static bool parse_visuals(const cJSON *visuals, const ui_layout_t *layout, ui_presets_t *all, int index, char *err,
+                          size_t size)
+{
+    const char *id = all->presets[index].id;
+    if (visuals == NULL || cJSON_IsNull(visuals)) {
+        return true;
+    }
+    if (!cJSON_IsObject(visuals)) {
+        return fail(err, size, "preset \"%s\": visuals must be an object of slot names", id);
+    }
+    const cJSON *visual;
+    cJSON_ArrayForEach(visual, visuals)
+    {
+        int slot = ui_slot_by_name(layout, visual->string);
+        if (slot < 0) {
+            return fail(err, size, "preset \"%s\": layout %s has no slot \"%s\"", id, layout->id, visual->string);
+        }
+        char what[24];
+        snprintf(what, sizeof(what), "slot %s", layout->slots[slot].name);
+        if (!parse_visual(visual, all, index, slot, what, err, size)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* A bound as the file writes it: a float's own digits, not its double's. */
+static void add_bound(cJSON *o, const char *key, uint8_t mode, float v)
+{
+    if (mode == UI_LIMIT_AUTO) {
+        cJSON_AddStringToObject(o, key, "auto");
+    } else if (mode == UI_LIMIT_VALUE) {
+        char digits[24];
+        snprintf(digits, sizeof(digits), "%.7g", (double)v);
+        cJSON_AddNumberToObject(o, key, strtod(digits, NULL));
+    }
+}
+
+static cJSON *visual_json(const ui_visual_t *v)
+{
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "as", v->as < UI_VIS_COUNT && k_visual_names[v->as] ? k_visual_names[v->as] : "bar");
+    add_bound(o, "min", v->min_mode, v->min);
+    add_bound(o, "max", v->max_mode, v->max);
+    if (v->as == UI_VIS_CHART) {
+        cJSON_AddNumberToObject(o, "span_s", v->span_s);
+        cJSON_AddBoolToObject(o, "numbers", v->numbers);
+    }
+    return o;
+}
+
 /* "22:30" -> minutes after midnight. */
 static bool parse_hhmm(const cJSON *item, uint16_t *out)
 {
@@ -213,6 +337,14 @@ static bool parse_node(tree_t *t, const cJSON *node)
         }
         if (optional_bool(node, "force_title", false)) {
             t->out->force_title |= 1u << t->cells;
+        }
+        const cJSON *show = cJSON_GetObjectItemCaseSensitive(node, "show");
+        if (show != NULL && !cJSON_IsNull(show)) {
+            char what[24];
+            snprintf(what, sizeof(what), "cell %d", t->cells + 1);
+            if (!parse_visual(show, t->all, t->index, t->cells, what, t->err, t->size)) {
+                return false;
+            }
         }
         t->cells++;
         return true;
@@ -324,6 +456,10 @@ static bool parse_preset(const cJSON *item, ui_presets_t *all, int index, char *
     }
     if (layout != UI_LAYOUT_SPLIT && !parse_titles(cJSON_GetObjectItemCaseSensitive(item, "titles"),
                                                    ui_layout((ui_layout_id_t)layout), all, index, err, size)) {
+        return false;
+    }
+    if (layout != UI_LAYOUT_SPLIT && !parse_visuals(cJSON_GetObjectItemCaseSensitive(item, "visuals"),
+                                                    ui_layout((ui_layout_id_t)layout), all, index, err, size)) {
         return false;
     }
     const cJSON *options = cJSON_GetObjectItemCaseSensitive(item, "options");
@@ -503,6 +639,10 @@ static cJSON *node_json(const ui_presets_t *all, int index, int *at, int *cell)
         if (p->force_title & (1u << c)) {
             cJSON_AddBoolToObject(obj, "force_title", true);
         }
+        const ui_visual_t *vis = ui_presets_visual(all, index, c);
+        if (vis != NULL) {
+            cJSON_AddItemToObject(obj, "show", visual_json(vis));
+        }
         return obj;
     }
     cJSON_AddStringToObject(obj, "split", node & UI_SPLIT_COLUMNS ? "columns" : "rows");
@@ -551,6 +691,17 @@ static cJSON *preset_json(const ui_presets_t *all, int index)
         }
         if (titles != NULL) {
             cJSON_AddItemToObject(obj, "titles", titles);
+        }
+        cJSON *visuals = NULL;
+        for (int i = 0; i < layout->slot_count; i++) {
+            const ui_visual_t *vis = ui_presets_visual(all, index, i);
+            if (vis != NULL) {
+                visuals = visuals != NULL ? visuals : cJSON_CreateObject();
+                cJSON_AddItemToObject(visuals, layout->slots[i].name, visual_json(vis));
+            }
+        }
+        if (visuals != NULL) {
+            cJSON_AddItemToObject(obj, "visuals", visuals);
         }
     }
     cJSON *options = cJSON_AddObjectToObject(obj, "options");

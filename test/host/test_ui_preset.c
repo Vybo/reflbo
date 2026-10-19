@@ -697,7 +697,7 @@ static void test_bad_split_trees_are_rejected_with_a_reason(void)
  * most columns a tree can have, with every line hidden; the longest field ids a cell takes, a PC reading's with
  * 15 characters (M7); names of control
  * characters, which cJSON writes as six bytes each ("\u0001"); every option at its longest; 8 schedule entries
- * that switch to a preset; every cell's title forced, and the pool full of one-quote titles. */
+ * that switch to a preset; every cell's title forced, and the pool full of one-quote titles; 48 visuals (M7). */
 static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
 {
     static const uint8_t k_tree[UI_SPLIT_NODES] = { UI_RATIO_1_3 | UI_SPLIT_NO_LINE, EIGHT_COLUMNS,
@@ -728,6 +728,12 @@ static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
         titled++;
     }
     TEST_ASSERT_EQUAL_INT(UI_TITLES_BYTES / 4, titled); /* 4 bytes each */
+    /* M7: the pool's 48 visuals at their longest, charts over a day with both bounds at a float's longest digits */
+    ui_visual_t chart = { .as = UI_VIS_CHART, .min_mode = UI_LIMIT_VALUE, .max_mode = UI_LIMIT_VALUE,
+                          .min = -1.234567e+38f, .max = 1.234567e+38f, .span_s = UI_SPAN_MAX_S, .numbers = true };
+    for (int i = 0; i < UI_VISUALS_MAX; i++) {
+        TEST_ASSERT_TRUE(ui_presets_set_visual(&s_p, i / UI_SPLIT_CELLS, i % UI_SPLIT_CELLS, &chart));
+    }
     s_p.count = UI_PRESET_MAX;
     s_p.cycle_interval_s = UI_CYCLE_MAX_S;
     s_p.offered = UI_OFFERED_ALL;

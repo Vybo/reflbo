@@ -319,6 +319,9 @@ static esp_err_t start(bool manual, sync_due_t due)
     memcpy(req.ntp, set->ntp, sizeof(req.ntp));
     app_radar_request(&req.radar);
     app_solar_request(&req.solar, &req.energy);
+    req.pc = (sync_pc_req_t){ .enabled = set->pc_enabled, .port = set->pc_port }; /* M7: the PC step */
+    snprintf(req.pc.host, sizeof(req.pc.host), "%s", set->pc_host);
+    app_secret_get(SETTINGS_SECRET_PC_TOKEN, req.pc.token, sizeof(req.pc.token));
     esp_err_t err = sync_start(&req, done);
     if (err == ESP_OK) {
         s_active = true;
@@ -549,7 +552,7 @@ void app_sync_summary(char *out, size_t size)
     lang_format_time(local.tm_hour, local.tm_min, 0, app_settings()->clock_24h, false, when, sizeof(when), &suffix);
     static const lang_str_t k_steps[SYNC_STEP_COUNT] = { LS_SYNC_STEP_WIFI,  LS_SYNC_STEP_TIME,  LS_SYNC_STEP_WEATHER,
                                                          LS_SYNC_STEP_AIR,   LS_SYNC_STEP_RADAR, LS_SYNC_STEP_SOLAR,
-                                                         LS_SYNC_STEP_ENERGY };
+                                                         LS_SYNC_STEP_ENERGY, LS_SYNC_STEP_PC };
     if (s->last_failed_step >= SYNC_STEP_COUNT) {
         snprintf(out, size, "%s%s%s OK", when, suffix[0] ? " " : "", suffix);
     } else {

@@ -22,6 +22,7 @@ typedef enum {
     SYNC_STEP_RADAR,  /* M6 (spec §11.2) */
     SYNC_STEP_SOLAR,  /* M6d (spec §11.5) */
     SYNC_STEP_ENERGY, /* M6d (spec §11.6) */
+    SYNC_STEP_PC,     /* M7 (spec §12a.2): finding the PC app */
     SYNC_STEP_COUNT,
 } sync_step_t;
 
@@ -32,8 +33,8 @@ typedef enum {
     SYNC_STEP_KEPT, /* it ran and kept what it had: Solcast's budget ("kept"), a provider's 429 (M6d) */
 } sync_step_result_t;
 
-/* A sync fails when a step fails, except the Energy step (D36; from M7 the MQTT step's, D32): their failures show
- * but start no retry. A step kept or not run is no failure. */
+/* A sync fails when a step fails, except the Energy and PC steps (D36, D44; from M8 the MQTT step's, D32): their
+ * failures show but start no retry. A step kept or not run is no failure. */
 bool sync_report_failed(const uint8_t result[SYNC_STEP_COUNT]);
 /* The first step that failed, whichever it is, for Info ▸ Last sync; SYNC_STEP_COUNT for none. */
 int sync_first_failed(const uint8_t result[SYNC_STEP_COUNT]);

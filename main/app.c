@@ -49,11 +49,12 @@
 #define TETHER_RECHECK_MS 1000
 #define RETRY_S           300  /* after a failed boot with no PC attached */
 #define SNAP_MAGIC        0x72666c62u /* "rflb" */
-#define SNAP_VERSION      16 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
+#define SNAP_VERSION      17 /* 6: the weather, the air quality and the syncs' state; 7: the rain; 8: split presets;
                                    9: 24 cells (M6c); 10: the solar state and the sync's two steps (M6d);
                                    11: the Developer API's plant (D37); 12: the presets' cycle windows (D41);
                                    13: the presets' titles (D42); 14: the last good sync and the presets'
-                                   status_sync (D43); 15: the forecast's setup; 16: the presets apart (M7) */
+                                   status_sync (D43); 15: the forecast's setup; 16: the presets apart (M7);
+                                   17: the PC step (M7) */
 #define PRESETS_MAGIC     0x7266707au /* "rfpz": the presets' block */
 #define PRESETS_VERSION   1
 #define PEEK_MS           60000 /* a button during the night shows the dashboard this long (spec §9.1) */

@@ -174,6 +174,56 @@ static void test_a_number_no_float_holds_is_no_value(void)
     TEST_ASSERT_EQUAL_STRING("protocol 2147483647", s_err);
 }
 
+/* The PC step's answer (spec §9.3, §12a.2): found, asleep, or refused with the reason. */
+static void test_the_probe_reads_the_pcs_answer(void)
+{
+    pc_info_t info;
+    char detail[32];
+    TEST_ASSERT_EQUAL(PC_PROBE_OFF, pc_probe_result(0, "", 0, &info, detail, sizeof(detail))); /* no answer */
+    TEST_ASSERT_EQUAL_STRING("off", detail);
+    TEST_ASSERT_EQUAL(PC_PROBE_REFUSED, pc_probe_result(401, "", 0, &info, detail, sizeof(detail)));
+    TEST_ASSERT_EQUAL_STRING("wrong token", detail);
+    TEST_ASSERT_EQUAL(PC_PROBE_REFUSED, pc_probe_result(503, "", 0, &info, detail, sizeof(detail)));
+    TEST_ASSERT_EQUAL_STRING("HTTP 503", detail);
+    const char *ok = "{\"app\":\"reflbo-stats\",\"protocol\":1,\"name\":\"DESKTOP-PC\",\"hwinfo\":\"ok\"}";
+    TEST_ASSERT_EQUAL(PC_PROBE_FOUND, pc_probe_result(200, ok, strlen(ok), &info, detail, sizeof(detail)));
+    TEST_ASSERT_EQUAL_STRING("", detail);
+    TEST_ASSERT_EQUAL_STRING("DESKTOP-PC", info.name);
+    const char *stale = "{\"app\":\"reflbo-stats\",\"protocol\":1,\"name\":\"PC\",\"hwinfo\":\"not running\"}";
+    TEST_ASSERT_EQUAL(PC_PROBE_FOUND, pc_probe_result(200, stale, strlen(stale), &info, detail, sizeof(detail)));
+    TEST_ASSERT_EQUAL_STRING("HWiNFO not running", detail); /* a session starts and says why its values are missing */
+    const char *v2 = "{\"app\":\"reflbo-stats\",\"protocol\":2}";
+    TEST_ASSERT_EQUAL(PC_PROBE_REFUSED, pc_probe_result(200, v2, strlen(v2), &info, detail, sizeof(detail)));
+    TEST_ASSERT_EQUAL_STRING("protocol 2", detail);
+    const char *other = "<html>router</html>";
+    TEST_ASSERT_EQUAL(PC_PROBE_REFUSED, pc_probe_result(200, other, strlen(other), &info, detail, sizeof(detail)));
+    TEST_ASSERT_EQUAL_STRING("not reflbo-stats", detail);
+}
+
+/* A stream that closes (spec §12a.3, the PC app's §6): the app quitting or turning the board away ends the session at
+ * once, as a refused upgrade does; a lost connection waits for the silence rule. */
+static void test_a_closed_stream_ends_its_session_or_waits(void)
+{
+    char why[48];
+    TEST_ASSERT_EQUAL(PC_CLOSE_END, pc_close_action(1001, "quit", 0, why, sizeof(why)));
+    TEST_ASSERT_EQUAL_STRING("the PC app quit", why);
+    TEST_ASSERT_EQUAL(PC_CLOSE_END, pc_close_action(1008, "new token", 0, why, sizeof(why)));
+    TEST_ASSERT_EQUAL_STRING("new token", why);
+    TEST_ASSERT_EQUAL(PC_CLOSE_END, pc_close_action(1008, "protocol 2", 0, why, sizeof(why)));
+    TEST_ASSERT_EQUAL_STRING("protocol 2", why);
+    TEST_ASSERT_EQUAL(PC_CLOSE_END, pc_close_action(1008, "", 0, why, sizeof(why)));
+    TEST_ASSERT_EQUAL_STRING("refused", why);
+    TEST_ASSERT_EQUAL(PC_CLOSE_END, pc_close_action(0, "", 401, why, sizeof(why)));
+    TEST_ASSERT_EQUAL_STRING("wrong token", why);
+    TEST_ASSERT_EQUAL(PC_CLOSE_END, pc_close_action(0, "", 503, why, sizeof(why))); /* eight boards already */
+    TEST_ASSERT_EQUAL_STRING("HTTP 503", why);
+    TEST_ASSERT_EQUAL(PC_CLOSE_WAIT, pc_close_action(1001, "no pong", 0, why, sizeof(why))); /* its pings lost */
+    TEST_ASSERT_EQUAL_STRING("no pong", why);
+    TEST_ASSERT_EQUAL(PC_CLOSE_WAIT, pc_close_action(1006, "", 0, why, sizeof(why))); /* lost */
+    TEST_ASSERT_EQUAL_STRING("closed", why);
+    TEST_ASSERT_EQUAL(PC_CLOSE_WAIT, pc_close_action(0, "", 0, why, sizeof(why)));
+}
+
 static void test_the_catalogue_survives_its_file(void)
 {
     parse(k_catalog, NULL);
@@ -199,6 +249,8 @@ int main(void)
     RUN_TEST(test_long_labels_and_units_are_cut_at_a_character);
     RUN_TEST(test_info_names_the_app_its_protocol_and_hwinfo);
     RUN_TEST(test_a_number_no_float_holds_is_no_value);
+    RUN_TEST(test_the_probe_reads_the_pcs_answer);
+    RUN_TEST(test_a_closed_stream_ends_its_session_or_waits);
     RUN_TEST(test_the_catalogue_survives_its_file);
     return UNITY_END();
 }

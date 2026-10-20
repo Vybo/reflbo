@@ -31,6 +31,7 @@ static const char *TAG = "sync";
 #define BODY_MAX (32 * 1024) /* the largest reply, Solcast's 72 h, is about 18 KB (M6d) */
 #define RADAR_STEP_MS 10000 /* spec §9.3 */
 #define REFRESH_MAX_MS 30000 /* a radar-only refresh, the last hour's 12 frames at most (D28) */
+#define PC_INFO_MS 2000      /* spec §12a.2 */
 
 static volatile bool s_running;
 static volatile uint8_t s_step = SYNC_STEP_COUNT;
@@ -592,6 +593,43 @@ static void step_energy(void)
     }
 }
 
+/* The PC app (spec §12a.2, M7): GET /v1/info with the token. No answer is the PC asleep, no failure; a wrong token
+ * or another protocol fails the step, never the sync (sync_report_failed()). */
+static void step_pc(void)
+{
+    if (!wanted(SYNC_STEP_PC, SETTINGS_STEP_PC)) {
+        return;
+    }
+    const sync_pc_req_t *q = &s_req.pc;
+    if (!q->enabled || q->host[0] == '\0') {
+        skipped(SYNC_STEP_PC, q->enabled ? "no address" : "no PC");
+        return;
+    }
+    int budget = sync_budget_ms(esp_timer_get_time(), s_deadline_us, PC_INFO_MS);
+    if (budget == 0) {
+        skipped(SYNC_STEP_PC, "timeout"); /* the radio's 45 s are up */
+        return;
+    }
+    char url[SETTINGS_HOST_LEN + 32];
+    snprintf(url, sizeof(url), "http://%s:%u/v1/info", q->host, (unsigned)q->port);
+    fetch_session_t session = { .bearer = q->token };
+    size_t len = 0;
+    int status = 0;
+    fetch_get(&session, url, s_body, sizeof(s_body), &len, budget, &status); /* status 0: no reply */
+    fetch_close(&session);
+    char detail[SYNC_DETAIL_LEN];
+    pc_probe_t found = pc_probe_result(status, s_body, len, &s_report.pc, detail, sizeof(detail));
+    if (found == PC_PROBE_FOUND) {
+        s_report.result[SYNC_STEP_PC] = SYNC_STEP_OK;
+        util_json_text(s_report.detail[SYNC_STEP_PC], SYNC_DETAIL_LEN, detail);
+        ESP_LOGI(TAG, "pc: found %s%s%s", s_report.pc.name, detail[0] ? ", " : "", detail);
+    } else if (found == PC_PROBE_OFF) {
+        skipped(SYNC_STEP_PC, detail);
+    } else {
+        failed(SYNC_STEP_PC, detail);
+    }
+}
+
 /* Sync mode `always`: the radar, the house's reading or both, on the network Wi-Fi is on already (D23: never
  * joining). */
 static void refresh_task(int64_t start)
@@ -644,6 +682,8 @@ static void sync_task(void *arg)
         step_solar();
         s_step = SYNC_STEP_ENERGY;
         step_energy();
+        s_step = SYNC_STEP_PC;
+        step_pc();
     } else {
         const char *why = err == ESP_ERR_NOT_FOUND ? "no network saved" : err == ESP_ERR_INVALID_STATE ? "Wi-Fi busy"
                                                                                                     : "not joined";
@@ -695,6 +735,6 @@ sync_step_t sync_step(void)
 const char *sync_step_name(sync_step_t step)
 {
     static const char *const k_names[SYNC_STEP_COUNT] = { "wifi", "time", "weather", "air", "radar", "solar",
-                                                          "energy" };
+                                                          "energy", "pc" };
     return (unsigned)step < SYNC_STEP_COUNT ? k_names[step] : "";
 }

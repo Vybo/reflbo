@@ -222,7 +222,7 @@ time_t sync_radar_next(time_t after, uint32_t step_s)
 bool sync_report_failed(const uint8_t result[SYNC_STEP_COUNT])
 {
     for (int i = 0; i < SYNC_STEP_COUNT; i++) {
-        if (result[i] == SYNC_STEP_FAILED && i != SYNC_STEP_ENERGY) {
+        if (result[i] == SYNC_STEP_FAILED && i != SYNC_STEP_ENERGY && i != SYNC_STEP_PC) {
             return true;
         }
     }

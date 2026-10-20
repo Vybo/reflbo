@@ -560,6 +560,7 @@ static void come_alive(void)
         /* Never erase NVS on our own (AGENTS.md quick rule 3): settings fall back to defaults. */
         ESP_LOGE(TAG, "NVS unavailable (%s); settings use their defaults", esp_err_to_name(err));
     }
+    app_pc_presets_changed(); /* M7: the charts' history, in PSRAM, now that the board stays awake */
     err = diag_start();
     if (err == ESP_OK) {
         app_register_commands();
@@ -612,6 +613,7 @@ static esp_err_t boot(void)
         app_ui_restore_forecast(); /* spec §6: shown as stale by its age */
         app_solar_restore();       /* spec §11.5, §11.6: the forecast and today's readings */
     }
+    app_pc_init(); /* M7: the cached catalogue (a cold boot's), the charts' history from nothing */
 
     ESP_RETURN_ON_ERROR(board_init(wake == POWER_WAKE_COLD), TAG, "board");
     ESP_RETURN_ON_ERROR(pcf85063_init(board_i2c()), TAG, "RTC");
@@ -728,6 +730,7 @@ static void app_task(void *arg)
             app_sync_wifi_check();
             app_ui_toast_expire();
             app_radar_loop_tick();
+            app_pc_tick(); /* M7: a session's silence */
             bool busy = pending || app_menu_is_open() || app_ui_toast_active();
             if (!busy && app_ui_night() && mono >= s_peek_until_ms) {
                 enter_night_sleep(); /* returns only if it had to sleep light instead */
@@ -767,7 +770,8 @@ static void app_task(void *arg)
             int64_t mono = app_uptime_ms();
             const int64_t deadlines[] = { app_menu_deadline_ms(), app_ui_toast_until_ms(),
                                           app_ui_night() ? s_peek_until_ms : 0, app_config_redraw_ms(),
-                                          s_ota_pending ? OTA_VERIFY_MS : 0, app_radar_loop_deadline_ms() };
+                                          s_ota_pending ? OTA_VERIFY_MS : 0, app_radar_loop_deadline_ms(),
+                                          app_pc_deadline_ms() };
             for (size_t i = 0; i < sizeof(deadlines) / sizeof(deadlines[0]); i++) {
                 if (deadlines[i] != 0 && deadlines[i] - mono < wait_ms) {
                     wait_ms = deadlines[i] - mono;

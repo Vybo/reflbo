@@ -408,6 +408,51 @@ static int cmd_sync(int argc, char **argv)
     return diag_on_owner(sync_body, argc, argv);
 }
 
+/* `pc status | demo on | demo off` (spec §12a.4, §15, M7): never the token. */
+static int pc_body(int argc, char **argv)
+{
+    static const char *const k_usage = "pc status | pc demo on | pc demo off";
+    if (argc == 3 && strcmp(argv[1], "demo") == 0 && (strcmp(argv[2], "on") == 0 || strcmp(argv[2], "off") == 0)) {
+        app_pc_demo(strcmp(argv[2], "on") == 0);
+        printf("pc: the sample PC %s\n", strcmp(argv[2], "on") == 0 ? "shows" : "is gone");
+        return 0;
+    }
+    if (argc != 2 || strcmp(argv[1], "status") != 0) {
+        return usage(k_usage);
+    }
+    const settings_t *set = app_settings();
+    app_pc_status_t s;
+    app_pc_status(&s);
+    char state[48];
+    app_pc_state_text(state, sizeof(state));
+    printf("pc: %s, %s:%u every %u ms, token %s\n", set->pc_enabled ? "on" : "off",
+           set->pc_host[0] ? set->pc_host : "(no address)", set->pc_port, set->pc_interval_ms,
+           app_secret_set(SETTINGS_SECRET_PC_TOKEN) ? "set" : "not set");
+    printf("  session: %s%s%s\n", state, s.session && s.connected ? ", connected" : "",
+           s.set_always ? ", switched to always" : "");
+    if (s.session) {
+        printf("  preset %s, HWiNFO %s, %u readings, the last %lu ms ago\n", s.preset[0] ? s.preset : "(none)",
+               pc_hwinfo_name(s.hwinfo), s.readings, (unsigned long)s.age_ms);
+    } else {
+        printf("  catalogue: %u readings%s\n", s.readings, s.readings ? " (cached)" : "");
+    }
+    if (s.why[0]) {
+        printf("  last trouble: %s\n", s.why);
+    }
+    const app_sync_state_t *sync = &app_state()->sync;
+    static const char *const k_results[] = { "not run", "ok", "failed", "kept" };
+    uint8_t r = sync->last_result[SYNC_STEP_PC];
+    printf("  last PC step: %s%s%s\n", k_results[r < 4 ? r : 0], sync->last_detail[SYNC_STEP_PC][0] ? ": " : "",
+           sync->last_detail[SYNC_STEP_PC]);
+    print_time("  last session ended", s.since);
+    return 0;
+}
+
+static int cmd_pc(int argc, char **argv)
+{
+    return diag_on_owner(pc_body, argc, argv);
+}
+
 /* `radar status | loop` (spec §15, M6). */
 static int radar_body(int argc, char **argv)
 {
@@ -582,6 +627,7 @@ void app_register_commands(void)
         { .command = "radar", .help = "radar status | loop (spec §11.2, §11.3)", .func = &cmd_radar },
         { .command = "solar", .help = "solar status | demo on | demo off (spec §11.5, §11.6)", .func = &cmd_solar },
         { .command = "energy", .help = "energy raw: SolaX's last replies (D37)", .func = &cmd_energy },
+        { .command = "pc", .help = "pc status | demo on | demo off (spec §12a)", .func = &cmd_pc },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_err_t err = esp_console_cmd_register(&cmds[i]);

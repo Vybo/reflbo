@@ -170,6 +170,10 @@ static void build_model(void)
     for (int i = 0; i < 6; i++) { /* Sync ▸ Steps (D35, M7), in settings_step_t order */
         m->value[UI_MI_STEP_WEATHER + i] = (set->sync_steps >> i) & 1;
     }
+    m->value[UI_MI_PC_STATS] = set->pc_enabled; /* Sync ▸ PC (M7) */
+    static char s_pc_state[48];
+    app_pc_state_text(s_pc_state, sizeof(s_pc_state));
+    m->info[UI_MI_PC_SESSION] = s_pc_state;
 
     m->value[UI_MI_UPDATE_INTERVAL] = set->display_every_min;
     int rate = 0;
@@ -315,6 +319,10 @@ static void apply(const ui_menu_intent_t *in)
             save_settings = true;
             break;
         }
+        case UI_MI_PC_STATS: /* off ends a session at the next tick (spec §12a.4) */
+            set->pc_enabled = in->value != 0;
+            save_settings = true;
+            break;
         case UI_MI_REFRESH_RATE:
             set->lpm_quarter_hz = k_quarter_hz[in->value < RATE_COUNT ? in->value : 2];
             apply_settings = save_settings = true;

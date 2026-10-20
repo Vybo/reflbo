@@ -25,6 +25,8 @@ struct ui_pc {
     time_t since;                /* when the last session ended (UTC), for "PC asleep"; 0: none since the boot */
 };
 
+/* "since 18:12" (D43's forms: today the time, earlier in the week "Mon 18:12", else the date), in the language. */
+void ui_pc_since_text(const ui_context_t *ctx, time_t since, char *out, size_t size);
 /* The PC layout's "PC asleep" (spec §5.2): a box across it with since when and the PC's name (ui_dashboard.c). */
 void ui_pc_draw_asleep(gfx_fb_t *fb, const ui_context_t *ctx);
 /* The sample PC (spec §12a.4, `pc demo`): the spike's seven readings and their latest values. */

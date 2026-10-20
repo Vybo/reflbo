@@ -694,7 +694,8 @@ static void test_bad_split_trees_are_rejected_with_a_reason(void)
 #define EIGHT_COLUMNS C, C, C, 0, 0, C, 0, 0, C, C, 0, 0, C, 0, 0
 
 /* The largest presets.json there can be (M6c, D42): 16 split presets of 24 cells, three rows of eight columns, the
- * most columns a tree can have, with every line hidden; the longest field ids a cell takes; names of control
+ * most columns a tree can have, with every line hidden; the longest field ids a cell takes, a PC reading's with
+ * 15 characters (M7); names of control
  * characters, which cJSON writes as six bytes each ("\u0001"); every option at its longest; 8 schedule entries
  * that switch to a preset; every cell's title forced, and the pool full of one-quote titles. */
 static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
@@ -708,8 +709,11 @@ static void test_a_full_set_of_split_presets_fits_the_save_buffer(void)
         memset(p->name, 0x01, UI_PRESET_NAME_LEN - 1);
         p->layout = UI_LAYOUT_SPLIT;
         memcpy(p->split, k_tree, sizeof(k_tree));
-        for (int k = 0; k < UI_SPLIT_CELLS; k++) {
-            p->slots[k] = (uint8_t)(k % 2 ? UI_FIELD_POLLEN_MUGWORT : UI_FIELD_POLLEN_RAGWEED); /* fit narrow S */
+        for (int k = 0; k < UI_SPLIT_CELLS; k++) { /* the table's 32 ids, in the order the file names them */
+            char id[PC_ID_LEN];
+            snprintf(id, sizeof(id), "reading_%07d", (i * UI_SPLIT_CELLS + k) % UI_PC_FIELDS);
+            p->slots[k] = (uint8_t)ui_presets_pc_field(&s_p, id);
+            TEST_ASSERT_TRUE(ui_field_is_pc((ui_field_id_t)p->slots[k]));
         }
         p->clock = UI_CLOCK_12H;
         p->stale_policy = UI_STALE_PLACEHOLDER;

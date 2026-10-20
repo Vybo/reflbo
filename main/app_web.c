@@ -350,6 +350,7 @@ static void preview(const char *method, const char *query, const char *body, uin
         app_radar_prepare(&doc.presets[index]); /* its map, and the frame from its file if PSRAM has none */
         ui_context_t ctx;
         app_ui_context(&ctx);
+        ctx.pc_ids = doc.pc_ids; /* M7: the previewed file's own PC readings */
         ui_titles_t titles;
         ui_presets_titles(&doc, index, &titles);
         ui_draw_dashboard(fb, &ctx, &doc.presets[index], &titles);

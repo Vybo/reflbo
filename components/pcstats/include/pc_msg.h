@@ -71,6 +71,9 @@ bool pc_parse_info(const char *json, size_t len, pc_info_t *info, char *err, siz
 /* The catalogue as a catalogue message, for /fs/state/pc.json; the length, or 0 if `size` is too small. */
 size_t pc_catalog_json(const pc_catalog_t *cat, char *out, size_t size);
 
+/* A reading's id: 1-15 characters of a-z, 0-9 and _ (spec §12a.3); presets.json's `pc.<id>` keeps the same rule. */
+bool pc_id_valid(const char *id);
+
 /* The index of the reading with `id`, or -1. */
 int pc_catalog_find(const pc_catalog_t *cat, const char *id);
 

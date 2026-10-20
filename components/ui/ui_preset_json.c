@@ -130,7 +130,22 @@ static bool parse_hhmm(const cJSON *item, uint16_t *out)
     return true;
 }
 
-static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_preset_t *out, char *err, size_t size)
+/* A slot's or cell's field by its name; a PC reading takes an entry in the presets' table (M7, D44). */
+static bool field_named(ui_presets_t *all, const char *preset, const char *name, ui_field_id_t *out, char *err,
+                        size_t size)
+{
+    *out = ui_presets_field_by_name(all, name);
+    if (*out != UI_FIELD_NONE) {
+        return true;
+    }
+    if (strncmp(name, "pc.", 3) == 0 && pc_id_valid(name + 3)) {
+        return fail(err, size, "preset \"%s\": the presets name more than %d PC readings", preset, UI_PC_FIELDS);
+    }
+    return fail(err, size, "preset \"%s\": unknown field \"%s\"", preset, name);
+}
+
+static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_presets_t *all, ui_preset_t *out, char *err,
+                        size_t size)
 {
     if (!cJSON_IsObject(slots)) {
         return fail(err, size, "preset \"%s\": slots must be an object of slot names", out->id);
@@ -148,9 +163,9 @@ static bool parse_slots(const cJSON *slots, const ui_layout_t *layout, ui_preset
         if (!cJSON_IsString(slot)) {
             return fail(err, size, "preset \"%s\": slot %s needs a field id", out->id, slot->string);
         }
-        ui_field_id_t field = ui_field_by_name(slot->valuestring);
-        if (field == UI_FIELD_NONE) {
-            return fail(err, size, "preset \"%s\": unknown field \"%s\"", out->id, slot->valuestring);
+        ui_field_id_t field;
+        if (!field_named(all, out->id, slot->valuestring, &field, err, size)) {
+            return false;
         }
         if (!(layout->slots[index].kinds & UI_KIND(ui_field_info(field)->kind))) {
             return fail(err, size, "preset \"%s\": slot %s can't show %s", out->id, slot->string, slot->valuestring);
@@ -186,9 +201,9 @@ static bool parse_node(tree_t *t, const cJSON *node)
             if (!cJSON_IsString(field)) {
                 return fail(t->err, t->size, "preset \"%s\": a cell's field must be a field id", id);
             }
-            ui_field_id_t f = ui_field_by_name(field->valuestring);
-            if (f == UI_FIELD_NONE) {
-                return fail(t->err, t->size, "preset \"%s\": unknown field \"%s\"", id, field->valuestring);
+            ui_field_id_t f;
+            if (!field_named(t->all, id, field->valuestring, &f, t->err, t->size)) {
+                return false;
             }
             t->out->slots[t->cells] = (uint8_t)f;
         }
@@ -243,8 +258,10 @@ static bool parse_split(const cJSON *split, ui_presets_t *all, int index, char *
     for (int i = 0; i < g.cells; i++) {
         const ui_field_info_t *info = ui_field_info((ui_field_id_t)out->slots[i]);
         if (info != NULL && ui_split_field_size(info->kind, g.cell[i].w, g.cell[i].h) < 0) {
+            char name[4 + PC_ID_LEN];
+            ui_presets_field_name(all, (ui_field_id_t)out->slots[i], name, sizeof(name));
             return fail(err, size, "preset \"%s\": cell %d (%d×%d) can't show %s", out->id, i + 1, g.cell[i].w,
-                        g.cell[i].h, info->id);
+                        g.cell[i].h, name);
         }
     }
     return true;
@@ -299,7 +316,7 @@ static bool parse_preset(const cJSON *item, ui_presets_t *all, int index, char *
     }
     const cJSON *slots = cJSON_GetObjectItemCaseSensitive(item, "slots");
     if (slots != NULL && !cJSON_IsNull(slots) &&
-        !parse_slots(slots, ui_layout((ui_layout_id_t)layout), out, err, size)) {
+        !parse_slots(slots, ui_layout((ui_layout_id_t)layout), all, out, err, size)) {
         return false;
     }
     if (layout == UI_LAYOUT_SPLIT && !parse_split(cJSON_GetObjectItemCaseSensitive(item, "split"), all, index, err, size)) {
@@ -475,9 +492,9 @@ static cJSON *node_json(const ui_presets_t *all, int index, int *at, int *cell)
     uint8_t node = p->split[(*at)++];
     if ((node & UI_SPLIT_RATIO) == 0) {
         int c = (*cell)++;
-        const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[c]);
-        if (info != NULL) {
-            cJSON_AddStringToObject(obj, "field", info->id);
+        char name[4 + PC_ID_LEN];
+        if (ui_presets_field_name(all, (ui_field_id_t)p->slots[c], name, sizeof(name)) > 0) {
+            cJSON_AddStringToObject(obj, "field", name);
         }
         const char *title = ui_presets_title(all, index, c);
         if (title != NULL) {
@@ -522,9 +539,9 @@ static cJSON *preset_json(const ui_presets_t *all, int index)
         cJSON *slots = cJSON_AddObjectToObject(obj, "slots");
         cJSON *titles = NULL;
         for (int i = 0; i < layout->slot_count; i++) {
-            const ui_field_info_t *info = ui_field_info((ui_field_id_t)p->slots[i]);
-            if (info != NULL) {
-                cJSON_AddStringToObject(slots, layout->slots[i].name, info->id);
+            char name[4 + PC_ID_LEN];
+            if (ui_presets_field_name(all, (ui_field_id_t)p->slots[i], name, sizeof(name)) > 0) {
+                cJSON_AddStringToObject(slots, layout->slots[i].name, name);
             }
             const char *title = ui_presets_title(all, index, i);
             if (title != NULL) {

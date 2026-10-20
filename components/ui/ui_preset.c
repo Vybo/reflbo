@@ -142,6 +142,44 @@ static size_t title_bytes(const char *text)
     return n;
 }
 
+ui_field_id_t ui_presets_pc_field(ui_presets_t *p, const char *id)
+{
+    if (!pc_id_valid(id)) {
+        return UI_FIELD_NONE;
+    }
+    for (int n = 0; n < UI_PC_FIELDS; n++) {
+        if (p->pc_ids[n][0] == '\0') {
+            snprintf(p->pc_ids[n], sizeof(p->pc_ids[n]), "%s", id); /* a new entry */
+            return (ui_field_id_t)(UI_FIELD_PC_FIRST + n);
+        }
+        if (strcmp(p->pc_ids[n], id) == 0) {
+            return (ui_field_id_t)(UI_FIELD_PC_FIRST + n);
+        }
+    }
+    return UI_FIELD_NONE;
+}
+
+ui_field_id_t ui_presets_field_by_name(ui_presets_t *p, const char *name)
+{
+    if (name != NULL && strncmp(name, "pc.", 3) == 0) {
+        return ui_presets_pc_field(p, name + 3);
+    }
+    return ui_field_by_name(name);
+}
+
+size_t ui_presets_field_name(const ui_presets_t *p, ui_field_id_t field, char *out, size_t size)
+{
+    int n = 0;
+    if (ui_field_is_pc(field)) {
+        const char *id = p->pc_ids[field - UI_FIELD_PC_FIRST];
+        n = id[0] ? snprintf(out, size, "pc.%s", id) : snprintf(out, size, "%s", "");
+    } else {
+        const ui_field_info_t *info = ui_field_info(field);
+        n = snprintf(out, size, "%s", info != NULL ? info->id : "");
+    }
+    return n > 0 && (size_t)n < size ? (size_t)n : 0;
+}
+
 const char *ui_presets_title(const ui_presets_t *p, int preset, int slot)
 {
     int n;

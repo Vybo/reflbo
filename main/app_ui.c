@@ -238,6 +238,7 @@ void app_ui_context(ui_context_t *ctx)
     ctx->local_day = local_day(&ctx->local);
     ctx->radar = app_radar_ui(); /* M6 */
     ctx->solar = app_solar_ui(); /* M6d */
+    ctx->pc_ids = s_presets.pc_ids; /* M7: the PC readings the presets name */
 }
 
 void app_ui_render(void)

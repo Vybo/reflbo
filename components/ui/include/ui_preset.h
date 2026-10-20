@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "ui_fields.h"
 #include "ui_layout.h"
 #include "ui_split.h"
 #include "ui_window.h"
@@ -21,7 +22,7 @@
 #define UI_CYCLE_MIN_S 10
 #define UI_CYCLE_MAX_S 3600
 #define UI_SCHEDULE_MAX 8
-#define UI_PRESETS_JSON_MAX 49152 /* presets.json at its largest: 24 cells a preset (test_ui_preset.c, M6c, D42) */
+#define UI_PRESETS_JSON_MAX 65536 /* presets.json at its largest: 24 cells a preset of PC readings (test_ui_preset.c, M7) */
 #define UI_TITLE_LEN 24           /* a slot's or cell's own title with its terminator, as a preset's name (D42) */
 #define UI_TITLES_BYTES 768       /* every preset's titles together, in the deep-sleep snapshot (spec §5.4, D42) */
 #define UI_JSON_MAX_DEPTH 20      /* presets.json nests 17 levels at most (a split tree's chain of 13 splits),
@@ -120,6 +121,9 @@ typedef struct {
     /* The presets' own titles (spec §5.4, D42), in preset and slot order: each the preset's index, the slot, the text
      * and its terminator. An empty text ends them, so all zeros is none. */
     uint8_t titles[UI_TITLES_BYTES];
+    /* The PC readings the presets name (M7, D44): `pc.<id>` is field UI_FIELD_PC_FIRST + n with its id in entry n, in
+     * the order the file names them first; "" ends them. A reading the PC no longer sends keeps its entry. */
+    char pc_ids[UI_PC_FIELDS][PC_ID_LEN];
 } ui_presets_t;
 
 /* A preset's own titles for the renderer, by slot (or cell); NULL: the field's own label. */
@@ -145,6 +149,14 @@ int ui_presets_cycle_next(const ui_presets_t *p, bool always, time_t now, int32_
 /* Offers the built-ins `offered` doesn't name yet: each joins at the end if its id is free and
  * there is room, and is marked offered either way. True if anything changed: save the file. */
 bool ui_presets_offer_builtins(ui_presets_t *p);
+/* The field for PC reading `id` (M7): its entry in the table, or a new one; UI_FIELD_NONE for an id outside the rule
+ * (pc_id_valid()) or a table already full. */
+ui_field_id_t ui_presets_pc_field(ui_presets_t *p, const char *id);
+/* A field by its name in presets.json: "env.temp", or "pc.<id>" through ui_presets_pc_field(); UI_FIELD_NONE for
+ * neither. */
+ui_field_id_t ui_presets_field_by_name(ui_presets_t *p, const char *name);
+/* A field's name in presets.json into `out`; its length, or 0 (and "") for none or a PC entry without an id. */
+size_t ui_presets_field_name(const ui_presets_t *p, ui_field_id_t field, char *out, size_t size);
 /* Preset `preset`'s own title for `slot`, or NULL. */
 const char *ui_presets_title(const ui_presets_t *p, int preset, int slot);
 /* Sets it (NULL or "" clears it), keeping the pool in order. False, the pool unchanged, if it doesn't fit. */

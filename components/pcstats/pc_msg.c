@@ -42,9 +42,9 @@ size_t pc_hello(char *out, size_t size, uint32_t interval_ms)
     return n > 0 && (size_t)n < size ? (size_t)n : 0;
 }
 
-static bool id_ok(const char *id)
+bool pc_id_valid(const char *id)
 {
-    size_t n = strlen(id);
+    size_t n = id != NULL ? strlen(id) : 0;
     if (n == 0 || n >= PC_ID_LEN) {
         return false;
     }
@@ -102,7 +102,7 @@ static pc_msg_kind_t parse_catalog(const cJSON *root, pc_catalog_t *cat, char *e
     for (const cJSON *e = list->child; e != NULL; e = e->next, i++) {
         pc_reading_t *r = &next.r[i];
         const char *id = text_of(e, "id");
-        if (!id_ok(id)) {
+        if (!pc_id_valid(id)) {
             snprintf(err, size, "reading %d: an id is 1-15 characters of a-z, 0-9 and _", i + 1);
             return PC_MSG_INVALID;
         }

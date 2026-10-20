@@ -343,7 +343,7 @@ static void bar(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, float lo, float
         const gfx_font_t *lf = r.h >= 70 ? &gfx_font_sans_16 : &gfx_font_sans_12;
         int hh = r.h >= 70 ? 32 : 22;
         int lw = v->label != NULL ? gfx_text_width(lf, v->label) : 0; /* the label first, the value in the rest */
-        lw = lw > (r.w - 8) * 3 / 5 ? (r.w - 8) * 3 / 5 : lw;
+        lw = lw > (r.w - 8) * 3 / 4 ? (r.w - 8) * 3 / 4 : lw;
         label(fb, (gfx_rect_t){ r.x, (int16_t)(r.y + hh - ascent(lf) - 4), r.w, r.h }, v, lf, lw);
         lw += lw > 0 ? 12 : 0;
         number_fit(fb, r.x + lw, r.y + 2, r.w - 4 - lw, hh, &n, true, GFX_ALIGN_RIGHT, false);

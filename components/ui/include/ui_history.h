@@ -30,7 +30,7 @@ typedef struct {
     uint8_t mbreak[UI_HIST_MINUTES];
 } ui_series_t;
 
-typedef struct {
+typedef struct ui_history {
     ui_series_t *series; /* UI_HIST_SERIES of them */
 } ui_history_t;
 

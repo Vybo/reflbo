@@ -8,6 +8,7 @@
 #include "ui_fields.h"
 #include "ui_layout.h"
 #include "ui_split.h"
+#include "ui_visual.h"
 #include "ui_window.h"
 
 /*
@@ -25,6 +26,7 @@
 #define UI_PRESETS_JSON_MAX 65536 /* presets.json at its largest: 24 cells a preset of PC readings (test_ui_preset.c, M7) */
 #define UI_TITLE_LEN 24           /* a slot's or cell's own title with its terminator, as a preset's name (D42) */
 #define UI_TITLES_BYTES 768       /* every preset's titles together, in the deep-sleep snapshot (spec §5.4, D42) */
+#define UI_VISUALS_MAX 48         /* every preset's visuals together (spec §5.4, M7) */
 #define UI_JSON_MAX_DEPTH 20      /* presets.json nests 17 levels at most (a split tree's chain of 13 splits),
                                      settings.json 5; anything deeper is rejected unparsed */
 
@@ -110,6 +112,12 @@ enum {
 };
 #define UI_OFFERED_ALL (UI_OFFERED_RAIN | UI_OFFERED_FLIGHTS | UI_OFFERED_SOLAR | UI_OFFERED_ENERGY)
 
+/* A slot's visual (spec §5.4, M7): its preset, its slot (or cell) and how it shows. */
+typedef struct {
+    uint8_t preset, slot;
+    ui_visual_t vis;
+} ui_visual_entry_t;
+
 typedef struct {
     uint8_t count;
     uint8_t active; /* index into presets */
@@ -124,11 +132,16 @@ typedef struct {
     /* The PC readings the presets name (M7, D44): `pc.<id>` is field UI_FIELD_PC_FIRST + n with its id in entry n, in
      * the order the file names them first; "" ends them. A reading the PC no longer sends keeps its entry. */
     char pc_ids[UI_PC_FIELDS][PC_ID_LEN];
+    /* The slots that show their field as a visual (M7, D44), by preset and slot; the rest show the value. */
+    uint8_t visual_count;
+    ui_visual_entry_t visuals[UI_VISUALS_MAX];
 } ui_presets_t;
 
-/* A preset's own titles for the renderer, by slot (or cell); NULL: the field's own label. */
+/* What a preset sets for its own slots (or cells), for the renderer: their titles (D42; NULL: the field's own label)
+ * and their visuals (M7; NULL: the value). */
 typedef struct {
     const char *text[UI_SLOT_MAX];
+    const ui_visual_t *visual[UI_SLOT_MAX];
 } ui_titles_t;
 
 /* How many of `p`'s slots its layout uses: a fixed layout's slots, or the cells of its split tree
@@ -161,7 +174,12 @@ size_t ui_presets_field_name(const ui_presets_t *p, ui_field_id_t field, char *o
 const char *ui_presets_title(const ui_presets_t *p, int preset, int slot);
 /* Sets it (NULL or "" clears it), keeping the pool in order. False, the pool unchanged, if it doesn't fit. */
 bool ui_presets_set_title(ui_presets_t *p, int preset, int slot, const char *text);
-/* Preset `preset`'s titles, pointing into the pool: valid while it doesn't change. */
+/* Preset `preset`'s visual for `slot`, or NULL: its value. */
+const ui_visual_t *ui_presets_visual(const ui_presets_t *p, int preset, int slot);
+/* Sets it (NULL or UI_VIS_VALUE clears it), keeping the pool in preset and slot order. False, the pool unchanged, when
+ * all 48 are taken. */
+bool ui_presets_set_visual(ui_presets_t *p, int preset, int slot, const ui_visual_t *vis);
+/* Preset `preset`'s titles and visuals, pointing into the pools: valid while they don't change. */
 void ui_presets_titles(const ui_presets_t *p, int preset, ui_titles_t *out);
 /* Parses and validates presets.json. On failure returns false with a reason in `err` and leaves
  * *out unspecified. */

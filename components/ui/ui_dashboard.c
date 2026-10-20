@@ -1,6 +1,7 @@
 #include "ui_dashboard.h"
 
 #include "gfx_fonts.h"
+#include "ui_history.h"
 #include "ui_internal.h"
 #include "ui_radar.h"
 #include "ui_solar.h"
@@ -33,6 +34,32 @@ static void draw_separators(gfx_fb_t *fb, ui_layout_id_t layout)
     default:
         break;
     }
+}
+
+/* A slot's or cell's visual (spec §5.3, M7, D44), where its field is a number and the visual fits; the stale policy
+ * as the widgets take it. True if it is the visual's place, drawn or hidden. */
+static bool draw_visual(gfx_fb_t *fb, gfx_rect_t r, const ui_context_t *ctx, const ui_value_t *v,
+                        const ui_visual_t *vis, ui_stale_policy_t policy)
+{
+    if (vis == NULL || vis->as == UI_VIS_VALUE || !ui_field_numeric(v->field) ||
+        !ui_visual_fits((ui_vis_as_t)vis->as, r.w, r.h)) {
+        return false;
+    }
+    if (ui_widget_hidden(v, policy)) {
+        return true;
+    }
+    ui_value_t shown = *v;
+    if (shown.state == UI_VALUE_STALE && policy != UI_STALE_STALE) {
+        shown.state = UI_VALUE_MISSING;
+    }
+    const ui_series_t *series = NULL;
+    char name[UI_HIST_NAME_LEN];
+    if (vis->as == UI_VIS_CHART && ctx->history != NULL &&
+        ui_field_name(ctx->pc_ids, v->field, name, sizeof(name)) > 0) {
+        series = ui_history_find(ctx->history, name);
+    }
+    ui_visual_draw(fb, r, &shown, vis, series, ctx->now_ms, ctx->lang);
+    return true;
 }
 
 bool ui_draw_cell(gfx_fb_t *fb, gfx_rect_t cell, const ui_context_t *ctx, ui_field_id_t field,
@@ -126,6 +153,18 @@ static bool draw_split(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
     }
     bool any_stale = false;
     for (int i = 0; i < g.cells; i++) {
+        const ui_visual_t *vis = titles != NULL ? titles->visual[i] : NULL;
+        if (vis != NULL) { /* M7: the cell's visual, where it fits */
+            ui_value_t v;
+            ui_resolve(ctx, (ui_field_id_t)preset->slots[i], &v);
+            if (titles->text[i] != NULL && titles->text[i][0]) {
+                v.label = titles->text[i];
+            }
+            if (draw_visual(fb, g.cell[i], ctx, &v, vis, (ui_stale_policy_t)preset->stale_policy)) {
+                any_stale |= v.state == UI_VALUE_STALE;
+                continue;
+            }
+        }
         any_stale |= ui_draw_titled_cell(fb, g.cell[i], ctx, (ui_field_id_t)preset->slots[i],
                                          (ui_stale_policy_t)preset->stale_policy, titles ? titles->text[i] : NULL,
                                          preset->force_title & (1u << i));
@@ -165,8 +204,11 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
                 v.label = titles->text[i]; /* the slot's own title (spec §5.2, D42) */
             }
             any_stale |= v.state == UI_VALUE_STALE;
-            ui_widget_draw(fb, layout->slots[i].rect, layout->slots[i].size, &v,
-                           (ui_stale_policy_t)preset->stale_policy, c.lang);
+            if (!draw_visual(fb, layout->slots[i].rect, &c, &v, titles != NULL ? titles->visual[i] : NULL,
+                             (ui_stale_policy_t)preset->stale_policy)) {
+                ui_widget_draw(fb, layout->slots[i].rect, layout->slots[i].size, &v,
+                               (ui_stale_policy_t)preset->stale_policy, c.lang);
+            }
         }
     }
     ui_status_draw(fb, &c, preset, any_stale);

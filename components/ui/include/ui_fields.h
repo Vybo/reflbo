@@ -109,6 +109,11 @@ typedef struct {
 const ui_field_info_t *ui_field_info(ui_field_id_t field);
 /* UI_FIELD_NONE for an unknown id. */
 ui_field_id_t ui_field_by_name(const char *id);
+/* A field's name in presets.json into `out`: "env.temp", or "pc.<id>" with its id from `pc_ids` (NULL: none). Its
+ * length, or 0 (and "") for none. */
+size_t ui_field_name(const char (*pc_ids)[PC_ID_LEN], ui_field_id_t field, char *out, size_t size);
+/* Whether a field is a number, which a visual can show (spec §5.3): numbers, the battery and the levels. */
+bool ui_field_numeric(ui_field_id_t field);
 
 typedef enum {
     UI_SYNC_IDLE,
@@ -137,6 +142,7 @@ typedef struct {
 typedef struct ui_radar ui_radar_t; /* ui_radar.h */
 typedef struct ui_solar ui_solar_t; /* ui_solar.h */
 typedef struct ui_pc ui_pc_t;       /* ui_pc.h */
+typedef struct ui_history ui_history_t; /* ui_history.h */
 
 /* Everything the dashboard reads, gathered by the app for one render. */
 typedef struct {
@@ -158,6 +164,8 @@ typedef struct {
     const ui_solar_t *solar; /* M6d: the PV forecast and the house's energy; NULL for none */
     const ui_pc_t *pc;       /* M7: the PC's catalogue and last readings; NULL for none */
     const char (*pc_ids)[PC_ID_LEN]; /* the rendered presets' PC reading ids (ui_presets_t.pc_ids); NULL: none */
+    const ui_history_t *history;     /* M7: the charts' history; NULL for none */
+    uint32_t now_ms;                 /* the history's clock now */
 } ui_context_t;
 
 typedef enum {

@@ -286,11 +286,11 @@ static void get_status(uint8_t *out, size_t size, webui_reply_t *reply)
         cJSON_AddStringToObject(energy, "plant", ss->site.plant_id); /* the Developer API's, found once (D37) */
     }
 
-    const ui_preset_t *active = &st->presets.presets[st->presets.active];
+    const ui_preset_t *active = &app_presets()->presets[app_presets()->active];
     cJSON *preset = cJSON_AddObjectToObject(o, "preset");
     cJSON_AddStringToObject(preset, "active", active->id);
     cJSON_AddStringToObject(preset, "name", active->name);
-    cJSON_AddBoolToObject(preset, "cycle", st->presets.cycle_enabled);
+    cJSON_AddBoolToObject(preset, "cycle", app_presets()->cycle_enabled);
     reply_cjson(reply, out, size, o);
 }
 

@@ -278,6 +278,7 @@ reflbo_host_test(test_ui_fields ui)
 reflbo_host_test(test_ui_preset ui)
 reflbo_host_test(test_ui_pc ui pcstats_logic)
 reflbo_host_test(test_ui_history ui)
+reflbo_host_test(test_ui_visual ui)
 reflbo_host_test(test_ui_split ui)
 reflbo_host_test(test_ui_schedule ui)
 reflbo_host_test(test_ui_window ui astro)
@@ -313,6 +314,13 @@ target_link_libraries(render_dashboard PRIVATE ui)
 
 reflbo_host_test(test_ui_screens_golden ui) # the time zones through ui's solar and energy
 target_compile_definitions(test_ui_screens_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+
+reflbo_host_test(test_ui_visual_golden ui)
+target_compile_definitions(test_ui_visual_golden PRIVATE GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+
+add_executable(render_visual render_visual.c)
+target_compile_options(render_visual PRIVATE ${REFLBO_WARNINGS})
+target_link_libraries(render_visual PRIVATE ui)
 
 add_executable(render_screen render_screen.c)
 target_compile_options(render_screen PRIVATE ${REFLBO_WARNINGS})

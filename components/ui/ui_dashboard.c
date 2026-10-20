@@ -2,6 +2,7 @@
 
 #include "gfx_fonts.h"
 #include "ui_history.h"
+#include "ui_pc.h"
 #include "ui_internal.h"
 #include "ui_radar.h"
 #include "ui_solar.h"
@@ -30,6 +31,14 @@ static void draw_separators(gfx_fb_t *fb, ui_layout_id_t layout)
     case UI_LAYOUT_FOCUS:
         gfx_hline(fb, 12, 211, 376, GFX_BLACK);
         gfx_vline(fb, 200, 220, 72, GFX_BLACK);
+        break;
+    case UI_LAYOUT_PC: /* M7: the spike's */
+        gfx_vline(fb, 200, 29, 84, GFX_BLACK);
+        gfx_vline(fb, 200, 130, 84, GFX_BLACK);
+        gfx_hline(fb, 8, 121, 384, GFX_BLACK);
+        gfx_hline(fb, 8, 222, 384, GFX_BLACK);
+        gfx_vline(fb, 133, 231, 61, GFX_BLACK);
+        gfx_vline(fb, 267, 231, 61, GFX_BLACK);
         break;
     default:
         break;
@@ -196,6 +205,10 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
     } else if (preset->layout == UI_LAYOUT_ENERGY) {
         any_stale = ui_draw_energy_layout(fb, below, &c);
     } else if (layout != NULL) {
+        bool asleep = preset->layout == UI_LAYOUT_PC && (c.pc == NULL || !c.pc->session);
+        if (asleep) {
+            c.history = NULL; /* the approved look: the charts empty under the box */
+        }
         draw_separators(fb, (ui_layout_id_t)preset->layout);
         for (int i = 0; i < layout->slot_count; i++) {
             ui_value_t v;
@@ -209,6 +222,9 @@ void ui_draw_dashboard(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t 
                 ui_widget_draw(fb, layout->slots[i].rect, layout->slots[i].size, &v,
                                (ui_stale_policy_t)preset->stale_policy, c.lang);
             }
+        }
+        if (asleep) {
+            ui_pc_draw_asleep(fb, &c);
         }
     }
     ui_status_draw(fb, &c, preset, any_stale);

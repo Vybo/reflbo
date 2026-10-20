@@ -255,6 +255,11 @@ static void chart(gfx_fb_t *fb, gfx_rect_t r, const ui_value_t *v, const ui_visu
             }
         }
     }
+    if (!have && (v->state == UI_VALUE_MISSING || !v->text[0])) { /* nothing to show yet: the label and the baseline */
+        label(fb, r, v, lf, r.w - 8);
+        gfx_hline(fb, p.x, p.y + p.h, p.w, GFX_BLACK);
+        return;
+    }
     float lo, hi;
     ui_visual_range(vis, v, have, vlo, vhi, &lo, &hi);
     char lo_s[16], hi_s[16];

@@ -20,6 +20,7 @@ typedef enum {
     UI_LAYOUT_SPLIT,   /* M6b: cells from the preset's own tree (ui_split.h, D31), without fixed slots */
     UI_LAYOUT_SOLAR,   /* M6d: today's PV forecast, its chart and the next two days (spec §11.5), without slots */
     UI_LAYOUT_ENERGY,  /* M6d: the house's energy now and today's totals (spec §11.6), without slots */
+    UI_LAYOUT_PC,      /* M7: four charts and three bars, "PC asleep" without a session (spec §5.2, D44) */
     UI_LAYOUT_COUNT,
 } ui_layout_id_t;
 

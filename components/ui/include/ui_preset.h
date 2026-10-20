@@ -109,8 +109,9 @@ enum {
     UI_OFFERED_FLIGHTS = 1u << 1, /* "flights": Flights (M6) */
     UI_OFFERED_SOLAR = 1u << 2,   /* "solar": Solar (M6d) */
     UI_OFFERED_ENERGY = 1u << 3,  /* "energy": Energy (M6d) */
+    UI_OFFERED_PC = 1u << 4,      /* "pc": PC (M7) */
 };
-#define UI_OFFERED_ALL (UI_OFFERED_RAIN | UI_OFFERED_FLIGHTS | UI_OFFERED_SOLAR | UI_OFFERED_ENERGY)
+#define UI_OFFERED_ALL (UI_OFFERED_RAIN | UI_OFFERED_FLIGHTS | UI_OFFERED_SOLAR | UI_OFFERED_ENERGY | UI_OFFERED_PC)
 
 /* A slot's visual (spec §5.4, M7): its preset, its slot (or cell) and how it shows. */
 typedef struct {
@@ -170,6 +171,13 @@ ui_field_id_t ui_presets_pc_field(ui_presets_t *p, const char *id);
 ui_field_id_t ui_presets_field_by_name(ui_presets_t *p, const char *name);
 /* A field's name in presets.json into `out`; its length, or 0 (and "") for none or a PC entry without an id. */
 size_t ui_presets_field_name(const ui_presets_t *p, ui_field_id_t field, char *out, size_t size);
+/* The built-in PC preset's charts and bars from the PC app's first catalogue (spec §5.4, M7): its first four readings
+ * as 60 s charts, the next three as bars, each with the reading's own range. Only a preset `pc` on the PC layout
+ * whose slots are all empty: one the owner has changed stays as it is. True if anything changed: save the file. */
+bool ui_presets_fill_pc(ui_presets_t *p, const pc_catalog_t *cat);
+/* The fields the presets' charts show, each once, in preset and slot order: the history's series (spec §5.3). How
+ * many, up to UI_HIST_SERIES. */
+int ui_presets_chart_fields(const ui_presets_t *p, char names[UI_HIST_SERIES][UI_HIST_NAME_LEN]);
 /* Preset `preset`'s own title for `slot`, or NULL. */
 const char *ui_presets_title(const ui_presets_t *p, int preset, int slot);
 /* Sets it (NULL or "" clears it), keeping the pool in order. False, the pool unchanged, if it doesn't fit. */

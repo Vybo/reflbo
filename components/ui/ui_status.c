@@ -4,6 +4,7 @@
 #include "gfx_fonts.h"
 #include "gfx_icons.h"
 #include "ui_internal.h"
+#include "ui_pc.h"
 #include "util_time.h"
 
 void ui_sync_time_text(const ui_context_t *ctx, time_t at, bool brief, char *out, size_t size)
@@ -35,7 +36,7 @@ bool ui_sync_time_fit(const ui_context_t *ctx, time_t at, const gfx_font_t *font
 }
 
 /* Status bar (spec §5.2): "Set time" or a stale warning on the left, then a globe while a phone is
- * logged in to the web UI (D20), the sync state and in sync mode `always` the Wi-Fi state, and the last
+ * logged in to the web UI (D20), a monitor during a PC session (M7), the sync state and in sync mode `always` the Wi-Fi state, and the last
  * good sync's time if the preset asks, with a cloud before it when it stands alone (D43); an optional clock in the
  * middle, the battery on the right with its level, voltage or days left as the preset asks. */
 void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *preset, bool any_stale)
@@ -58,6 +59,14 @@ void ui_status_draw(gfx_fb_t *fb, const ui_context_t *ctx, const ui_preset_t *pr
     }
     if (ctx->web_session) {
         gfx_bitmap(fb, left, 2, &gfx_icon_web_16, GFX_BLACK);
+        left += 20;
+    }
+    if (ctx->pc != NULL && ctx->pc->session) { /* M7 (D44): a small monitor, the spike's */
+        gfx_rect(fb, (gfx_rect_t){ (int16_t)left, 4, 14, 10 }, GFX_BLACK);
+        gfx_fill_rect(fb, (gfx_rect_t){ (int16_t)(left + 2), 6, 10, 6 }, GFX_BLACK);
+        gfx_hline(fb, left + 4, 15, 6, GFX_BLACK);
+        gfx_vline(fb, left + 6, 14, 1, GFX_BLACK);
+        gfx_vline(fb, left + 7, 14, 1, GFX_BLACK);
         left += 20;
     }
     if (ctx->sync != UI_SYNC_IDLE) { /* spec §5.2: a sync running, or the last one failed */

@@ -8,6 +8,7 @@
 #include "solar_fixtures.h"
 #include "ui_dashboard.h"
 #include "ui_history.h"
+#include "ui_pc.h"
 
 /* The dashboard fixtures for the golden renders (test_ui_dashboard_golden.c, render_dashboard.c):
  * a context and a preset each, on top of context_fixtures.h. */
@@ -120,6 +121,42 @@ static inline const ui_history_t *fixture_history(void)
         }
     }
     return &h;
+}
+
+/* M7: the built-in presets with the PC preset filled from the sample PC's catalogue, its view and its last minute. */
+static ui_presets_t s_fix_pc_presets;
+static pc_catalog_t s_fix_pc_cat;
+static pc_values_t s_fix_pc_vals;
+static ui_pc_t s_fix_pc;
+
+static inline void fixture_pc(ui_context_t *ctx, ui_preset_t *preset, bool session, bool filled)
+{
+    ui_presets_defaults(&s_fix_pc_presets);
+    ui_pc_demo(&s_fix_pc_cat, &s_fix_pc_vals);
+    if (filled) {
+        ui_presets_fill_pc(&s_fix_pc_presets, &s_fix_pc_cat);
+    }
+    *preset = s_fix_pc_presets.presets[ui_presets_find(&s_fix_pc_presets, "pc")];
+    static ui_history_t h;
+    static ui_series_t *mem;
+    if (mem == NULL) {
+        mem = calloc(UI_HIST_SERIES, sizeof(ui_series_t));
+    }
+    ui_history_init(&h, mem);
+    char names[UI_HIST_SERIES][UI_HIST_NAME_LEN];
+    const char *list[UI_HIST_SERIES];
+    int n = ui_presets_chart_fields(&s_fix_pc_presets, names);
+    for (int i = 0; i < n; i++) {
+        list[i] = names[i];
+    }
+    ui_history_track(&h, list, n);
+    ui_pc_demo_history(&h, FIX_HISTORY_MS);
+    s_fix_pc = (ui_pc_t){ .session = session, .catalog = &s_fix_pc_cat, .values = &s_fix_pc_vals, .age_ms = 300,
+                          .interval_ms = 1000, .name = "DESKTOP-PC", .since = session ? 0 : FIX_NOW - 2 * 3600 - 36 * 60 };
+    ctx->pc = &s_fix_pc;
+    ctx->pc_ids = s_fix_pc_presets.pc_ids;
+    ctx->history = &h;
+    ctx->now_ms = FIX_HISTORY_MS;
 }
 
 /* Each fixture: a context and a preset. */
@@ -421,6 +458,17 @@ static inline bool fixture_dashboard(const char *name, ui_context_t *ctx, ui_pre
         fixture_solar_ctx(ctx, true, false);
         ctx->history = fixture_history();
         ctx->now_ms = FIX_HISTORY_MS;
+    } else if (strcmp(name, "pc_session") == 0) { /* M7: the sample PC, its charts' last minute */
+        fixture_pc(ctx, preset, true, true);
+    } else if (strcmp(name, "pc_asleep") == 0) { /* its session ended at 18:12 */
+        fixture_pc(ctx, preset, false, true);
+    } else if (strcmp(name, "pc_asleep_cs") == 0) {
+        fixture_pc(ctx, preset, false, true);
+        ctx->lang = lang_get("cs");
+    } else if (strcmp(name, "pc_new") == 0) { /* before the first catalogue: no PC seen since the boot */
+        fixture_pc(ctx, preset, false, false);
+        s_fix_pc.since = 0;
+        s_fix_pc.name[0] = '\0';
     } else if (strcmp(name, "grid_clock_12h") == 0) { /* a clock in a grid cell, 12-hour */
         *preset = fixture_preset("indoor");
         preset->slots[0] = UI_FIELD_TIME_CLOCK;
@@ -536,6 +584,11 @@ static inline const ui_titles_t *fixture_titles(const char *name)
     if (strcmp(name, "classic_visuals") == 0) {
         return &k_classic_visuals;
     }
+    if (strncmp(name, "pc_", 3) == 0) { /* fixture_pc()'s presets: the PC preset's own visuals */
+        static ui_titles_t pc;
+        ui_presets_titles(&s_fix_pc_presets, ui_presets_find(&s_fix_pc_presets, "pc"), &pc);
+        return &pc;
+    }
     if (strcmp(name, "split_visuals") == 0) {
         return &k_split_visuals;
     }
@@ -566,4 +619,5 @@ static const char *const k_dashboard_fixtures[] = { "home", "indoor", "weather",
                                                     "energy_night_cs", "energy_none", "energy_low",
                                                     "grid_solar_low", "solar_evening", "split_titles",
                                                     "home_sync_time", "home_sync_old", "classic_visuals",
-                                                    "split_visuals" };
+                                                    "split_visuals", "pc_session", "pc_asleep", "pc_asleep_cs",
+                                                    "pc_new" };

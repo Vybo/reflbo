@@ -5,6 +5,8 @@
 #include "cJSON.h"
 #include "context_fixtures.h"
 #include "ui_catalog.h"
+#include "ui_pc.h"
+#include "ui_visual.h"
 #include "ui_split.h"
 #include "unity.h"
 
@@ -197,6 +199,66 @@ static void test_fields_carry_their_kind_label_and_current_value(void)
     TEST_ASSERT_EQUAL_STRING("", str(wx, "value"));
 }
 
+/* M7 (D44): which fields a visual takes, and the PC's readings from its catalogue, the cached one too. */
+static void test_fields_say_which_are_numbers_and_list_the_pcs_readings(void)
+{
+    ui_context_t ctx = fixture_context();
+    pc_catalog_t cat;
+    pc_values_t vals;
+    ui_pc_demo(&cat, &vals);
+    ui_pc_t pc = { .session = true, .catalog = &cat, .values = &vals, .age_ms = 200, .interval_ms = 1000 };
+    ctx.pc = &pc;
+    TEST_ASSERT_TRUE(ui_catalog_fields_json(&ctx, s_out, sizeof(s_out)) > 0);
+    s_root = cJSON_Parse(s_out);
+    const cJSON *fields = cJSON_GetObjectItemCaseSensitive(s_root, "fields");
+    TEST_ASSERT_EQUAL_INT(UI_FIELD_COUNT - 1 + cat.count, cJSON_GetArraySize(fields));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(by_id(fields, "env.temp"), "numeric")));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(by_id(fields, "bat.level"), "numeric")));
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(by_id(fields, "wx.now"), "numeric"));
+    const cJSON *hum = by_id(fields, "env.hum"); /* a field's own range, for the editor's placeholders */
+    TEST_ASSERT_EQUAL_INT(0, num(hum, "min"));
+    TEST_ASSERT_EQUAL_INT(100, num(hum, "max"));
+    const cJSON *load = by_id(fields, "pc.cpu_load");
+    TEST_ASSERT_NOT_NULL(load);
+    TEST_ASSERT_EQUAL_STRING("number", str(load, "kind"));
+    TEST_ASSERT_EQUAL_STRING("CPU load", str(load, "label"));
+    TEST_ASSERT_EQUAL_STRING("pc", str(load, "group"));
+    TEST_ASSERT_EQUAL_STRING("fresh", str(load, "state"));
+    TEST_ASSERT_EQUAL_INT(100, num(load, "max"));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(load, "numeric")));
+    TEST_ASSERT_EQUAL_STRING("21.3 GB", str(by_id(fields, "pc.ram_used"), "value"));
+    cJSON_Delete(s_root);
+    pc.session = false; /* the PC asleep: the cached catalogue still lists them, without a value */
+    TEST_ASSERT_TRUE(ui_catalog_fields_json(&ctx, s_out, sizeof(s_out)) > 0);
+    s_root = cJSON_Parse(s_out);
+    fields = cJSON_GetObjectItemCaseSensitive(s_root, "fields");
+    TEST_ASSERT_EQUAL_STRING("missing", str(by_id(fields, "pc.cpu_load"), "state"));
+    TEST_ASSERT_EQUAL_STRING("", str(by_id(fields, "pc.cpu_load"), "value"));
+}
+
+/* GET /api/layouts publishes the room each visual needs and a chart's spans (spec §5.3), so the editor offers only
+ * what the device takes. */
+static void test_layouts_publish_the_visuals_rules(void)
+{
+    TEST_ASSERT_TRUE(ui_catalog_layouts_json(s_out, sizeof(s_out)) > 0);
+    s_root = cJSON_Parse(s_out);
+    const cJSON *visuals = cJSON_GetObjectItemCaseSensitive(s_root, "visuals");
+    TEST_ASSERT_NOT_NULL(visuals);
+    static const char *const k_names[] = { "chart", "bar", "ring", "gauge" };
+    static const ui_vis_as_t k_as[] = { UI_VIS_CHART, UI_VIS_BAR, UI_VIS_RING, UI_VIS_GAUGE };
+    for (int i = 0; i < 4; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(visuals, k_names[i]);
+        int w = num(v, "min_w"), h = num(v, "min_h");
+        TEST_ASSERT_TRUE_MESSAGE(ui_visual_fits(k_as[i], w, h), k_names[i]);
+        TEST_ASSERT_FALSE(ui_visual_fits(k_as[i], w - 1, h) || ui_visual_fits(k_as[i], w, h - 1));
+    }
+    const cJSON *spans = cJSON_GetObjectItemCaseSensitive(s_root, "spans");
+    TEST_ASSERT_EQUAL_INT(UI_SPAN_MIN_S, num(spans, "min_s"));
+    TEST_ASSERT_EQUAL_INT(UI_SPAN_VALUES_MAX_S, num(spans, "values_max_s"));
+    TEST_ASSERT_EQUAL_INT(UI_SPAN_HOURS_MIN_S, num(spans, "hours_min_s"));
+    TEST_ASSERT_EQUAL_INT(UI_SPAN_MAX_S, num(spans, "max_s"));
+}
+
 static void test_a_buffer_too_small_gives_nothing(void)
 {
     TEST_ASSERT_EQUAL_UINT(0, ui_catalog_layouts_json(s_out, 64));
@@ -210,6 +272,8 @@ int main(void)
     RUN_TEST(test_layouts_list_their_slots_with_rectangles_sizes_and_kinds);
     RUN_TEST(test_layouts_publish_the_split_rules);
     RUN_TEST(test_fields_carry_their_kind_label_and_current_value);
+    RUN_TEST(test_fields_say_which_are_numbers_and_list_the_pcs_readings);
+    RUN_TEST(test_layouts_publish_the_visuals_rules);
     RUN_TEST(test_a_buffer_too_small_gives_nothing);
     return UNITY_END();
 }

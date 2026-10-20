@@ -29,6 +29,7 @@ typedef enum {
     SYNC_KIND_REFRESH, /* sync mode `always`: the radar's frames, the house's reading or both, on the network
                           Wi-Fi is on already (D23: never joining) */
     SYNC_KIND_CHECK,   /* the Solar page's Check now (M6d): the Solar and Energy steps, joining first if need be */
+    SYNC_KIND_PC,      /* the PC page's Test (M7): the PC step alone, joining first if need be */
 } sync_kind_t;
 
 /* The Solar step's request (spec §11.5); keys stay in it, never in a log. */

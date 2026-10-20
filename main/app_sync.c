@@ -248,7 +248,10 @@ static void apply(void *arg)
 {
     sync_report_t *r = arg;
     if (r->kind != SYNC_KIND_SYNC) {
-        if (r->kind == SYNC_KIND_CHECK) {
+        if (r->kind == SYNC_KIND_PC) {
+            app_pc_tested(r); /* M7: a session may start, which keeps Wi-Fi */
+        }
+        if (r->kind == SYNC_KIND_CHECK || r->kind == SYNC_KIND_PC) {
             release_wifi(); /* as a sync does: config mode or `always` keep it */
         }
         apply_refresh(r);
@@ -402,6 +405,40 @@ esp_err_t app_sync_now(void)
         return ESP_OK;
     }
     return start(true, (sync_due_t){ 0 });
+}
+
+esp_err_t app_sync_pc_test(void)
+{
+    const settings_t *set = app_settings();
+    if (app_state()->critical || s_active) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!set->pc_enabled || set->pc_host[0] == '\0') {
+        return ESP_ERR_INVALID_ARG; /* nothing to ask */
+    }
+    if (!networks_saved()) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (app_config_active()) {
+        netmgr_status_t ns;
+        netmgr_status(&ns);
+        if (ns.state != NETMGR_STATION) {
+            return ESP_ERR_INVALID_STATE; /* only the device's own network: nothing to reach */
+        }
+    }
+    EXT_RAM_BSS_ATTR static sync_request_t req;
+    req = (sync_request_t){ .kind = SYNC_KIND_PC, .steps = SETTINGS_STEPS_ALL,
+                            .pc = { .enabled = true, .port = set->pc_port } };
+    snprintf(req.pc.host, sizeof(req.pc.host), "%s", set->pc_host);
+    app_secret_get(SETTINGS_SECRET_PC_TOKEN, req.pc.token, sizeof(req.pc.token));
+    esp_err_t err = sync_start(&req, done);
+    if (err == ESP_OK) {
+        s_active = true;
+        s_refresh = true; /* not a sync: no mark in the status bar, no history */
+        s_manual = false;
+        ESP_LOGI(TAG, "PC test starts");
+    }
+    return err;
 }
 
 esp_err_t app_sync_check(void)

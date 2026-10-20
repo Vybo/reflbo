@@ -5,7 +5,9 @@
 
 #include "cJSON.h"
 #include "ui_layout.h"
+#include "ui_pc.h"
 #include "ui_split.h"
+#include "ui_visual.h"
 
 #define PANEL_W 400
 #define PANEL_H 300
@@ -76,6 +78,31 @@ static void add_split(cJSON *root)
     }
 }
 
+/* Show as (spec §5.3, M7): the least room each visual needs, and a chart's spans. */
+static void add_visuals(cJSON *root)
+{
+    static const char *const k_names[UI_VIS_COUNT] = { [UI_VIS_CHART] = "chart", [UI_VIS_BAR] = "bar",
+                                                       [UI_VIS_RING] = "ring", [UI_VIS_GAUGE] = "gauge" };
+    cJSON *visuals = cJSON_AddObjectToObject(root, "visuals");
+    for (int as = UI_VIS_CHART; as < UI_VIS_COUNT; as++) {
+        int w = 1, h = 1;
+        while (!ui_visual_fits((ui_vis_as_t)as, w, PANEL_H)) {
+            w++;
+        }
+        while (!ui_visual_fits((ui_vis_as_t)as, PANEL_W, h)) {
+            h++;
+        }
+        cJSON *v = cJSON_AddObjectToObject(visuals, k_names[as]);
+        cJSON_AddNumberToObject(v, "min_w", w);
+        cJSON_AddNumberToObject(v, "min_h", h);
+    }
+    cJSON *spans = cJSON_AddObjectToObject(root, "spans");
+    cJSON_AddNumberToObject(spans, "min_s", UI_SPAN_MIN_S);
+    cJSON_AddNumberToObject(spans, "values_max_s", UI_SPAN_VALUES_MAX_S);
+    cJSON_AddNumberToObject(spans, "hours_min_s", UI_SPAN_HOURS_MIN_S);
+    cJSON_AddNumberToObject(spans, "max_s", UI_SPAN_MAX_S);
+}
+
 size_t ui_catalog_layouts_json(char *out, size_t size)
 {
     cJSON *root = cJSON_CreateObject();
@@ -108,32 +135,66 @@ size_t ui_catalog_layouts_json(char *out, size_t size)
         cJSON_AddItemToArray(layouts, lo);
     }
     add_split(root);
+    add_visuals(root);
     return print(root, out, size);
+}
+
+/* One field as the editor lists it: its kind, label and value now; from M7 whether a visual takes it, its own range
+ * and, for a PC reading, its group. */
+static void add_field(cJSON *fields, const ui_context_t *ctx, ui_field_id_t f, const char *id, const char *label,
+                      const char *group)
+{
+    static const char *const k_states[] = { "missing", "fresh", "stale" };
+    static ui_value_t v;
+    ui_resolve(ctx, f, &v);
+    char value[sizeof(v.text) + sizeof(v.unit) + 2];
+    snprintf(value, sizeof(value), "%s%s%s", v.state == UI_VALUE_MISSING ? "" : v.text,
+             v.state != UI_VALUE_MISSING && v.unit[0] ? " " : "", v.state == UI_VALUE_MISSING ? "" : v.unit);
+    cJSON *fo = cJSON_CreateObject();
+    cJSON_AddStringToObject(fo, "id", id);
+    cJSON_AddStringToObject(fo, "kind", k_kinds[ui_field_info(f)->kind]);
+    cJSON_AddStringToObject(fo, "label", label);
+    cJSON_AddStringToObject(fo, "value", value);
+    cJSON_AddStringToObject(fo, "state", k_states[v.state]);
+    if (v.state == UI_VALUE_STALE) {
+        cJSON_AddNumberToObject(fo, "age_s", v.age_s);
+    }
+    if (ui_field_numeric(f)) {
+        cJSON_AddBoolToObject(fo, "numeric", true);
+    }
+    if (v.has_range) {
+        cJSON_AddNumberToObject(fo, "min", v.range_min);
+        cJSON_AddNumberToObject(fo, "max", v.range_max);
+    }
+    if (group != NULL) {
+        cJSON_AddStringToObject(fo, "group", group);
+    }
+    cJSON_AddItemToArray(fields, fo);
 }
 
 size_t ui_catalog_fields_json(const ui_context_t *ctx, char *out, size_t size)
 {
-    static const char *const k_states[] = { "missing", "fresh", "stale" };
     const lang_t *en = lang_get("en");
     cJSON *root = cJSON_CreateObject();
     cJSON *fields = cJSON_AddArrayToObject(root, "fields");
     for (int f = UI_FIELD_NONE + 1; f < UI_FIELD_COUNT; f++) {
         const ui_field_info_t *info = ui_field_info((ui_field_id_t)f);
-        static ui_value_t v;
-        ui_resolve(ctx, (ui_field_id_t)f, &v);
-        char value[sizeof(v.text) + sizeof(v.unit) + 2];
-        snprintf(value, sizeof(value), "%s%s%s", v.state == UI_VALUE_MISSING ? "" : v.text,
-                 v.state != UI_VALUE_MISSING && v.unit[0] ? " " : "", v.state == UI_VALUE_MISSING ? "" : v.unit);
-        cJSON *fo = cJSON_CreateObject();
-        cJSON_AddStringToObject(fo, "id", info->id);
-        cJSON_AddStringToObject(fo, "kind", k_kinds[info->kind]);
-        cJSON_AddStringToObject(fo, "label", lang_str(en, info->label));
-        cJSON_AddStringToObject(fo, "value", value);
-        cJSON_AddStringToObject(fo, "state", k_states[v.state]);
-        if (v.state == UI_VALUE_STALE) {
-            cJSON_AddNumberToObject(fo, "age_s", v.age_s);
+        add_field(fields, ctx, (ui_field_id_t)f, info->id, lang_str(en, info->label), NULL);
+    }
+    const pc_catalog_t *cat = ctx->pc != NULL ? ctx->pc->catalog : NULL;
+    if (cat != NULL) { /* M7: the PC's readings, as the catalogue names them, each as field n of its own table */
+        static char ids[UI_PC_FIELDS][PC_ID_LEN];
+        memset(ids, 0, sizeof(ids));
+        ui_context_t c = *ctx;
+        c.pc_ids = ids;
+        for (int i = 0; i < cat->count && i < UI_PC_FIELDS; i++) {
+            memcpy(ids[i], cat->r[i].id, PC_ID_LEN);
+            char id[4 + PC_ID_LEN];
+            snprintf(id, sizeof(id), "pc.%s", cat->r[i].id);
+            add_field(fields, &c, (ui_field_id_t)(UI_FIELD_PC_FIRST + i), id, cat->r[i].label[0] ? cat->r[i].label
+                                                                                                 : cat->r[i].id,
+                      "pc");
         }
-        cJSON_AddItemToArray(fields, fo);
     }
     return print(root, out, size);
 }

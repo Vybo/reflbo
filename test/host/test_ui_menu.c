@@ -318,9 +318,9 @@ static void test_the_sync_steps_switch_on_and_off(void)
     open_item(UI_MI_SYNC_STEPS);
     ui_menu_item_t items[UI_MI_COUNT];
     const ui_menu_item_t expected[] = { UI_MI_STEP_WEATHER, UI_MI_STEP_AIR, UI_MI_STEP_RADAR, UI_MI_STEP_SOLAR,
-                                        UI_MI_STEP_ENERGY };
-    TEST_ASSERT_EQUAL_INT(5, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
-    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 5);
+                                        UI_MI_STEP_ENERGY,  UI_MI_STEP_PC }; /* M7: finding the PC */
+    TEST_ASSERT_EQUAL_INT(6, ui_menu_visible(&s_m, &s_model, items, UI_MI_COUNT));
+    TEST_ASSERT_EQUAL_INT_ARRAY(expected, items, 6);
     const lang_t *en = lang_get("en"), *cs = lang_get("cs");
     TEST_ASSERT_EQUAL_STRING("Steps", ui_menu_label(UI_MI_SYNC_STEPS, en));
     TEST_ASSERT_EQUAL_STRING("Air quality", ui_menu_label(UI_MI_STEP_AIR, en));
@@ -328,6 +328,7 @@ static void test_the_sync_steps_switch_on_and_off(void)
     TEST_ASSERT_EQUAL_STRING("House energy", ui_menu_label(UI_MI_STEP_ENERGY, en));
     TEST_ASSERT_EQUAL_STRING("Kroky", ui_menu_label(UI_MI_SYNC_STEPS, cs));
     TEST_ASSERT_EQUAL_STRING("Energie domu", ui_menu_label(UI_MI_STEP_ENERGY, cs));
+    TEST_ASSERT_EQUAL_STRING("PC", ui_menu_label(UI_MI_STEP_PC, en));
     s_model.value[UI_MI_STEP_SOLAR] = 1;
     ui_menu_intent_t in = open_item(UI_MI_STEP_SOLAR);
     TEST_ASSERT_EQUAL(UI_MENU_SET, in.kind); /* a switch flips at once */

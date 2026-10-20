@@ -175,6 +175,7 @@ const lang_t lang_en = {
         [LS_SYNC_STEP_RADAR] = "Radar",
         [LS_SYNC_STEP_SOLAR] = "Solar forecast",
         [LS_SYNC_STEP_ENERGY] = "House energy",
+        [LS_SYNC_STEP_PC] = "PC",
         [LS_SYNC_NEVER] = "Never",
         [LS_SYNC_RUNNING] = "Running",
         [LS_T_SYNC_STARTED] = "Syncing…",

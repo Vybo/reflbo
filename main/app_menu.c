@@ -26,7 +26,7 @@
 
 static const char *TAG = "app_menu";
 
-_Static_assert(UI_MI_STEP_ENERGY - UI_MI_STEP_WEATHER == 4 && SETTINGS_STEP_ENERGY == 1 << 4,
+_Static_assert(UI_MI_STEP_PC - UI_MI_STEP_WEATHER == 5 && SETTINGS_STEP_PC == 1 << 5,
                "Sync ▸ Steps follows settings_step_t: a switch a bit");
 
 static int64_t s_closed_ms; /* app_uptime_ms() when the menu last closed */
@@ -167,7 +167,7 @@ static void build_model(void)
     m->value[UI_MI_SYNC_INTERVAL] = nearest_index(k_sync_min, SYNC_STEPS, set->sync_interval_min);
     m->hidden[UI_MI_SYNC_INTERVAL] = set->sync_mode != SETTINGS_SYNC_INTERVAL;
     m->value[UI_MI_QUIET_HOURS] = set->quiet;
-    for (int i = 0; i < 5; i++) { /* Sync ▸ Steps (D35), in settings_step_t order */
+    for (int i = 0; i < 6; i++) { /* Sync ▸ Steps (D35, M7), in settings_step_t order */
         m->value[UI_MI_STEP_WEATHER + i] = (set->sync_steps >> i) & 1;
     }
 
@@ -308,7 +308,8 @@ static void apply(const ui_menu_intent_t *in)
         case UI_MI_STEP_AIR:
         case UI_MI_STEP_RADAR:
         case UI_MI_STEP_SOLAR:
-        case UI_MI_STEP_ENERGY: { /* a step that is off makes no requests, its refreshes in `always` included */
+        case UI_MI_STEP_ENERGY:
+        case UI_MI_STEP_PC: { /* a step that is off makes no requests, its refreshes in `always` included */
             uint8_t bit = (uint8_t)(1u << (in->item - UI_MI_STEP_WEATHER));
             set->sync_steps = (uint8_t)(in->value ? set->sync_steps | bit : set->sync_steps & ~bit);
             save_settings = true;

@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L /* setenv() in fixture_zone() */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "context_fixtures.h"
@@ -572,6 +573,58 @@ static void test_a_reading_goes_stale_after_15_minutes(void)
     TEST_ASSERT_EQUAL_UINT32(16 * 60, v.age_s);
 }
 
+/* M7 (D44): every numeric field carries its number for the visuals (spec §5.3), in its base unit, and its own
+ * range where it has one; other kinds, and a missing value, carry none. */
+static void test_numeric_fields_carry_their_number(void)
+{
+    ui_value_t v = resolve(UI_FIELD_ENV_TEMP);
+    TEST_ASSERT_TRUE(v.has_num);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 23.4f, v.num);
+    TEST_ASSERT_FALSE(v.has_range);
+    s_ctx.fahrenheit = true;
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 74.1f, resolve(UI_FIELD_ENV_TEMP).num);
+    s_ctx.fahrenheit = false;
+    v = resolve(UI_FIELD_ENV_HUM);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 45.0f, v.num);
+    TEST_ASSERT_TRUE(v.has_range);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, v.range_min);
+    TEST_ASSERT_EQUAL_FLOAT(100.0f, v.range_max);
+    v = resolve(UI_FIELD_BAT_LEVEL);
+    TEST_ASSERT_EQUAL_FLOAT(87.0f, v.num);
+    TEST_ASSERT_TRUE(v.has_range);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 8.5f, resolve(UI_FIELD_BAT_DAYS).num);
+    TEST_ASSERT_EQUAL_FLOAT(39.0f, resolve(UI_FIELD_DATE_WEEK).num); /* 25 September 2026 */
+    TEST_ASSERT_FALSE(resolve(UI_FIELD_DATE_DAY).has_num);
+    TEST_ASSERT_FALSE(resolve(UI_FIELD_MOON_PHASE).has_num);
+    TEST_ASSERT_FALSE(resolve(UI_FIELD_AQ_INDEX).has_num); /* no forecast yet */
+}
+
+static void test_the_air_carries_its_numbers(void)
+{
+    fixture_forecast(&s_fix_ds, FIX_NOW - 3600);
+    TEST_ASSERT_EQUAL_FLOAT(38.0f, resolve(UI_FIELD_AQ_INDEX).num);
+    TEST_ASSERT_EQUAL_FLOAT(11.0f, resolve(UI_FIELD_AQ_PM25).num);
+    s_ctx.now = FIX_NOW - 7 * 3600 - 48 * 60; /* 13:00, the peak */
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 4.5f, resolve(UI_FIELD_AQ_UV).num);
+}
+
+static void test_powers_are_kilowatts_and_energies_kilowatt_hours_whatever_the_text(void)
+{
+    with_solar();
+    ui_value_t v = resolve(UI_FIELD_EN_LOAD); /* its text is "860" W */
+    TEST_ASSERT_TRUE(v.has_num);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.86f, v.num);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.42f, resolve(UI_FIELD_EN_PV).num);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -2.56f, resolve(UI_FIELD_EN_GRID).num); /* exporting */
+    v = resolve(UI_FIELD_EN_SELF);
+    TEST_ASSERT_TRUE(v.has_num && v.has_range);
+    v = resolve(UI_FIELD_PV_TODAY);
+    TEST_ASSERT_TRUE(v.has_num);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, (float)atof(v.text), v.num);
+    TEST_ASSERT_FALSE(resolve(UI_FIELD_PV_CHART).has_num);
+    TEST_ASSERT_FALSE(resolve(UI_FIELD_EN_FLOW).has_num);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -604,5 +657,8 @@ int main(void)
     RUN_TEST(test_the_home_battery);
     RUN_TEST(test_todays_totals);
     RUN_TEST(test_a_reading_goes_stale_after_15_minutes);
+    RUN_TEST(test_numeric_fields_carry_their_number);
+    RUN_TEST(test_the_air_carries_its_numbers);
+    RUN_TEST(test_powers_are_kilowatts_and_energies_kilowatt_hours_whatever_the_text);
     return UNITY_END();
 }

@@ -108,6 +108,7 @@ static void resolve_temperature(const ui_context_t *ctx, ds_field_t f, ui_value_
         return;
     }
     long tenths = temp_tenths(ctx, e.value);
+    ui_set_num(out, (float)tenths / 10.0f);
     lang_format_decimal(ctx->lang, tenths, 1, out->text, sizeof(out->text));
     lang_format_decimal(ctx->lang, (tenths + (tenths >= 0 ? 5 : -5)) / 10, 0, out->short_text, sizeof(out->short_text));
     snprintf(out->unit, sizeof(out->unit), "%s", ctx->fahrenheit ? "°F" : "°C");
@@ -129,12 +130,16 @@ static void resolve_store(const ui_context_t *ctx, ui_field_id_t field, ui_value
             snprintf(out->text, sizeof(out->text), "%ld", (long)(e.value + 50) / 100);
             snprintf(out->unit, sizeof(out->unit), "%%");
             out->trend = trend_sign(e.trend, HUM_TREND_PCT100);
+            ui_set_num(out, (float)e.value / 100.0f);
+            ui_set_range(out, 0.0f, 100.0f);
         }
         break;
     case UI_FIELD_BAT_LEVEL:
         if (from_store(ctx, DS_BAT_LEVEL, out, &e)) {
             out->percent = e.value;
             out->battery = (ds_bat_state_t)e.bat_state;
+            ui_set_num(out, (float)e.value);
+            ui_set_range(out, 0.0f, 100.0f);
             snprintf(out->text, sizeof(out->text), "%ld", (long)e.value);
             snprintf(out->unit, sizeof(out->unit), "%%");
             char volts[12];
@@ -144,6 +149,7 @@ static void resolve_store(const ui_context_t *ctx, ui_field_id_t field, ui_value
         break;
     case UI_FIELD_BAT_DAYS:
         if (from_store(ctx, DS_BAT_DAYS, out, &e)) {
+            ui_set_num(out, (float)e.value / 10.0f);
             if (e.value >= 100) { /* whole days from 10 on */
                 snprintf(out->text, sizeof(out->text), "%ld", (long)(e.value + 5) / 10);
             } else {
@@ -189,6 +195,7 @@ static void resolve_clock(const ui_context_t *ctx, ui_field_id_t field, ui_value
         break;
     case UI_FIELD_DATE_WEEK:
         snprintf(out->text, sizeof(out->text), "%d", util_iso_week(year, month, day));
+        ui_set_num(out, (float)util_iso_week(year, month, day));
         out->state = UI_VALUE_FRESH;
         break;
     case UI_FIELD_MOON_PHASE:

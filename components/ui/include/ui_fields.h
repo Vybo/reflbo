@@ -182,6 +182,13 @@ typedef struct {
     int quarter, minute;     /* pv.chart: the local quarter hour now and the minute */
     const uint16_t *chart_q;    /* pv.chart: today's forecast by quarter hour, in tens of W */
     const uint16_t *chart_read; /* and the readings' means (0xFFFF where none came); NULL without readings */
+    /* M7 (D44): the value as a number, for the visuals (spec §5.3): in the field's base unit (°C or °F as set,
+     * %, kW for a power and kWh for an energy whatever `unit` says, µg/m³), signed (a power to the grid is
+     * negative); and the field's own range where it has one (0-100 for a %) */
+    bool has_num;
+    float num;
+    bool has_range;
+    float range_min, range_max;
 } ui_value_t;
 
 void ui_resolve(const ui_context_t *ctx, ui_field_id_t field, ui_value_t *out);

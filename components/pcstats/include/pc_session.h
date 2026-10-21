@@ -59,6 +59,8 @@ bool pc_session_keeps_wifi(const pc_session_t *s);
  * from before while the mode is still the session's `always` (`mode` otherwise), and the preset from before while
  * the session's own is on screen (NULL: the one shown). */
 int pc_session_saved_mode(const pc_session_t *s, int mode);
+/* Whether `mode`, saved by hand, ends the session: leaving `always` does (the owner, 2026-10-21). */
+bool pc_session_left_always(const pc_session_t *s, int mode);
 const char *pc_session_saved_preset(const pc_session_t *s, const char *shown);
 /* A schedule's night that comes due during a session is kept for its end (the one that ends last, if two)... */
 void pc_session_defer_night(pc_session_t *s, int64_t until);

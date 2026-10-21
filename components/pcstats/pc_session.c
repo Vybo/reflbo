@@ -92,6 +92,11 @@ bool pc_session_keeps_wifi(const pc_session_t *s)
     return s->active;
 }
 
+bool pc_session_left_always(const pc_session_t *s, int mode)
+{
+    return s->active && mode != PC_SESSION_ALWAYS;
+}
+
 int pc_session_saved_mode(const pc_session_t *s, int mode)
 {
     return s->active && s->set_always && mode == PC_SESSION_ALWAYS ? s->mode_before : mode;

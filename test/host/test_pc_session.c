@@ -57,6 +57,21 @@ static void test_always_turned_off_by_hand_stays_off(void)
     TEST_ASSERT_EQUAL_STRING("weather", e.select);
 }
 
+/* Leaving `always` by hand ends the session at once (the owner, 2026-10-21): Wi-Fi goes with the owner's mode, and
+ * the session's preset comes back if it is still on screen. While the mode is still `always`, nothing ends. */
+static void test_leaving_always_by_hand_ends_the_session(void)
+{
+    TEST_ASSERT_FALSE(pc_session_left_always(&s, MODE_TIMES)); /* no session */
+    pc_session_start(&s, &k_both, false, MODE_TIMES, "weather", 1000);
+    TEST_ASSERT_FALSE(pc_session_left_always(&s, MODE_ALWAYS));
+    TEST_ASSERT_TRUE(pc_session_left_always(&s, MODE_TIMES)); /* BOOT double, the menu or the page */
+    TEST_ASSERT_TRUE(pc_session_left_always(&s, MODE_INTERVAL));
+    pc_end_t e = pc_session_end(&s, false, "pc");
+    TEST_ASSERT_FALSE(e.restore_mode);
+    TEST_ASSERT_EQUAL_STRING("weather", e.select);
+    TEST_ASSERT_FALSE(pc_session_left_always(&s, MODE_TIMES)); /* ended */
+}
+
 static void test_the_owners_own_always_isnt_undone(void)
 {
     pc_start_t a = pc_session_start(&s, &k_both, true, MODE_ALWAYS, "energy", 1000);
@@ -173,6 +188,7 @@ int main(void)
     RUN_TEST(test_the_end_brings_back_the_mode_and_the_preset);
     RUN_TEST(test_a_preset_chosen_by_hand_stays);
     RUN_TEST(test_always_turned_off_by_hand_stays_off);
+    RUN_TEST(test_leaving_always_by_hand_ends_the_session);
     RUN_TEST(test_the_owners_own_always_isnt_undone);
     RUN_TEST(test_without_a_preset_nothing_is_selected_or_restored);
     RUN_TEST(test_a_pc_preset_already_on_screen_isnt_restored_to_itself);

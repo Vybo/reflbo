@@ -453,6 +453,13 @@ void app_pc_defer_night(time_t until)
     pc_session_defer_night(&s_sess, until);
 }
 
+void app_pc_settings_saved(uint8_t mode)
+{
+    if (pc_session_left_always(&s_sess, mode)) { /* BOOT double, the menu or a page left `always`: your hand wins */
+        end_session("always off by hand");
+    }
+}
+
 /* ---- the views ---- */
 
 const ui_pc_t *app_pc_ui(void)

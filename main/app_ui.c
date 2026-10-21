@@ -519,6 +519,7 @@ static bool keep_text(const char *text, void *ctx)
 
 esp_err_t app_ui_save_settings(void)
 {
+    app_pc_settings_saved(s.settings.sync_mode); /* before the save: a session's end gives back its preset */
     esp_err_t err = storage_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "saving settings: %s", esp_err_to_name(err));

@@ -277,6 +277,7 @@ bool app_pc_pauses_cycle(void);    /* the session's preset is on screen */
 uint8_t app_pc_saved_mode(uint8_t mode);
 const char *app_pc_saved_preset(void);
 void app_pc_defer_night(time_t until); /* a schedule's night during a session: it starts at the session's end */
+void app_pc_settings_saved(uint8_t mode); /* leaving `always` by hand ends a session (the owner, 2026-10-21) */
 void app_pc_feed(bool sample);     /* the charts' other fields: at a sample (`env.*`, `bat.*`) or a sync (the rest) */
 const ui_pc_t *app_pc_ui(void);    /* what a render draws now */
 const ui_history_t *app_pc_history(void); /* NULL until a chart needs it */

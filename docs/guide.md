@@ -20,6 +20,8 @@ The images are the firmware's own output. The panel images are the host build's 
 - [Weather radar](#weather-radar)
 - [Flight radar](#flight-radar)
 - [Solar and the house's energy](#solar-and-the-houses-energy)
+- [Your PC's sensors](#your-pcs-sensors)
+- [Charts, bars, rings and gauges](#charts-bars-rings-and-gauges)
 - [The menu](#the-menu)
 - [Wi-Fi and the web configurator](#wi-fi-and-the-web-configurator)
 - [Syncing](#syncing)
@@ -256,6 +258,40 @@ Keys, tokens, site ids, Client IDs and Secrets are write-only: the page only say
 
 [Open-Meteo](https://open-meteo.com) is used under CC BY 4.0, Forecast.Solar's data under CC BY-SA 4.0, and Solcast's for personal use only, as its terms say.
 
+## Your PC's sensors
+
+While your Windows PC is on, the device can show its load, temperatures, memory and network live, a value a second. A small tray app on the PC, **reflbo-stats**, reads [HWiNFO](https://www.hwinfo.com) Pro's sensors and serves the ones you pick to the device over your home network. When the PC sleeps or the app quits, your dashboards come back.
+
+<p><img src="images/panel/pc.png" width="400" alt="The PC layout during a session: four charts of the last 60 s, CPU load 55 %, CPU 69 °C, GPU load 94 %, GPU 65 °C, each with its range at the right and 60 s at the bottom left; below, bars for RAM 21.3 GB, VRAM 6.2 GB and the network at 12.4 MB/s; a small monitor in the status bar"> <img src="images/panel/pc-asleep.png" width="400" alt="The PC layout without a session: the charts' labels and baselines, with a box saying PC asleep, since 18:12 and the PC's name"></p>
+
+**Setting it up:**
+
+1. On the PC, run HWiNFO Pro with Shared Memory Support on, and reflbo-stats (its own README says how). Its page, at `http://127.0.0.1:47124` on the PC, lists HWiNFO's sensors: tick the ones you want, give each a short id (`cpu_load`), and optionally a unit, a scale and a range. It shows the token the device needs.
+2. On the device's web page, open **PC**: turn PC stats on, enter the PC's address (its name or IP) and the token, and press **Test**. It should say "found" with the PC's name.
+3. Choose what happens when the PC is on: **Switch to Always on** keeps the device online for the stream, and **Show preset** switches to a preset (PC by default).
+
+**A session.** A sync finds the PC: the device looks for it at each sync only, so it shows up to one sync interval after the PC wakes (a shorter interval, or sync mode Always on, finds it sooner). Then the readings stream in at the interval you set on the PC page (1 s by default; 250 ms to 10 s). The PC page warns when it is shorter than the panel's frame time, as faster values couldn't show. A small monitor in the status bar says a session runs.
+
+**When it ends.** When the app quits, or the PC sleeps and stays quiet for about 15 seconds, the session ends and gives back what it changed, but only what you haven't changed yourself: the preset from before if the PC preset is still on screen, and the sync mode if it is still the Always on the session set. If you turn Always on off yourself during a session (BOOT double, the menu or the Sync page), the session ends at once. A night from the schedule waits until the session ends, then starts if its end hasn't come. A restart during a session comes back as you left the device.
+
+The built-in **PC** preset fills itself from the first readings the PC sends: the first four as charts, the next three as bars. Your PC readings are fields like any other (`pc.cpu_load`), so they fit in any layout, and the editor lists them while the PC is off.
+
+<p><img src="images/web/pc.png" width="260" alt="The PC page: PC stats on, the PC's address desktop-pc.local and port 47123, the token set, and a reading every 1000 ms"> <img src="images/web/pc-now.png" width="260" alt="The PC page's Now card: the session running with DESKTOP-PC, HWiNFO running, the last message 312 ms ago, sync mode Always on until the session ends, and the seven readings with their ids and units"></p>
+
+`pc status` on the console shows the session; `pc demo on` draws a sample PC without one.
+
+## Charts, bars, rings and gauges
+
+Any number on the device can show as more than its value: in the preset editor, a slot or cell with a numeric field has **Show as**: Value, History chart, Bar, Ring or Gauge. The editor offers only the ones that fit: about 80×40 px for a chart, 60×40 for a gauge, 40×40 for a ring and 60×16 for a bar.
+
+<p><img src="images/panel/classic-visuals.png" width="400" alt="The Classic layout with its small slots as visuals: the indoor temperature as a chart, the humidity as a ring, the panels' power as a gauge from 0 to 7 kW, and the battery as a bar"> <img src="images/panel/visuals.png" width="400" alt="The four visuals side by side: a history chart, a bar, a ring and an arc gauge, each with its value"></p>
+
+- **History chart**: the last 10 s to 1 h from each value, or 2 to 24 h from each minute's low, mean and high. Numbers over the chart show the latest value, the range's ends and the span. The history lives in memory only: a restart or a deep sleep starts it again. A gap in the values stays a gap.
+- **Bar, Ring, Gauge**: the value between a minimum and a maximum.
+- **Minimum and maximum**: left empty, they are the field's own range (a PC reading's from the app), else automatic: a chart's from the values in view, a bar's, ring's or gauge's from 0 to a round number past the value. Powers and energies take their bounds in kW and kWh.
+
+<p><img src="images/web/presets-show.png" width="260" alt="The preset editor: the PC preset's c1 showing CPU load as a History chart, its minimum and maximum left to the reading's own 0 and 100, a span of 60 s and Numbers over the chart ticked"> <img src="images/panel/chart-spans.png" width="400" alt="History charts of 10 s, 60 s, 1 h and 24 h"></p>
+
 ## The menu
 
 Hold KEY to open the menu. KEY moves to the next item and, held, opens it; BOOT goes back. A value is changed with KEY (+) and BOOT (−), then saved by holding KEY.
@@ -360,7 +396,6 @@ tools/idf.sh exec python tools/devlog.py --cmd "field set env.temp -5.5" --cmd "
 
 ## Coming next
 
-- **Your PC's sensors (M7, designed).** A small Windows app reads HWiNFO and streams the sensors you pick to the device over your network. When a sync finds the PC on, the device can stay online and switch to a PC preset; when the PC sleeps, your dashboards come back. Any number on the device can then show as a history chart, a bar, a ring or a gauge.
 - **MQTT and Home Assistant (M8, designed).** The device's sensors and state in Home Assistant through MQTT discovery; its preset as a select; Sync now and Next preset as buttons; key presses as device triggers; a message from Home Assistant as a banner; and values from Home Assistant or other devices as fields on the dashboard.
 - **Audio (M9, planned).** Alarms that ring from sleep, with snooze; internet radio.
 - **microSD (M10, planned).** Uses to be agreed, such as history and graphs, sounds and station lists, or a detailed map.

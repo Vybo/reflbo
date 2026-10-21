@@ -4,7 +4,7 @@ Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-
 
 <p align="center"><img src="docs/images/panel/hero.png" width="820" alt="Four dashboards: a large clock with the date, indoor temperature, humidity, the moon and the battery; the current weather with today's forecast and the next hours; a rain radar map of Czechia; a flight radar with aircraft around Brno"></p>
 
-**Status:** version 0.1.0-dev. Milestones M0 to M6e are built: dashboards and presets, the on-device menu, Wi-Fi with a web configurator, syncing, weather and air quality, both radars, layouts of your own down to the status bar's size, the solar forecast with the house's energy, and presets that join the auto-cycle only at the hours you choose. Live values from your Windows PC (M7) and MQTT with Home Assistant (M8) are designed; audio and microSD come after. The **[user guide](docs/guide.md)** describes every feature.
+**Status:** version 0.1.0-dev. Milestones M0 to M7 are built: dashboards and presets, the on-device menu, Wi-Fi with a web configurator, syncing, weather and air quality, both radars, layouts of your own down to the status bar's size, the solar forecast with the house's energy, presets that join the auto-cycle only at the hours you choose, and live values from your Windows PC with charts, bars, rings and gauges for any number. MQTT with Home Assistant (M8) is designed; audio and microSD come after. The **[user guide](docs/guide.md)** describes every feature.
 
 ## Features
 
@@ -15,6 +15,8 @@ Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-
 - **Weather radar.** Rain from ČHMÚ, or RainViewer outside its area, on a built-in world map, with the last hour as a loop.
 - **Flight radar.** Aircraft from adsb.fi around a point you choose, with the nearest one's route.
 - **Solar.** Your PV system's forecast for the day from Open-Meteo through the device's own model (no account), Forecast.Solar or Solcast, with a chart; the house's energy now from SolaX Cloud: solar output, the grid, the house, a home battery and today's totals.
+- **Your PC's sensors.** A small Windows tray app, [reflbo-stats](https://github.com/Vybo/reflbo-stats-win), reads HWiNFO Pro and streams the sensors you pick, a value a second; when a sync finds the PC on, the device can stay online and show a PC preset, and your dashboards come back when it sleeps.
+- **Charts, bars, rings and gauges.** Any number can show as a history chart (10 s to 24 h), a bar, a ring or a gauge, slot by slot.
 - **Only what you use.** Each step of the sync can be switched off, so services you don't use cost no requests.
 - **Battery first.** Wi-Fi only for a sync, once a day by default; light sleep between the minute updates; a battery gauge that can learn its cell.
 - **Accurate time.** NTP to the millisecond, a trim for the clock chip's drift, and time zones with daylight saving.
@@ -36,6 +38,10 @@ Firmware for the Waveshare [ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-
 <tr>
 <td><img src="docs/images/panel/solar.png" width="400" alt="The Solar layout: 27.4 kWh forecast today, now, the peak and what is still to come, the day's chart, and the next two days"><br>Today's solar forecast, with what was produced so far</td>
 <td><img src="docs/images/panel/energy.png" width="400" alt="The Energy layout: solar output flowing to the grid, the home and a charging battery, with today's totals"><br>The house's energy now, from SolaX Cloud</td>
+</tr>
+<tr>
+<td><img src="docs/images/panel/pc.png" width="400" alt="The PC layout: four charts of the last 60 s, CPU load 55 %, CPU 69 °C, GPU load 94 %, GPU 65 °C, and bars for RAM, VRAM and the network"><br>Your PC, live, from HWiNFO</td>
+<td><img src="docs/images/panel/classic-visuals.png" width="400" alt="The Classic layout with the indoor temperature as a chart, the humidity as a ring, the panels' power as a gauge and the battery as a bar"><br>Any number as a chart, ring, gauge or bar</td>
 </tr>
 <tr>
 <td><img src="docs/images/panel/menu.png" width="400" alt="The menu: Presets, Wi-Fi, Sync, Time, Display, Sensors and Info"><br>The menu, driven by two buttons</td>
@@ -112,7 +118,7 @@ python3 tools/docs_images.py     # the panel images in docs/images from the gold
 | M6c: smaller split cells, down to the status bar's size | Built |
 | M6d: solar forecast and the house's energy (SolaX Cloud) | Built |
 | M6e: cycle windows per preset | Built |
-| M7: the PC's sensors, with charts, bars and gauges | Designed |
+| M7: the PC's sensors, with charts, bars and gauges | Built |
 | M8: MQTT and Home Assistant | Designed |
 | M9: alarms and internet radio | Planned |
 | M10: microSD | Planned |

@@ -481,8 +481,8 @@ static void backup(uint8_t *out, size_t size, webui_reply_t *reply)
     netmgr_status_t net;
     netmgr_status(&net);
     backup_file_t files[] = {
-        { "settings.json", app_ui_settings_json(settings, sizeof(settings)) ? settings : NULL },
-        { "presets.json", ui_presets_to_json(app_presets(), presets, sizeof(presets)) ? presets : NULL },
+        { "settings.json", app_ui_saved_settings_json(settings, sizeof(settings)) ? settings : NULL },
+        { "presets.json", app_ui_saved_presets_json(presets, sizeof(presets)) ? presets : NULL },
     };
     reply_text(reply, out, size,
                backup_build(files, 2, net.host, esp_app_get_description()->version, (char *)out, size));

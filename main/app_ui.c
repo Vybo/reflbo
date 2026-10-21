@@ -482,14 +482,20 @@ void app_ui_sample(time_t now)
     app_pc_feed(true);      /* M7: the indoor values' charts, at each sample */
 }
 
-esp_err_t app_ui_save_presets(void)
+size_t app_ui_saved_presets_json(char *out, size_t size)
 {
     uint8_t shown = s_presets.active; /* a PC session's own preset isn't saved: the one before it is (spec §12a.4) */
     const char *before = app_pc_saved_preset();
     int i = before != NULL ? ui_presets_find(&s_presets, before) : -1;
     s_presets.active = i >= 0 ? (uint8_t)i : shown;
-    size_t n = ui_presets_to_json(&s_presets, s_file, sizeof(s_file));
+    size_t n = ui_presets_to_json(&s_presets, out, size);
     s_presets.active = shown;
+    return n;
+}
+
+esp_err_t app_ui_save_presets(void)
+{
+    size_t n = app_ui_saved_presets_json(s_file, sizeof(s_file));
     if (n == 0) {
         ESP_LOGE(TAG, "presets.json does not fit %u bytes", (unsigned)sizeof(s_file));
         return ESP_ERR_INVALID_SIZE;
@@ -526,10 +532,7 @@ esp_err_t app_ui_save_settings(void)
         }
     }
     EXT_RAM_BSS_ATTR static char out[sizeof(s_settings_base)];
-    static settings_t saved; /* a PC session's `always` isn't saved: the mode before it is (spec §12a.4) */
-    saved = s.settings;
-    saved.sync_mode = app_pc_saved_mode(saved.sync_mode);
-    size_t n = settings_to_json(&saved, s_settings_base[0] ? s_settings_base : NULL, out, sizeof(out));
+    size_t n = app_ui_saved_settings_json(out, sizeof(out));
     if (n == 0) {
         ESP_LOGE(TAG, "settings.json does not fit %u bytes", (unsigned)sizeof(out));
         return ESP_ERR_INVALID_SIZE;
@@ -707,6 +710,14 @@ void app_ui_end_first_run(void)
 size_t app_ui_settings_json(char *out, size_t size)
 {
     return settings_to_json(&s.settings, s_settings_base[0] ? s_settings_base : NULL, out, size);
+}
+
+size_t app_ui_saved_settings_json(char *out, size_t size)
+{
+    static settings_t saved; /* a PC session's `always` isn't saved: the mode before it is (spec §12a.4) */
+    saved = s.settings;
+    saved.sync_mode = app_pc_saved_mode(saved.sync_mode);
+    return settings_to_json(&saved, s_settings_base[0] ? s_settings_base : NULL, out, size);
 }
 
 /* The new settings take effect everywhere: time zone, offsets, panel rate, slots and the text. */

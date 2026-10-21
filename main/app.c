@@ -541,9 +541,10 @@ static bool routine_wake(power_wake_t wake)
 
 /* Logs, settings and the console: what a board needs once it stays awake. Routine wakes skip
  * them, because they cost time on every wake and nobody can use them (spec §3.3). */
+static bool s_alive; /* come_alive() ran: the board stays awake */
+
 static void come_alive(void)
 {
-    static bool s_alive;
     if (s_alive) {
         return;
     }
@@ -614,6 +615,9 @@ static esp_err_t boot(void)
         app_solar_restore();       /* spec §11.5, §11.6: the forecast and today's readings */
     }
     app_pc_init(); /* M7: the cached catalogue (a cold boot's), the charts' history from nothing */
+    if (s_alive) { /* a cold boot came alive before its presets loaded: their charts' history now */
+        app_pc_presets_changed();
+    }
 
     ESP_RETURN_ON_ERROR(board_init(wake == POWER_WAKE_COLD), TAG, "board");
     ESP_RETURN_ON_ERROR(pcf85063_init(board_i2c()), TAG, "RTC");

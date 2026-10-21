@@ -116,8 +116,8 @@ static void handler(void *arg, esp_event_base_t base, int32_t id, void *data)
         take(c, d);
         break;
     case WEBSOCKET_EVENT_ERROR:
-        if (d->error_handle.error_type == WEBSOCKET_ERROR_TYPE_HANDSHAKE) {
-            c->http_status = d->error_handle.esp_ws_handshake_status_code; /* 401: a wrong token */
+        if (c->http_status == 0) { /* 401: a wrong token; the library never sets the handshake error's type */
+            c->http_status = pc_upgrade_status(d->error_handle.esp_ws_handshake_status_code);
         }
         if (!c->told) {
             c->told = true;
@@ -128,6 +128,9 @@ static void handler(void *arg, esp_event_base_t base, int32_t id, void *data)
     case WEBSOCKET_EVENT_CLOSED:
         if (c->close_code == 0) {
             c->close_code = d->close_status_code;
+        }
+        if (c->http_status == 0) {
+            c->http_status = pc_upgrade_status(d->error_handle.esp_ws_handshake_status_code);
         }
         if (!c->told) {
             c->told = true;

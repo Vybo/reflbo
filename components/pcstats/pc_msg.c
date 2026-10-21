@@ -248,6 +248,11 @@ pc_close_t pc_close_action(int close_code, const char *reason, int http_status, 
     return PC_CLOSE_WAIT;
 }
 
+int pc_upgrade_status(int handshake_status)
+{
+    return handshake_status >= 100 && handshake_status <= 599 && handshake_status != 101 ? handshake_status : 0;
+}
+
 size_t pc_catalog_json(const pc_catalog_t *cat, char *out, size_t size)
 {
     cJSON *root = cJSON_CreateObject();

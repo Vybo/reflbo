@@ -92,6 +92,9 @@ pc_probe_t pc_probe_result(int status, const char *body, size_t len, pc_info_t *
  * "wrong token", "HTTP 503", "no pong", "closed". */
 typedef enum { PC_CLOSE_WAIT, PC_CLOSE_END } pc_close_t;
 pc_close_t pc_close_action(int close_code, const char *reason, int http_status, char *why, size_t size);
+/* The HTTP status of a refused upgrade, from the status esp_websocket_client 1.8.0 gives with its error and its
+ * disconnect, whatever the error's type: 401, 503, …; 0 for a plain TCP failure or a stream it accepted (101). */
+int pc_upgrade_status(int handshake_status);
 
 /* The index of the reading with `id`, or -1. */
 int pc_catalog_find(const pc_catalog_t *cat, const char *id);

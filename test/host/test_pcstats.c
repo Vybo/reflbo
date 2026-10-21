@@ -224,6 +224,18 @@ static void test_a_closed_stream_ends_its_session_or_waits(void)
     TEST_ASSERT_EQUAL(PC_CLOSE_WAIT, pc_close_action(0, "", 0, why, sizeof(why)));
 }
 
+/* A refused upgrade's status as esp_websocket_client 1.8.0 reports it: with the error, whatever the error's type
+ * (it never sets WEBSOCKET_ERROR_TYPE_HANDSHAKE). 0 for a plain TCP failure, 101 for a stream that was accepted. */
+static void test_a_refused_upgrade_reports_its_status(void)
+{
+    TEST_ASSERT_EQUAL_INT(401, pc_upgrade_status(401));
+    TEST_ASSERT_EQUAL_INT(503, pc_upgrade_status(503));
+    TEST_ASSERT_EQUAL_INT(0, pc_upgrade_status(0));
+    TEST_ASSERT_EQUAL_INT(0, pc_upgrade_status(101));
+    TEST_ASSERT_EQUAL_INT(0, pc_upgrade_status(-1));
+    TEST_ASSERT_EQUAL_INT(0, pc_upgrade_status(1000));
+}
+
 static void test_the_catalogue_survives_its_file(void)
 {
     parse(k_catalog, NULL);
@@ -251,6 +263,7 @@ int main(void)
     RUN_TEST(test_a_number_no_float_holds_is_no_value);
     RUN_TEST(test_the_probe_reads_the_pcs_answer);
     RUN_TEST(test_a_closed_stream_ends_its_session_or_waits);
+    RUN_TEST(test_a_refused_upgrade_reports_its_status);
     RUN_TEST(test_the_catalogue_survives_its_file);
     return UNITY_END();
 }

@@ -1,5 +1,29 @@
 reflbo
 Copyright 2026 Dan Vybiral
 
-This product includes third-party components. Their authors and licences are
-listed in THIRD_PARTY.md.
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License, version 3 only, as published by
+the Free Software Foundation. The licence's text is in LICENSE.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+Versions up to commit c1cf153 were released under the Apache License,
+Version 2.0, and remain available under its terms.
+
+Additional permission under GNU GPL version 3 section 7
+
+If you modify this Program, or any covered work, by linking or combining it
+with the libraries that Espressif Systems distributes with ESP-IDF in object
+form only, such as those of its Wi-Fi, PHY, Bluetooth and coexistence
+components (or modified versions of those libraries), containing parts
+covered by the terms of the Apache License, Version 2.0, the licensors of
+this Program grant you additional permission to convey the resulting work.
+Corresponding Source for a non-source form of such a combination need not
+include the source code of those libraries, but shall include the source
+code of the parts of ESP-IDF used for which Espressif provides source code,
+as well as that of the covered work.
+
+Third-party components keep their own licences. Their authors and licences
+are listed in THIRD_PARTY.md.

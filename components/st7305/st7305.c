@@ -38,8 +38,8 @@ typedef struct {
     uint16_t delay_ms;
 } init_cmd_t;
 
-/* From ref/waveshare: 10_FactoryProgram port_bsp/display_bsp.cpp and the XiaoZhi board's
- * custom_lcd_display.cc. Identical except C1, C4, D8 and B2. */
+/* From ref/waveshare (Apache-2.0, LICENSE-Waveshare.txt beside this file): 10_FactoryProgram
+ * port_bsp/display_bsp.cpp and the XiaoZhi board's custom_lcd_display.cc. Identical except C1, C4, D8 and B2. */
 static const init_cmd_t s_init_factory[] = {
     { 0xD6, 2, { 0x17, 0x02 }, 0 },                  /* NVMLOADCTRL */
     { 0xD1, 1, { 0x01 }, 0 },                        /* BSTEN: booster on */

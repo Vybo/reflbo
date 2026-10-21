@@ -138,4 +138,4 @@ The device fetches or carries data from these services and datasets:
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md).
+GPL-3.0-only, with an additional permission to link with the libraries ESP-IDF ships without source (Wi-Fi, PHY, Bluetooth): see [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party material keeps its own licence, listed in [THIRD_PARTY.md](THIRD_PARTY.md). Versions up to commit `c1cf153`, the `stable-*` tags among them, were released under Apache-2.0.

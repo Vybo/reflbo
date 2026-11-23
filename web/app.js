@@ -1103,7 +1103,7 @@ function showEditor(f, w, hgt, vis, set) {
   return h('div', { class: 'show' }, parts);
 }
 
-const LANGUAGES = [['en', 'English'], ['cs', 'Čeština']];
+const LANGUAGES = [['en', 'English'], ['cs', 'Čeština'], ['pl', 'Polski']];
 const SENSOR_MIN = [1, 2, 5, 10, 15, 30];
 const RATES = [0.25, 0.5, 1, 2, 4, 8];
 

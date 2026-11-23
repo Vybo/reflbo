@@ -250,6 +250,67 @@ static void test_tracking_keeps_known_series_and_frees_the_rest(void)
     TEST_ASSERT_NULL(ui_history_find(&s_h, ""));
 }
 
+/* 16 series in PSRAM at once are 761 KB (spec §5.3; the T5 fork's 4 MB ran short, its DT18): memory now comes for
+ * the series kept, and goes back when one is no longer charted. */
+static ui_series_t *s_taken[UI_HIST_SERIES + 1];
+static int s_takes, s_gives, s_take_limit;
+static ui_series_t *s_given;
+
+static ui_series_t *take(void)
+{
+    if (s_takes >= s_take_limit) {
+        return NULL; /* PSRAM short */
+    }
+    s_taken[s_takes] = calloc(1, sizeof(ui_series_t));
+    return s_taken[s_takes++];
+}
+
+static void give(ui_series_t *gone)
+{
+    s_gives++;
+    s_given = gone;
+    free(gone);
+}
+
+static void test_lazy_memory_comes_for_the_series_kept_and_goes_back(void)
+{
+    ui_history_t h;
+    s_takes = s_gives = 0;
+    s_take_limit = UI_HIST_SERIES;
+    ui_history_init_lazy(&h, take, give);
+    TEST_ASSERT_EQUAL(0, s_takes); /* nothing until a chart names a field */
+    const char *const three[] = { "pc.cpu_load", "pc.gpu_temp", "env.temp" };
+    TEST_ASSERT_EQUAL(3, ui_history_track(&h, three, 3));
+    TEST_ASSERT_EQUAL(3, s_takes);
+    ui_series_push(ui_history_find(&h, "pc.cpu_load"), 1000, 42.0f);
+    ui_series_t *gpu = ui_history_find(&h, "pc.gpu_temp");
+    const char *const two[] = { "pc.cpu_load", "env.temp" };
+    TEST_ASSERT_EQUAL(2, ui_history_track(&h, two, 2));
+    TEST_ASSERT_EQUAL(1, s_gives);
+    TEST_ASSERT_EQUAL_PTR(gpu, s_given);
+    TEST_ASSERT_NULL(ui_history_find(&h, "pc.gpu_temp"));
+    TEST_ASSERT_EQUAL(1, ui_history_find(&h, "pc.cpu_load")->count); /* kept with its values */
+    TEST_ASSERT_EQUAL(3, s_takes);
+    TEST_ASSERT_EQUAL(0, ui_history_track(&h, NULL, 0));
+    TEST_ASSERT_EQUAL(3, s_gives);
+}
+
+static void test_lazy_memory_short_keeps_what_it_could_take(void)
+{
+    ui_history_t h;
+    s_takes = s_gives = 0;
+    s_take_limit = 1;
+    ui_history_init_lazy(&h, take, give);
+    const char *const two[] = { "pc.cpu_load", "pc.gpu_temp" };
+    TEST_ASSERT_EQUAL(1, ui_history_track(&h, two, 2));
+    TEST_ASSERT_NOT_NULL(ui_history_find(&h, "pc.cpu_load"));
+    TEST_ASSERT_NULL(ui_history_find(&h, "pc.gpu_temp"));
+    s_take_limit = 2; /* PSRAM came back: the next track takes it */
+    TEST_ASSERT_EQUAL(2, ui_history_track(&h, two, 2));
+    TEST_ASSERT_EQUAL(0, ui_history_track(&h, NULL, 0));
+    TEST_ASSERT_EQUAL(2, s_gives);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -266,5 +327,7 @@ int main(void)
     RUN_TEST(test_a_few_columns_at_a_time_make_the_same_chart);
     RUN_TEST(test_values_from_weeks_ago_stay_weeks_ago);
     RUN_TEST(test_tracking_keeps_known_series_and_frees_the_rest);
+    RUN_TEST(test_lazy_memory_comes_for_the_series_kept_and_goes_back);
+    RUN_TEST(test_lazy_memory_short_keeps_what_it_could_take);
     return UNITY_END();
 }

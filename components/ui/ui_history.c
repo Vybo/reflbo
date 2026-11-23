@@ -15,10 +15,18 @@ static void clear(ui_series_t *s, const char *name)
 
 void ui_history_init(ui_history_t *h, ui_series_t *mem)
 {
-    h->series = mem;
+    memset(h, 0, sizeof(*h));
     for (int i = 0; i < UI_HIST_SERIES; i++) {
+        h->series[i] = &mem[i];
         clear(&mem[i], "");
     }
+}
+
+void ui_history_init_lazy(ui_history_t *h, ui_series_t *(*take)(void), void (*give)(ui_series_t *s))
+{
+    memset(h, 0, sizeof(*h));
+    h->take = take;
+    h->give = give;
 }
 
 static bool named(const char *const names[], int count, const char *name)
@@ -34,8 +42,8 @@ static bool named(const char *const names[], int count, const char *name)
 ui_series_t *ui_history_find(const ui_history_t *h, const char *name)
 {
     for (int i = 0; name != NULL && name[0] && i < UI_HIST_SERIES; i++) {
-        if (strcmp(h->series[i].name, name) == 0) {
-            return &h->series[i];
+        if (h->series[i] != NULL && strcmp(h->series[i]->name, name) == 0) {
+            return h->series[i];
         }
     }
     return NULL;
@@ -44,8 +52,13 @@ ui_series_t *ui_history_find(const ui_history_t *h, const char *name)
 int ui_history_track(ui_history_t *h, const char *const names[], int count)
 {
     for (int i = 0; i < UI_HIST_SERIES; i++) {
-        if (h->series[i].name[0] && !named(names, count, h->series[i].name)) {
-            h->series[i].name[0] = '\0'; /* freed: cleared when it is taken again */
+        ui_series_t *s = h->series[i];
+        if (s != NULL && s->name[0] && !named(names, count, s->name)) {
+            s->name[0] = '\0'; /* freed: cleared when it is taken again */
+            if (h->give != NULL) {
+                h->series[i] = NULL;
+                h->give(s);
+            }
         }
     }
     for (int k = 0; k < count; k++) {
@@ -54,15 +67,21 @@ int ui_history_track(ui_history_t *h, const char *const names[], int count)
             continue;
         }
         for (int i = 0; i < UI_HIST_SERIES; i++) {
-            if (!h->series[i].name[0]) {
-                clear(&h->series[i], name);
+            if (h->series[i] == NULL && h->take != NULL) {
+                h->series[i] = h->take();
+                if (h->series[i] == NULL) {
+                    break; /* no memory for it: the next track tries again */
+                }
+            }
+            if (h->series[i] != NULL && !h->series[i]->name[0]) {
+                clear(h->series[i], name);
                 break;
             }
         }
     }
     int kept = 0;
     for (int i = 0; i < UI_HIST_SERIES; i++) {
-        kept += h->series[i].name[0] != '\0';
+        kept += h->series[i] != NULL && h->series[i]->name[0] != '\0';
     }
     return kept;
 }

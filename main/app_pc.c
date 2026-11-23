@@ -43,28 +43,38 @@ static struct {
 static app_pc_test_t s_test; /* the PC page's last Test */
 static ui_pc_t s_view;
 static ui_history_t s_hist;
-static ui_series_t *s_series; /* PSRAM, from the first chart */
+static bool s_hist_up; /* from the first chart: each series in PSRAM while a chart shows it */
 
 typedef pc_ws_msg_t ws_event_t; /* a copy, posted to the app task */
 
 /* ---- the history ---- */
 
-/* The series of the charts every preset shows (spec §5.3): kept, the rest freed; the memory from the first. */
+static ui_series_t *take_series(void)
+{
+    ui_series_t *s = heap_caps_calloc(1, sizeof(ui_series_t), MALLOC_CAP_SPIRAM);
+    if (s == NULL) {
+        ESP_LOGE(TAG, "no PSRAM for a chart's history");
+    }
+    return s;
+}
+
+static void give_series(ui_series_t *s)
+{
+    heap_caps_free(s);
+}
+
+/* The series of the charts every preset shows (spec §5.3): kept, the rest freed, each with its own memory. */
 void app_pc_presets_changed(void)
 {
     char names[UI_HIST_SERIES][UI_HIST_NAME_LEN];
     const char *list[UI_HIST_SERIES];
     int n = ui_presets_chart_fields(app_presets(), names);
-    if (n == 0 && s_series == NULL) {
+    if (n == 0 && !s_hist_up) {
         return;
     }
-    if (s_series == NULL) {
-        s_series = heap_caps_calloc(UI_HIST_SERIES, sizeof(ui_series_t), MALLOC_CAP_SPIRAM);
-        if (s_series == NULL) {
-            ESP_LOGE(TAG, "no PSRAM for the charts' history");
-            return;
-        }
-        ui_history_init(&s_hist, s_series);
+    if (!s_hist_up) {
+        ui_history_init_lazy(&s_hist, take_series, give_series);
+        s_hist_up = true;
     }
     for (int i = 0; i < n; i++) {
         list[i] = names[i];
@@ -80,9 +90,9 @@ static bool is_pc_name(const char *name)
 /* The PC's readings, each series from the message just taken. */
 static void feed_pc(uint32_t now_ms)
 {
-    for (int i = 0; s_series != NULL && i < UI_HIST_SERIES; i++) {
-        ui_series_t *s = &s_series[i];
-        if (!s->name[0] || !is_pc_name(s->name)) {
+    for (int i = 0; i < UI_HIST_SERIES; i++) {
+        ui_series_t *s = s_hist.series[i];
+        if (s == NULL || !s->name[0] || !is_pc_name(s->name)) {
             continue;
         }
         int k = pc_catalog_find(&s_cat, s->name + 3);
@@ -96,13 +106,16 @@ static void feed_pc(uint32_t now_ms)
 
 void app_pc_feed(bool sample)
 {
-    if (s_series == NULL) {
+    if (!s_hist_up) {
         return;
     }
     ui_context_t ctx;
     app_ui_context(&ctx);
     for (int i = 0; i < UI_HIST_SERIES; i++) {
-        ui_series_t *s = &s_series[i];
+        ui_series_t *s = s_hist.series[i];
+        if (s == NULL) {
+            continue;
+        }
         bool local = strncmp(s->name, "env.", 4) == 0 || strncmp(s->name, "bat.", 4) == 0;
         if (!s->name[0] || is_pc_name(s->name) || local != sample) { /* each at its source's own rate */
             continue;
@@ -224,9 +237,10 @@ static void end_session(const char *why)
     s_have_vals = false;
     s_since = time(NULL);
     uint32_t now_ms = (uint32_t)app_uptime_ms();
-    for (int i = 0; s_series != NULL && i < UI_HIST_SERIES; i++) {
-        if (s_series[i].name[0] && is_pc_name(s_series[i].name)) {
-            ui_series_break(&s_series[i], now_ms); /* the next session's line starts apart */
+    for (int i = 0; i < UI_HIST_SERIES; i++) {
+        ui_series_t *s = s_hist.series[i];
+        if (s != NULL && s->name[0] && is_pc_name(s->name)) {
+            ui_series_break(s, now_ms); /* the next session's line starts apart */
         }
     }
     ESP_LOGI(TAG, "session ends: %s%s%s", why, e.restore_mode ? ", the mode back" : "",
@@ -476,7 +490,7 @@ const ui_pc_t *app_pc_ui(void)
 
 const ui_history_t *app_pc_history(void)
 {
-    return s_series != NULL ? &s_hist : NULL;
+    return s_hist_up ? &s_hist : NULL;
 }
 
 void app_pc_status(app_pc_status_t *out)
@@ -502,7 +516,7 @@ void app_pc_demo(bool on)
         snprintf(s_info.name, sizeof(s_info.name), "%s", "DEMO-PC");
         s_demo_filled = ui_presets_fill_pc(p, &s_cat);
         app_pc_presets_changed();
-        if (s_series != NULL) {
+        if (s_hist_up) {
             ui_pc_demo_history(&s_hist, (uint32_t)app_uptime_ms());
         }
     } else if (!on && s_demo) {

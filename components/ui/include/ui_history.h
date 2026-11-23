@@ -31,7 +31,9 @@ typedef struct {
 } ui_series_t;
 
 typedef struct ui_history {
-    ui_series_t *series; /* UI_HIST_SERIES of them */
+    ui_series_t *series[UI_HIST_SERIES]; /* NULL: lazy memory not taken (spec §5.3) */
+    ui_series_t *(*take)(void);          /* lazy memory: one series', or NULL when there is none */
+    void (*give)(ui_series_t *s);        /* lazy memory back */
 } ui_history_t;
 
 /* A chart's pixel column. */
@@ -43,9 +45,12 @@ typedef struct {
 
 /* `mem` holds UI_HIST_SERIES series; all of them free. */
 void ui_history_init(ui_history_t *h, ui_series_t *mem);
+/* Memory for the series kept only (spec §5.3): `take` gives one series' memory, or NULL when there is none, and
+ * `give` gets it back once its name is no longer kept. */
+void ui_history_init_lazy(ui_history_t *h, ui_series_t *(*take)(void), void (*give)(ui_series_t *s));
 /* The series to keep, by field name: those already kept stay with their values, the others are freed, and new
- * names take free series, from nothing, until all 16 are taken. "" and repeats count for nothing. Returns how many
- * series are kept. */
+ * names take free series, from nothing, until all 16 are taken (or, lazily, memory runs out). "" and repeats count
+ * for nothing. Returns how many series are kept. */
 int ui_history_track(ui_history_t *h, const char *const names[], int count);
 /* The series kept for `name`, or NULL. */
 ui_series_t *ui_history_find(const ui_history_t *h, const char *name);

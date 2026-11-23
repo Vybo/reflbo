@@ -30,6 +30,7 @@ CONFIG_ESP_COREDUMP_LOGS=n
 # `tasks` console command
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
 
 # Faster deep-sleep wakes: skip image validation, quiet bootloader (spec §9.4 optimisation candidates)
 CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP=y

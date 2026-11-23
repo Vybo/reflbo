@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "diag_internal.h"
 #include "esp_app_desc.h"
@@ -59,9 +60,17 @@ static int cmd_tasks(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
-    static char buf[1024];
+    /* vTaskList() writes without a bound: a line is at most the padded name and five numbers (47 bytes), and a few
+     * tasks may start meanwhile. */
+    size_t len = (uxTaskGetNumberOfTasks() + 4) * (configMAX_TASK_NAME_LEN + 32);
+    char *buf = malloc(len);
+    if (buf == NULL) {
+        printf("no memory for the task list\n");
+        return 1;
+    }
     vTaskList(buf);
     printf("Name          State Prio Stack  Num Core\n%s", buf);
+    free(buf);
     return 0;
 }
 
